@@ -9,6 +9,7 @@ drone_min_t = 5
 drone_max_t = 20
 truck_min_t = 10
 truck_max_t = 50
+M = 99999
 
 
 class ToyTest:
@@ -261,10 +262,87 @@ class ToyTest:
             id += 1
 
         # customer serve once
-        lhs = rhs = 0
+        id = 0
         for n_name in self.customers:
+            lhs = 0
             n = self.all_nodes_indices[n_name]
-            
-            sdsa = 0
+            in_arcs = self.G.in_edges(n_name)
+            for i_name, _ in in_arcs:
+                i = self.all_nodes_indices[i_name]
+                for k in range(self.num_trucks):
+                    lhs += x_list[(i, n, k)] + f_list[(i, n, k)]
+                for d in range(self.num_drones):
+                    lhs += y_list[(i, n, d)]
+            rhs = 1
+            self.constraints.append(model.addConstr(lhs == rhs, f"servonce_{id}"))
+            id += 1
+
+        # linking constraints
+        id = 0
+        for i_name, j_name, _ in edges:
+            i = self.all_nodes_indices[i_name]
+            j = self.all_nodes_indices[j_name]
+            # cons 1,2
+            for k in range(self.num_trucks):
+                sum_z = 0
+                for d in range(self.num_drones):
+                    sum_z += z_list[(i, j, k, d)]
+                lhs = 1 + M * (f_list[(i, j, k)] - 1)
+                rhs = M * f_list[(i, j, k)]
+                # cons 1
+                self.constraints.append(model.addConstr(lhs <= sum_z, f"linking_{id}"))
+                id += 1
+                self.constraints.append(model.addConstr(sum_z <= rhs, f"linking_{id}"))
+                id += 1
+                # cons 2
+                lhs = x_list[(i, j, k)] + f_list[(i, j, k)]
+                rhs = 1
+                self.constraints.append(model.addConstr(lhs <= rhs, f"linking_{id}"))
+                id += 1
+            # cons 3
+            for d in range(self.num_drones):
+                sum_z = 0
+                for k in range(self.num_trucks):
+                    sum_z += z_list[(i, j, k, d)]
+                lhs = y_list[(i, j, d)] + sum_z
+                rhs = 1
+                self.constraints.append(model.addConstr(lhs <= rhs, f"linking_{id}"))
+                id += 1
+        # cons 4
+        for n_name in self.customers:
+            n = self.customer_indices[n_name]
+            out_arcs = self.G.out_edges(n_name)
+            for _, j_name in out_arcs:
+                j = self.all_nodes_indices[j_name]
+                for k in range(self.num_trucks):
+                    for d in range(self.num_drones):
+                        sum_y = 0
+                        in_arcs = self.G.in_edges(n_name)
+                        for i_name, _ in in_arcs:
+                            i = self.all_nodes_indices[i_name]
+                            sum_y += y_list[(i, n, d)]
+                            rhs = M * (1 - z_list[(n, j, k, d)])
+                            self.constraints.append(model.addConstr(sum_y <= rhs, f"linking_{id}"))
+                            id += 1
+
+        # sync point opening
+        id = 0
+        for s_name in self.hubs:
+            s = self.all_nodes_indices[s_name]
+            lhs = rhs = 0
+            in_arcs = self.G.in_edges(s_name)
+            for i_name, _ in in_arcs:
+                i = self.all_nodes_indices[i_name]
+                for k in range(self.num_trucks):
+                    lhs += x_list[(i, s, k)] + f_list[(i, s, k)]
+                    for d in range(self.num_drones):
+                        lhs += z_list[(i, s, k, d)]
+                for d in range(self.num_drones):
+                    lhs += y_list[(i, s, d)]
+            rhs = M * u_list[s]
+            self.constraints.append(model.addConstr(lhs <= rhs, f"sync_{id}"))
+            id += 1
+
+        # drone flight endurance
 
         sdas = 0
