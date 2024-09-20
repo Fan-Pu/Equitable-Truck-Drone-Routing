@@ -10,6 +10,11 @@ drone_max_t = 20
 truck_min_t = 10
 truck_max_t = 50
 M = 99999
+drone_endurance = 120
+drone_max_weight = 15
+drone_max_volume = 10
+truck_max_weight = 500
+truck_max_drone_dock_num = 10
 
 
 class ToyTest:
@@ -60,7 +65,6 @@ class ToyTest:
         for i in range(len(self.all_nodes)):
             node_name = self.all_nodes[i]
             self.all_nodes_indices[node_name] = i
-            self.customer_indices[node_name] = i
             if node_name in customers:
                 self.customer_indices[node_name] = i
             elif node_name in hubs:
@@ -101,6 +105,8 @@ class ToyTest:
                     G.add_edge(customer, hub, travel_time={'truck': truck_travel_time, 'drone': drone_travel_time})
 
         self.G = G
+        self.demand_weights = {self.all_nodes_indices[n_name]: random.uniform(0, 5) for n_name in customers}
+        self.demand_volume = {self.all_nodes_indices[n_name]: random.uniform(0, 3) for n_name in customers}
 
     def visualize(self):
         pos = nx.spring_layout(self.G)  # Position the nodes using spring layout
@@ -136,9 +142,6 @@ class ToyTest:
         model = gp.Model("model")
         self.constraints = []
         # add decision variables
-        u_list = {}
-        for s in range(self.num_hubs):
-            u_list[s] = model.addVar(name=f"u_{s}", vtype=GRB.BINARY)
         x_list = {}
         y_list = {}
         f_list = {}
@@ -154,12 +157,16 @@ class ToyTest:
                     z_list[(i, j, k, d)] = model.addVar(name=f"z_{(i, j, k, d)}", vtype=GRB.BINARY)
             for d in range(self.num_drones):
                 y_list[(i, j, d)] = model.addVar(name=f"y_{(i, j, d)}", vtype=GRB.BINARY)
+        u_list = {}
+        for s_name in self.hubs:
+            s = self.all_nodes_indices[s_name]
+            u_list[s] = model.addVar(name=f"u_{s}", vtype=GRB.BINARY)
         # continuous variables
         t_list = {}
         w_list = {}
         v_list = {}
         c_list = {}
-        for n in range(1, len(self.all_nodes_indices)):
+        for n in range(len(self.all_nodes_indices)):
             for d in range(self.num_drones):
                 t_list[(n, d)] = model.addVar(name=f"t_{(n, d)}", vtype=GRB.CONTINUOUS, lb=0)
                 w_list[(n, d)] = model.addVar(name=f"w_{(n, d)}", vtype=GRB.CONTINUOUS, lb=0)
@@ -181,8 +188,6 @@ class ToyTest:
 
         # flow conservation
         lhs = rhs = 0
-        source_id = 0
-        sink_id = len(self.all_nodes_indices) - 1
         # cons 1
         out_arcs = self.G.out_edges(self.depot_source)
         in_arcs = self.G.in_edges(self.depot_sink)
@@ -344,5 +349,108 @@ class ToyTest:
             id += 1
 
         # drone flight endurance
+        id = 0
+        # cons 1
+        for n_name in self.all_nodes:
+            n = self.all_nodes_indices[n_name]
+            if n_name == self.depot_source:
+                continue
+            for d in range(self.num_drones):
+                self.constraints.append(model.addConstr(t_list[(n, d)] <= drone_endurance, f"drone_endu1_{id}"))
+                id += 1
+        # cons 2
+        for n_name in self.customers:
+            n = self.all_nodes_indices[n_name]
+            out_arcs = self.G.out_edges(n_name, data=True)
+            for _, j_name, data in out_arcs:
+                j = self.all_nodes_indices[j_name]
+                travel_time = data["travel_time"]["drone"]
+                for d in range(self.num_drones):
+                    rhs = t_list[(n, d)] + travel_time + M * (y_list[(n, j, d)] - 1)
+                    self.constraints.append(model.addConstr(t_list[(j, d)] >= rhs, f"drone_endu2_{id}"))
+                    id += 1
+        # cons 3
+        for n_name in self.hubs + [self.depot_source]:
+            n = self.all_nodes_indices[n_name]
+            out_arcs = self.G.out_edges(n_name, data=True)
+            for _, j_name, data in out_arcs:
+                j = self.all_nodes_indices[j_name]
+                travel_time = data["travel_time"]["drone"]
+                for d in range(self.num_drones):
+                    rhs = travel_time + M * (y_list[(n, j, d)] - 1)
+                    self.constraints.append(model.addConstr(t_list[(j, d)] >= rhs, f"drone_endu3_{id}"))
+                    id += 1
 
-        sdas = 0
+        # drone payload weight and volume
+        id = 0
+        # cons 1
+        for n_name in self.customers:
+            n = self.all_nodes_indices[n_name]
+            for d in range(self.num_drones):
+                self.constraints.append(model.addConstr(w_list[(n, d)] <= drone_max_weight, f"drone_load1_{id}"))
+                id += 1
+        # cons 2
+        for n_name in self.customers:
+            n = self.all_nodes_indices[n_name]
+            in_arcs = self.G.in_edges(n_name)
+            for i_name, _ in in_arcs:
+                i = self.all_nodes_indices[i_name]
+                for d in range(self.num_drones):
+                    rhs = w_list[(i, d)] + self.demand_weights[n] + M * (y_list[(i, n, d)] - 1)
+                    self.constraints.append(model.addConstr(w_list[(n, d)] >= rhs, f"drone_load2_{id}"))
+                    id += 1
+        # cons 3
+        for n_name in self.customers:
+            n = self.all_nodes_indices[n_name]
+            for d in range(self.num_drones):
+                self.constraints.append(model.addConstr(v_list[(n, d)] <= drone_max_volume, f"drone_load3_{id}"))
+                id += 1
+        # cons 4
+        for n_name in self.customers:
+            n = self.all_nodes_indices[n_name]
+            in_arcs = self.G.in_edges(n_name)
+            for i_name, _ in in_arcs:
+                i = self.all_nodes_indices[i_name]
+                for d in range(self.num_drones):
+                    rhs = v_list[(i, d)] + self.demand_volume[n] + M * (y_list[(i, n, d)] - 1)
+                    self.constraints.append(model.addConstr(v_list[(n, d)] >= rhs, f"drone_load4_{id}"))
+                    id += 1
+
+        # truck capacity
+        id = 0
+        # cons 1
+        for n_name in self.customers:
+            n = self.all_nodes_indices[n_name]
+            for k in range(self.num_trucks):
+                self.constraints.append(model.addConstr(c_list[(n, k)] <= truck_max_weight, f"truck_load1_{id}"))
+                id += 1
+        # cons 2
+        for n_name in self.customers:
+            n = self.all_nodes_indices[n_name]
+            in_arcs = self.G.in_edges(n_name)
+            for i_name, _ in in_arcs:
+                i = self.all_nodes_indices[i_name]
+                for k in range(self.num_trucks):
+                    rhs = c_list[(i, k)] + self.demand_weights[n] + M * (x_list[(i, n, k)] + f_list[(i, n, k)] - 1)
+                    self.constraints.append(model.addConstr(c_list[(n, k)] >= rhs, f"truck_load2_{id}"))
+                    id += 1
+        # cons 3
+        for s_name in self.hubs:
+            s = self.all_nodes_indices[s_name]
+            in_arcs = self.G.in_edges(s_name)
+            for i_name, _ in in_arcs:
+                i = self.all_nodes_indices[i_name]
+                for k in range(self.num_trucks):
+                    rhs = c_list[(i, k)] + M * (x_list[(i, s, k)] + f_list[(i, s, k)] - 1)
+                    self.constraints.append(model.addConstr(c_list[(s, k)] >= rhs, f"truck_load3_{id}"))
+                    id += 1
+        # cons 4
+        for i_name, j_name, _ in edges:
+            i = self.all_nodes_indices[i_name]
+            j = self.all_nodes_indices[j_name]
+            for k in range(self.num_trucks):
+                lhs = 0
+                for d in range(self.num_drones):
+                    lhs += z_list[(i, j, k, d)]
+                self.constraints.append(model.addConstr(lhs >= truck_max_drone_dock_num, f"truck_load4_{id}"))
+                id += 1
