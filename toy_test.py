@@ -1,5 +1,6 @@
 import random
 
+seed = 1998
 import gurobipy as gp
 import matplotlib.pyplot as plt
 import networkx as nx
@@ -19,11 +20,11 @@ truck_max_drone_dock_num = 10
 
 class ToyTest:
     def __init__(self, num_customers, num_hubs, num_trucks, num_drones):
-        random.seed(1998)
         self.num_customers = num_customers
         self.num_hubs = num_hubs
         self.num_trucks = num_trucks
         self.num_drones = num_drones
+        self.seed = 1998  # You can change this seed value for different deterministic outcomes
         self.create_random_truck_drone_network(num_customers, num_hubs)
 
     def create_random_truck_drone_network(self, num_customers, num_hubs):
@@ -37,6 +38,8 @@ class ToyTest:
         Returns:
             G (nx.DiGraph): Directed graph representing the network.
         """
+        random.seed(self.seed)  # Set the seed here for reproducibility
+
         G = nx.DiGraph()
 
         # Generate node names
@@ -71,7 +74,6 @@ class ToyTest:
                 self.hub_indices[node_name] = i
 
         # Ensure that each customer and hub has a path from depot_source and to depot_sink
-        # Add edges from depot_source to at least one customer or hub
         for location in customers + hubs:
             truck_travel_time = random.randint(truck_min_t, truck_max_t)
             drone_travel_time = random.randint(drone_min_t, drone_max_t)
@@ -109,7 +111,7 @@ class ToyTest:
         self.demand_volume = {self.all_nodes_indices[n_name]: random.uniform(0, 3) for n_name in customers}
 
     def visualize(self):
-        pos = nx.spring_layout(self.G)  # Position the nodes using spring layout
+        pos = nx.spring_layout(self.G, seed=self.seed)  # Position the nodes using spring layout with a fixed seed
 
         # Color mapping: Different colors for depot, customers, and hubs
         node_colors = []
@@ -171,7 +173,8 @@ class ToyTest:
                 t_list[(n, d)] = model.addVar(name=f"t_{(n, d)}", vtype=GRB.CONTINUOUS, lb=0)
                 w_list[(n, d)] = model.addVar(name=f"w_{(n, d)}", vtype=GRB.CONTINUOUS, lb=0)
                 v_list[(n, d)] = model.addVar(name=f"v_{(n, d)}", vtype=GRB.CONTINUOUS, lb=0)
-                c_list[(n, d)] = model.addVar(name=f"c_{(n, d)}", vtype=GRB.CONTINUOUS, lb=0)
+            for k in range(self.num_trucks):
+                c_list[(n, k)] = model.addVar(name=f"c_{(n, k)}", vtype=GRB.CONTINUOUS, lb=0)
 
         # add objective function
         obj_expr = 0
@@ -452,5 +455,86 @@ class ToyTest:
                 lhs = 0
                 for d in range(self.num_drones):
                     lhs += z_list[(i, j, k, d)]
-                self.constraints.append(model.addConstr(lhs >= truck_max_drone_dock_num, f"truck_load4_{id}"))
+                self.constraints.append(model.addConstr(lhs <= truck_max_drone_dock_num, f"truck_load4_{id}"))
                 id += 1
+
+        model.update()
+        model.optimize()
+        if model.status == GRB.OPTIMAL:
+            print(f"Optimal solution found")
+        elif model.status == GRB.INFEASIBLE:
+            print("No feasible solution found")
+            model.computeIIS()  # Find the irreducible infeasible set (IIS)
+            model.write("model.ilp")
+        elif model.status == GRB.UNBOUNDED:
+            print("The model is unbounded")
+
+        # Retrieve the objective value
+        if model.status == GRB.OPTIMAL:
+            print(f"Objective value: {model.objVal}")
+
+        # Extract and store the solution values for the decision variables
+        self.x_values = {(i, j, k): var.X for (i, j, k), var in x_list.items()}
+        self.y_values = {(i, j, d): var.X for (i, j, d), var in y_list.items()}
+        self.f_values = {(i, j, d): var.X for (i, j, d), var in f_list.items()}
+        self.z_values = {(i, j, k, d): var.X for (i, j, k, d), var in z_list.items()}
+        self.u_values = {s: var.X for s, var in u_list.items()}
+        self.t_values = {(n, d): var.X for (n, d), var in t_list.items()}
+        self.w_values = {(n, d): var.X for (n, d), var in w_list.items()}
+        self.v_values = {(n, d): var.X for (n, d), var in v_list.items()}
+        self.c_values = {(n, k): var.X for (n, k), var in c_list.items()}
+
+    def visualize_routes(self):
+        pos = nx.spring_layout(self.G, seed=self.seed)  # Use the same layout for consistency
+
+        # Draw the network without routes first
+        node_colors = []
+        for node in self.G.nodes():
+            if node == self.depot_source or node == self.depot_sink:
+                node_colors.append('red')  # Red for depot
+            elif node in self.customers:
+                node_colors.append('yellow')  # Yellow for customers
+            elif node in self.hubs:
+                node_colors.append('green')  # Green for hubs
+            else:
+                node_colors.append('gray')  # Default color for others (if any)
+
+        # Draw the nodes and edges without routes
+        # nx.draw(self.G, pos, with_labels=True, node_color=node_colors, node_size=1000, font_size=10,
+        #         font_weight='bold', edge_color='gray')
+
+        nx.draw_networkx_nodes(self.G, pos, node_color=node_colors, node_size=1000)
+        nx.draw_networkx_labels(self.G, pos, font_size=10, font_weight='bold')
+
+        # Create a color map for routes: blue for trucks, orange for drones
+        truck_edges = {k: [] for k in range(self.num_trucks)}
+        drone_edges = {d: [] for d in range(self.num_drones)}
+
+        # truck routes
+        for (i, j, k), val in self.x_values.items():
+            if val > 0.5:
+                truck_edges[k].append((self.all_nodes[i], self.all_nodes[j]))
+        for (i, j, k), val in self.f_values.items():
+            if val > 0.5:
+                truck_edges[k].append((self.all_nodes[i], self.all_nodes[j]))
+        for (i, j, d), val in self.y_values.items():
+            if val > 0.5:
+                drone_edges[d].append((self.all_nodes[i], self.all_nodes[j]))
+        for (i, j, k, d), val in self.z_values.items():
+            if val > 0.5:
+                drone_edges[d].append((self.all_nodes[i], self.all_nodes[j]))
+
+        cmap = plt.get_cmap("viridis")
+        # Generate n colors from the colormap
+        total_num = self.num_drones + self.num_trucks
+        colors = [cmap(i / total_num) for i in range(total_num)]  # Ensure we don't exceed colormap range
+        for i in range(self.num_trucks):
+            nx.draw_networkx_edges(self.G, pos, edgelist=truck_edges[i], edge_color=colors[i], width=2, label=f"T{i}")
+        for i in range(self.num_drones):
+            nx.draw_networkx_edges(self.G, pos, edgelist=drone_edges[i], edge_color=colors[i + self.num_trucks],
+                                   width=2, label=f"D{i}")
+
+        # Add a legend
+        plt.legend()
+
+        plt.show()

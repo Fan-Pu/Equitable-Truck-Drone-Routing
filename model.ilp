@@ -1,0 +1,10 @@
+\ Model model_copy
+\ LP format - for model browsing. Use MPS format to capture full model detail.
+Minimize
+ 
+Subject To
+ truck_load4_39: z_(0,_1,_0,_0) >= 10
+Bounds
+Binaries
+ z_(0,_1,_0,_0)
+End
