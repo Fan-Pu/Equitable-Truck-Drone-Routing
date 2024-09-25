@@ -11,8 +11,8 @@ drone_max_t = 20
 truck_min_t = 10
 truck_max_t = 50
 M = 9999999
-drone_endurance = 120
-drone_max_weight = 5
+drone_endurance = 30
+drone_max_weight = 3
 drone_max_volume = 10
 truck_max_weight = 500
 truck_max_drone_dock_num = 10
@@ -112,11 +112,13 @@ class ToyTest:
         self.G = G
         self.demand_weights = {self.all_nodes_indices[n_name]: random.uniform(0, 5) for n_name in customers}
         self.demand_volume = {self.all_nodes_indices[n_name]: random.uniform(0, 3) for n_name in customers}
-        dsas = 0
+        print(self.demand_weights)
+        print(self.demand_volume)
 
     def visualize(self):
         pos = nx.spring_layout(self.G, seed=self.seed)  # Position the nodes using spring layout with a fixed seed
-
+        fig, ax = plt.subplots()
+        plt.sca(ax)
         # Color mapping: Different colors for depot, customers, and hubs
         node_colors = []
         for node in self.G.nodes():
@@ -199,7 +201,7 @@ class ToyTest:
                 obj_expr += xi_list[s_name] * u_list[s]
         model.setObjective(obj_expr, GRB.MINIMIZE)
 
-        # flow conservation
+        # flow conservation ************************************************************
         i = 0
         # cons 1
         out_arcs = self.G.out_edges(self.depot_source)
@@ -278,7 +280,7 @@ class ToyTest:
                 self.constraints.append(model.addConstr(lhs == rhs, f"conserv4_{id}"))
                 id += 1
 
-        # customer serve once
+        # customer serve once ************************************************************
         id = 0
         for n_name in self.customers:
             lhs = 0
@@ -294,7 +296,7 @@ class ToyTest:
             self.constraints.append(model.addConstr(lhs == rhs, f"servonce_{id}"))
             id += 1
 
-        # truck use once
+        # truck drone use once ************************************************************
         for k in range(self.num_trucks):
             lhs = rhs = 0
             out_arcs = self.G.out_edges(self.depot_source)
@@ -304,8 +306,6 @@ class ToyTest:
                 lhs += x_list[(i, j, k)] + f_list[i, j, k]
             self.constraints.append(model.addConstr(lhs <= 1, f"truck_once_{i}"))
             i += 1
-
-        # drone use once
         for d in range(self.num_drones):
             lhs = rhs = 0
             out_arcs = self.G.out_edges(self.depot_source)
@@ -318,7 +318,7 @@ class ToyTest:
             self.constraints.append(model.addConstr(lhs <= 1, f"truck_once_{i}"))
             i += 1
 
-        # linking constraints
+        # linking constraints ************************************************************
         id = 0
         for i_name, j_name, _ in edges:
             i = self.all_nodes_indices[i_name]
@@ -366,7 +366,7 @@ class ToyTest:
                             self.constraints.append(model.addConstr(sum_y <= rhs, f"linking_{id}"))
                             id += 1
 
-        # sync point opening
+        # sync point opening ************************************************************
         id = 0
         for s_name in self.hubs:
             s = self.all_nodes_indices[s_name]
@@ -384,7 +384,7 @@ class ToyTest:
             self.constraints.append(model.addConstr(lhs <= rhs, f"sync_{id}"))
             id += 1
 
-        # drone flight endurance
+        # drone flight endurance ************************************************************
         id = 0
         # cons 1
         for n_name in self.all_nodes:
@@ -417,7 +417,7 @@ class ToyTest:
                     self.constraints.append(model.addConstr(t_list[(j, d)] >= rhs, f"drone_endu3_{id}"))
                     id += 1
 
-        # drone payload weight and volume
+        # drone payload weight and volume ************************************************************
         id = 0
         # cons 1
         for n_name in self.customers:
@@ -452,7 +452,7 @@ class ToyTest:
                     self.constraints.append(model.addConstr(v_list[(n, d)] >= rhs, f"drone_load4_{id}"))
                     id += 1
 
-        # truck capacity
+        # truck capacity ************************************************************
         id = 0
         # cons 1
         for n_name in self.customers:
@@ -532,14 +532,12 @@ class ToyTest:
             else:
                 node_colors.append('gray')  # Default color for others (if any)
 
-        # Draw the nodes and edges without routes
-        # nx.draw(self.G, pos, with_labels=True, node_color=node_colors, node_size=1000, font_size=10,
-        #         font_weight='bold', edge_color='gray')
-
+        # truck route
+        fig, ax = plt.subplots()
+        plt.sca(ax)
         nx.draw_networkx_nodes(self.G, pos, node_color=node_colors, node_size=1000)
         nx.draw_networkx_labels(self.G, pos, font_size=10, font_weight='bold')
 
-        # Create a color map for routes: blue for trucks, orange for drones
         truck_edges = {k: [] for k in range(self.num_trucks)}
         drone_edges = {d: [] for d in range(self.num_drones)}
 
@@ -565,10 +563,17 @@ class ToyTest:
             nx.draw_networkx_edges(self.G, pos, edgelist=truck_edges[i],
                                    edge_color=[colors[i]] * len(truck_edges[i]), width=2,
                                    label=f"T{i}", arrows=True, arrowsize=20)
+        # Add a legend
+        plt.legend()
+
+        # drone route
+        fig, ax = plt.subplots()
+        plt.sca(ax)
+        nx.draw_networkx_nodes(self.G, pos, node_color=node_colors, node_size=1000)
+        nx.draw_networkx_labels(self.G, pos, font_size=10, font_weight='bold')
         for i in range(self.num_drones):
             nx.draw_networkx_edges(self.G, pos, edgelist=drone_edges[i],
                                    edge_color=[colors[i + self.num_trucks]] * len(drone_edges[i]),
-                                   width=2, label=f"D{i}", arrows=True, arrowsize=20)
-
+                                   width=2, label=f"D{i}", arrows=True, arrowsize=20, style='dashed')
         # Add a legend
         plt.legend()
