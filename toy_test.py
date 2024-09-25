@@ -1,6 +1,6 @@
 import random
 
-seed = 1998
+seed = 1
 import gurobipy as gp
 import matplotlib.pyplot as plt
 import networkx as nx
@@ -10,12 +10,15 @@ drone_min_t = 5
 drone_max_t = 20
 truck_min_t = 10
 truck_max_t = 50
-M = 99999
+M = 9999999
 drone_endurance = 120
-drone_max_weight = 15
+drone_max_weight = 5
 drone_max_volume = 10
 truck_max_weight = 500
 truck_max_drone_dock_num = 10
+
+hub_cost_min = 500
+hub_cost_max = 1000
 
 
 class ToyTest:
@@ -73,13 +76,13 @@ class ToyTest:
             elif node_name in hubs:
                 self.hub_indices[node_name] = i
 
-        # Ensure that each customer and hub has a path from depot_source and to depot_sink
+        # Ensure that each customer and hub has a path from depot_source to current location
         for location in customers + hubs:
             truck_travel_time = random.randint(truck_min_t, truck_max_t)
             drone_travel_time = random.randint(drone_min_t, drone_max_t)
             G.add_edge(depot_source, location, travel_time={'truck': truck_travel_time, 'drone': drone_travel_time})
 
-        # Add edges from at least one customer or hub to depot_sink
+        # Ensure that each customer and hub has a path to depot_sink
         for location in customers + hubs:
             truck_travel_time = random.randint(truck_min_t, truck_max_t)
             drone_travel_time = random.randint(drone_min_t, drone_max_t)
@@ -109,6 +112,7 @@ class ToyTest:
         self.G = G
         self.demand_weights = {self.all_nodes_indices[n_name]: random.uniform(0, 5) for n_name in customers}
         self.demand_volume = {self.all_nodes_indices[n_name]: random.uniform(0, 3) for n_name in customers}
+        dsas = 0
 
     def visualize(self):
         pos = nx.spring_layout(self.G, seed=self.seed)  # Position the nodes using spring layout with a fixed seed
@@ -138,7 +142,6 @@ class ToyTest:
 
         # Draw edge labels (travel times for both truck and drone)
         nx.draw_networkx_edge_labels(self.G, pos, edge_labels=edge_labels, font_size=8)
-        plt.show()
 
     def solve(self):
         model = gp.Model("model")
@@ -148,6 +151,10 @@ class ToyTest:
         y_list = {}
         f_list = {}
         z_list = {}
+        xi_list = {}
+        for s_name in self.hubs:
+            xi = random.randint(hub_cost_min, hub_cost_max)
+            xi_list[s_name] = xi
         edges = self.G.edges(data=True)
         for i_name, j_name, data in edges:
             i = self.all_nodes_indices[i_name]
@@ -187,87 +194,89 @@ class ToyTest:
                 obj_expr += truck_time * (x_list[(i, j, k)] + f_list[(i, j, k)])
             for d in range(self.num_drones):
                 obj_expr += drone_time * y_list[(i, j, d)]
+            for s_name in self.hubs:
+                s = self.all_nodes_indices[s_name]
+                obj_expr += xi_list[s_name] * u_list[s]
         model.setObjective(obj_expr, GRB.MINIMIZE)
 
         # flow conservation
-        lhs = rhs = 0
+        i = 0
         # cons 1
         out_arcs = self.G.out_edges(self.depot_source)
         in_arcs = self.G.in_edges(self.depot_sink)
-        for i_name, j_name in out_arcs:
-            i = self.all_nodes_indices[i_name]
-            j = self.all_nodes_indices[j_name]
-            for k in range(self.num_trucks):
+        for k in range(self.num_trucks):
+            lhs = rhs = 0
+            for i_name, j_name in out_arcs:
+                i = self.all_nodes_indices[i_name]
+                j = self.all_nodes_indices[j_name]
                 lhs += x_list[(i, j, k)] + f_list[i, j, k]
-        for i_name, j_name in in_arcs:
-            i = self.all_nodes_indices[i_name]
-            j = self.all_nodes_indices[j_name]
-            for k in range(self.num_trucks):
+            for i_name, j_name in in_arcs:
+                i = self.all_nodes_indices[i_name]
+                j = self.all_nodes_indices[j_name]
                 rhs += x_list[(i, j, k)] + f_list[i, j, k]
-        self.constraints.append(model.addConstr(lhs == rhs, "conserv1"))
+            self.constraints.append(model.addConstr(lhs == rhs, f"conserv1_{i}"))
+            i += 1
         # cons 2
-        lhs = rhs = 0
-        for i_name, j_name in out_arcs:
-            i = self.all_nodes_indices[i_name]
-            j = self.all_nodes_indices[j_name]
-            for d in range(self.num_drones):
+        for d in range(self.num_drones):
+            lhs = rhs = 0
+            for i_name, j_name in out_arcs:
+                i = self.all_nodes_indices[i_name]
+                j = self.all_nodes_indices[j_name]
                 sum_z = 0
                 for k in range(self.num_trucks):
                     sum_z += z_list[(i, j, k, d)]
                 lhs += y_list[(i, j, d)] + sum_z
-        for i_name, j_name in in_arcs:
-            i = self.all_nodes_indices[i_name]
-            j = self.all_nodes_indices[j_name]
-            for d in range(self.num_drones):
+            for i_name, j_name in in_arcs:
+                i = self.all_nodes_indices[i_name]
+                j = self.all_nodes_indices[j_name]
                 sum_z = 0
                 for k in range(self.num_trucks):
                     sum_z += z_list[(i, j, k, d)]
                 rhs += y_list[(i, j, d)] + sum_z
-        self.constraints.append(model.addConstr(lhs == rhs, "conserv2"))
+            self.constraints.append(model.addConstr(lhs == rhs, f"conserv2_{i}"))
+            i += 1
         # cons 3
         id = 0
         for n_name in self.all_nodes[1:-1]:
-            n = self.all_nodes_indices[n_name]
-            lhs = rhs = 0
             out_arcs = self.G.out_edges(n_name)
             in_arcs = self.G.in_edges(n_name)
-            # for lhs
-            for _, j_name in out_arcs:
-                j = self.all_nodes_indices[j_name]
-                for k in range(self.num_trucks):
+            n = self.all_nodes_indices[n_name]
+            for k in range(self.num_trucks):
+                lhs = rhs = 0
+                # for lhs
+                for _, j_name in out_arcs:
+                    j = self.all_nodes_indices[j_name]
                     lhs += x_list[(n, j, k)] + f_list[(n, j, k)]
-            # for rhs
-            for j_name, _ in in_arcs:
-                j = self.all_nodes_indices[j_name]
-                for k in range(self.num_trucks):
+                # for rhs
+                for j_name, _ in in_arcs:
+                    j = self.all_nodes_indices[j_name]
                     rhs += x_list[(j, n, k)] + f_list[(j, n, k)]
-            self.constraints.append(model.addConstr(lhs == rhs, f"conserv3_{id}"))
-            id += 1
+                self.constraints.append(model.addConstr(lhs == rhs, f"conserv3_{id}"))
+                id += 1
         # cons 4
         id = 0
         for n_name in self.all_nodes[1:-1]:
             n = self.all_nodes_indices[n_name]
-            lhs = rhs = 0
             out_arcs = self.G.out_edges(n_name)
             in_arcs = self.G.in_edges(n_name)
-            # for lhs
-            for _, j_name in out_arcs:
-                j = self.all_nodes_indices[j_name]
-                for d in range(self.num_drones):
+            for d in range(self.num_drones):
+                lhs = rhs = 0
+                # for lhs
+                for _, j_name in out_arcs:
+                    j = self.all_nodes_indices[j_name]
                     sum_z = 0
                     for k in range(self.num_trucks):
                         sum_z += z_list[(n, j, k, d)]
                     lhs += y_list[(n, j, d)] + sum_z
-            # for rhs
-            for j_name, _ in in_arcs:
-                j = self.all_nodes_indices[j_name]
-                for d in range(self.num_drones):
+                # for rhs
+                for j_name, _ in in_arcs:
+                    j = self.all_nodes_indices[j_name]
                     sum_z = 0
                     for k in range(self.num_trucks):
                         sum_z += z_list[(j, n, k, d)]
                     rhs += y_list[(j, n, d)] + sum_z
-            self.constraints.append(model.addConstr(lhs == rhs, f"conserv4_{id}"))
-            id += 1
+                self.constraints.append(model.addConstr(lhs == rhs, f"conserv4_{id}"))
+                id += 1
 
         # customer serve once
         id = 0
@@ -284,6 +293,30 @@ class ToyTest:
             rhs = 1
             self.constraints.append(model.addConstr(lhs == rhs, f"servonce_{id}"))
             id += 1
+
+        # truck use once
+        for k in range(self.num_trucks):
+            lhs = rhs = 0
+            out_arcs = self.G.out_edges(self.depot_source)
+            for i_name, j_name in out_arcs:
+                i = self.all_nodes_indices[i_name]
+                j = self.all_nodes_indices[j_name]
+                lhs += x_list[(i, j, k)] + f_list[i, j, k]
+            self.constraints.append(model.addConstr(lhs <= 1, f"truck_once_{i}"))
+            i += 1
+
+        # drone use once
+        for d in range(self.num_drones):
+            lhs = rhs = 0
+            out_arcs = self.G.out_edges(self.depot_source)
+            for i_name, j_name in out_arcs:
+                i = self.all_nodes_indices[i_name]
+                j = self.all_nodes_indices[j_name]
+                lhs += y_list[(i, j, d)]
+                for k in range(self.num_trucks):
+                    lhs += z_list[(i, j, k, d)]
+            self.constraints.append(model.addConstr(lhs <= 1, f"truck_once_{i}"))
+            i += 1
 
         # linking constraints
         id = 0
@@ -529,12 +562,13 @@ class ToyTest:
         total_num = self.num_drones + self.num_trucks
         colors = [cmap(i / total_num) for i in range(total_num)]  # Ensure we don't exceed colormap range
         for i in range(self.num_trucks):
-            nx.draw_networkx_edges(self.G, pos, edgelist=truck_edges[i], edge_color=colors[i], width=2, label=f"T{i}")
+            nx.draw_networkx_edges(self.G, pos, edgelist=truck_edges[i],
+                                   edge_color=[colors[i]] * len(truck_edges[i]), width=2,
+                                   label=f"T{i}", arrows=True, arrowsize=20)
         for i in range(self.num_drones):
-            nx.draw_networkx_edges(self.G, pos, edgelist=drone_edges[i], edge_color=colors[i + self.num_trucks],
-                                   width=2, label=f"D{i}")
+            nx.draw_networkx_edges(self.G, pos, edgelist=drone_edges[i],
+                                   edge_color=[colors[i + self.num_trucks]] * len(drone_edges[i]),
+                                   width=2, label=f"D{i}", arrows=True, arrowsize=20)
 
         # Add a legend
         plt.legend()
-
-        plt.show()
