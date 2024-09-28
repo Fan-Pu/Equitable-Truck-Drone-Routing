@@ -126,6 +126,9 @@ class ToyTest:
                     G.add_edge(customer, hub, travel_time={'truck': truck_travel_time, 'drone': drone_travel_time})
 
         self.G = G
+
+        self.t_lb = self.get_shortest_drone_travel_times()
+
         self.demand_weights = {}
         self.demand_volume = {}
         for n_name in customers:
@@ -137,6 +140,30 @@ class ToyTest:
             self.demand_weights[s] = self.demand_volume[s] = epsilon
         print(self.demand_weights)
         print(self.demand_volume)
+
+    def get_shortest_drone_travel_times(self):
+        # Create a dictionary of edge weights based on drone travel time
+        drone_travel_times = {
+            (u, v): d['travel_time']['drone']
+            for u, v, d in self.G.edges(data=True)
+        }
+
+        # Set the drone travel time as the weight of the edges in the graph
+        nx.set_edge_attributes(self.G, drone_travel_times, 'weight')
+
+        # Calculate the shortest travel time from depot_source to each customer using Dijkstra's algorithm
+        shortest_drone_times = {}
+        for customer in self.customers:
+            try:
+                # Use Dijkstra's algorithm to get the shortest path and travel time
+                path_length = nx.single_source_dijkstra_path_length(self.G, self.depot_source, weight='weight')[
+                    customer]
+                shortest_drone_times[customer] = path_length
+            except KeyError:
+                # If there's no path to the customer, we can store inf or some other indication
+                shortest_drone_times[customer] = float('inf')
+
+        return shortest_drone_times
 
     def visualize(self):
         pos = nx.spring_layout(self.G, seed=self.seed)  # Position the nodes using spring layout with a fixed seed
@@ -221,6 +248,8 @@ class ToyTest:
             for k in range(self.num_trucks):
                 c_list[(n, k)] = model.addVar(name=f"c_{(n, k)}", vtype=GRB.CONTINUOUS, lb=0)
                 ak_list[(n, k)] = model.addVar(name=f"ak_{(n, k)}", vtype=GRB.CONTINUOUS, lb=0)
+        # upper bound of arriving time
+        a_max = model.addVar(name="a_max", vtype=GRB.CONTINUOUS, lb=0)
 
         # add objective function
         obj_expr = 0
@@ -233,18 +262,37 @@ class ToyTest:
         #         obj_expr += truck_time * (x_list[(i, j, k)] + f_list[(i, j, k)])
         #     for d in range(self.num_drones):
         #         obj_expr += drone_time * y_list[(i, j, d)]
-        for k in range(self.num_trucks):
-            obj_expr += ak_list[(self.all_nodes_indices[self.depot_sink], k)]
-        for d in range(self.num_drones):
-            obj_expr += ad_list[(self.all_nodes_indices[self.depot_sink], d)]
 
         for s_name in self.hubs:
             s = self.all_nodes_indices[s_name]
             obj_expr += xi_list[s_name] * u_list[s]
+
+        for n_name in self.customers:
+            n = self.all_nodes_indices[n_name]
+            arrive_time = 0
+            for k in range(self.num_trucks):
+                arrive_time += ak_list[(n, k)]
+            for d in range(self.num_drones):
+                arrive_time += ad_list[(n, d)]
+            obj_expr += arrive_time - self.t_lb[n_name]
+
+        # obj_expr += a_max
+
         model.setObjective(obj_expr, GRB.MINIMIZE)
 
+        # objective linearization ************************************************************
+        id = 0
+        for k in range(self.num_trucks):
+            self.constraints.append(
+                model.addConstr(a_max >= ak_list[(self.all_nodes_indices[self.depot_sink], k)], f"obj_{id}"))
+            id += 1
+        for d in range(self.num_drones):
+            self.constraints.append(
+                model.addConstr(a_max >= ad_list[(self.all_nodes_indices[self.depot_sink], d)], f"obj_{id}"))
+            id += 1
+
         # flow conservation ************************************************************
-        i = 0
+        id = 0
         # cons 1
         out_arcs = self.G.out_edges(self.depot_source)
         in_arcs = self.G.in_edges(self.depot_sink)
@@ -258,8 +306,8 @@ class ToyTest:
                 i = self.all_nodes_indices[i_name]
                 j = self.all_nodes_indices[j_name]
                 rhs += x_list[(i, j, k)] + f_list[i, j, k]
-            self.constraints.append(model.addConstr(lhs == rhs, f"conserv1_{i}"))
-            i += 1
+            self.constraints.append(model.addConstr(lhs == rhs, f"conserv1_{id}"))
+            id += 1
         # cons 2
         for d in range(self.num_drones):
             lhs = rhs = 0

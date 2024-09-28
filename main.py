@@ -1,7 +1,7 @@
 from toy_test import *
 
 if __name__ == '__main__':
-    test_case = ToyTest(3, 1, 0, 2)
+    test_case = ToyTest(5, 1, 0, 2)
     test_case.visualize()
     # plt.show()
     test_case.solve()
