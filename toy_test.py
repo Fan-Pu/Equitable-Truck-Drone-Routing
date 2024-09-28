@@ -12,9 +12,9 @@ truck_min_t = 10
 truck_max_t = 50
 M = 99999
 epsilon = 0.01
-drone_endurance = 15
-drone_max_weight = 50
-drone_max_volume = 10
+drone_endurance = 150
+drone_max_weight = 500
+drone_max_volume = 100
 truck_max_weight = 500
 truck_max_drone_dock_num = 10
 
@@ -224,18 +224,23 @@ class ToyTest:
 
         # add objective function
         obj_expr = 0
-        for i_name, j_name, data in edges:
-            i = self.all_nodes_indices[i_name]
-            j = self.all_nodes_indices[j_name]
-            truck_time = data['travel_time']['truck']
-            drone_time = data['travel_time']['drone']
-            for k in range(self.num_trucks):
-                obj_expr += truck_time * (x_list[(i, j, k)] + f_list[(i, j, k)])
-            for d in range(self.num_drones):
-                obj_expr += drone_time * y_list[(i, j, d)]
-            for s_name in self.hubs:
-                s = self.all_nodes_indices[s_name]
-                obj_expr += xi_list[s_name] * u_list[s]
+        # for i_name, j_name, data in edges:
+        #     i = self.all_nodes_indices[i_name]
+        #     j = self.all_nodes_indices[j_name]
+        #     truck_time = data['travel_time']['truck']
+        #     drone_time = data['travel_time']['drone']
+        #     for k in range(self.num_trucks):
+        #         obj_expr += truck_time * (x_list[(i, j, k)] + f_list[(i, j, k)])
+        #     for d in range(self.num_drones):
+        #         obj_expr += drone_time * y_list[(i, j, d)]
+        for k in range(self.num_trucks):
+            obj_expr += ak_list[(self.all_nodes_indices[self.depot_sink], k)]
+        for d in range(self.num_drones):
+            obj_expr += ad_list[(self.all_nodes_indices[self.depot_sink], d)]
+
+        for s_name in self.hubs:
+            s = self.all_nodes_indices[s_name]
+            obj_expr += xi_list[s_name] * u_list[s]
         model.setObjective(obj_expr, GRB.MINIMIZE)
 
         # flow conservation ************************************************************
