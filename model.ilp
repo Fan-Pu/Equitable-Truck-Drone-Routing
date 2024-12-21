@@ -1,13 +1,11 @@
 \ Model model_copy
 \ LP format - for model browsing. Use MPS format to capture full model detail.
-Minimize
+Maximize
  
 Subject To
- realized5_22: 9952 x_(4,_3,_0) + ak_(3,_0) - ak_(4,_0) >= 10000
- realized5_27: 9952 x_(3,_4,_0) - ak_(3,_0) + ak_(4,_0) >= 10000
+ payload3_96: 8.651549406417697 y_(6,_3,_0) <= 5
+ R389: y_(6,_3,_0) >= 0.5
 Bounds
- ak_(3,_0) free
- ak_(4,_0) free
 Binaries
- x_(3,_4,_0) x_(4,_3,_0)
+ y_(6,_3,_0)
 End
