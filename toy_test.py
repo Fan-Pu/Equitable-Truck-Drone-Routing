@@ -425,10 +425,14 @@ class ToyTest:
         # realized service times ************************************************************
         id = 0
         # cons 1
+        lhs = 0
+        for k in range(self.num_trucks):
+            n = self.all_nodes_indices[self.depot_source]
+            lhs += ak_dict[(n, k)]
         for d in range(self.total_drone_num):
             n = self.all_nodes_indices[self.depot_source]
-            self.constraints.append(model.addConstr(ad_dict[(n, d)] <= 0, f"realized1_{id}"))
-            id += 1
+            lhs += ad_dict[(n, d)]
+        self.constraints.append(model.addConstr(lhs <= 0, f"realized1"))
         # cons 2
         for n_name in self.customers:
             n = self.all_nodes_indices[n_name]
@@ -436,15 +440,10 @@ class ToyTest:
                 self.constraints.append(model.addConstr(a_dict[n] >= ak_dict[(n, k)], f"realized2_{id}"))
                 id += 1
         # cons 3
-        for k in range(self.num_trucks):
-            n = self.all_nodes_indices[self.depot_source]
-            self.constraints.append(model.addConstr(ak_dict[(n, k)] <= 0, f"realized3_{id}"))
-            id += 1
-        # cons 4
         for n_name in self.customers:
             n = self.all_nodes_indices[n_name]
             for d in range(self.total_drone_num):
-                self.constraints.append(model.addConstr(a_dict[n] >= ad_dict[(n, d)], f"realized4_{id}"))
+                self.constraints.append(model.addConstr(a_dict[n] >= ad_dict[(n, d)], f"realized3_{id}"))
                 id += 1
         # cons 4
         for n_name in self.all_nodes:
@@ -457,7 +456,7 @@ class ToyTest:
                 for k in range(self.num_trucks):
                     rhs = ak_dict[(i, k)] + t_dict[(i, k)] + travel_time * x_dict[(i, n, k)] + M * (
                             x_dict[(i, n, k)] - 1)
-                    self.constraints.append(model.addConstr(ak_dict[(n, k)] >= rhs, f"realized5_{id}"))
+                    self.constraints.append(model.addConstr(ak_dict[(n, k)] >= rhs, f"realized4_{id}"))
                     id += 1
         # cons 5
         for n_name in self.hubs:
@@ -468,7 +467,7 @@ class ToyTest:
                 for d in range(self.total_drone_num):
                     rhs = ak_dict[(n, self.kd_dict[d])] + travel_time * y_dict[(n, j, d)] + M * (
                             y_dict[(n, j, d)] - 1)
-                    self.constraints.append(model.addConstr(ad_dict[(j, d)] >= rhs, f"realized6_{id}"))
+                    self.constraints.append(model.addConstr(ad_dict[(j, d)] >= rhs, f"realized5_{id}"))
                     id += 1
 
         # test
