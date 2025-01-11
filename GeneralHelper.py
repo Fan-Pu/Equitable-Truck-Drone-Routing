@@ -23,14 +23,21 @@ truck_max_weight = 100
 drone_endurance = 150
 
 # for sub-tour elimination
-epsilon = 0.01
+epsilon = 1
 
 num_customers = 4
 num_hubs = 2
 num_trucks = 2
-num_drones = 2
+num_drones_per_truck = 2
 
 M = 100000
+
+# cost_scale = 0.01
+cost_scale = 1
+
+BSP_LB = 0  # lower bound of BSP
+
+close_tolerance = 0.001
 
 
 def update_arc_infos(location, term, travel_time, is_truck, truck_travel_times, truck_out_arcs, truck_in_arcs,
@@ -163,5 +170,9 @@ def create_random_truck_drone_network():
 
     net = Network(depot_source, depot_sink, customers, hubs, all_nodes, all_nodes_indices, customer_indices,
                   hub_indices, truck_net, drone_net, truck_out_arcs, truck_in_arcs, drone_out_arcs, drone_in_arcs,
-                  truck_travel_times, drone_travel_times, demand_weights, num_trucks, num_drones, a_lb)
+                  truck_travel_times, drone_travel_times, demand_weights, num_trucks, num_drones_per_truck, a_lb)
     return net
+
+
+def is_close(x, y):
+    return True if abs(x - y) < close_tolerance else False

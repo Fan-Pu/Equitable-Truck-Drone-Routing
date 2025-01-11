@@ -1,4 +1,4 @@
-import random
+import math
 
 import gurobipy as gp
 import matplotlib.cm as cm
@@ -30,163 +30,37 @@ node_size = 500
 
 
 class ToyTest:
-    def __init__(self, num_customers, num_hubs, num_trucks, num_drones):
+    def __init__(self, net):
         self.constraints = []
-        self.num_customers = num_customers
-        self.num_hubs = num_hubs
-        self.num_trucks = num_trucks
-        self.num_drones = num_drones
+        self.num_customers = net.num_customers
+        self.num_hubs = net.num_hubs
+        self.num_trucks = net.num_trucks
+        self.num_drones = net.num_drones
         # set drone_dict and kd_dict
         self.drone_dict = {}
         self.kd_dict = {}  # key: drone_id
         drone_id = 0
-        for k in range(num_trucks):
+        for k in range(self.num_trucks):
             temp_list = []
-            for d in range(num_drones):
+            for d in range(self.num_drones):
                 temp_list.append(drone_id)
                 self.kd_dict[drone_id] = k
                 drone_id += 1
             self.drone_dict[k] = temp_list
         self.total_drone_num = drone_id
-        self.seed = 2024  # You can change this seed value for different deterministic outcomes
-        self.create_random_truck_drone_network(num_customers, num_hubs)
-
-    def create_random_truck_drone_network(self, num_customers, num_hubs):
-        """
-        Creates a random graph to represent the truck-drone routing problem.
-
-        Args:
-            num_customers (int): Number of customer locations.
-            num_hubs (int): Number of docking hub locations.
-
-        Returns:
-            truck_net (nx.DiGraph): Directed graph representing the network.
-        """
-        random.seed(self.seed)
-        truck_net = nx.DiGraph()
-        # Generate node names
-        depot_source = "Source"
-        depot_sink = "Sink"
-        customers = [f"C{i + 1}" for i in range(num_customers)]
-        hubs = [f"H{i + 1}" for i in range(num_hubs)]
-
-        self.depot_source = depot_source
-        self.depot_sink = depot_sink
-        self.customers = customers
-        self.hubs = hubs
-
-        # Add depot, customers, and hubs as nodes
-        truck_net.add_node(depot_source)
-        truck_net.add_node(depot_sink)
-        for customer in customers:
-            truck_net.add_node(customer)
-        for hub in hubs:
-            truck_net.add_node(hub)
-
-        drone_net = truck_net.copy()
-
-        self.all_nodes = [depot_source] + customers + hubs + [depot_sink]
-        self.customer_indices = {}
-        self.hub_indices = {}
-        self.all_nodes_indices = {}
-        for i in range(len(self.all_nodes)):
-            node_name = self.all_nodes[i]
-            self.all_nodes_indices[node_name] = i
-            if node_name in customers:
-                self.customer_indices[node_name] = i
-            elif node_name in hubs:
-                self.hub_indices[node_name] = i
-
-        self.truck_out_arcs = {n: [] for n in self.all_nodes}
-        self.truck_in_arcs = {n: [] for n in self.all_nodes}
-        self.drone_out_arcs = {n: [] for n in self.all_nodes}
-        self.drone_in_arcs = {n: [] for n in self.all_nodes}
-
-        self.truck_travel_times = {}
-        self.drone_travel_times = {}
-
-        # generate truck arcs *************************************************************
-
-        # Ensure that each customer and hub has a path from depot_source
-        for location in customers + hubs:
-            travel_time = random.randint(truck_min_t, truck_max_t)
-            self.update_arc_infos(depot_source, location, travel_time, True)
-            truck_net.add_edge(depot_source, location)
-
-        # Ensure that each customer and hub has a path to depot_sink
-        for location in customers + hubs:
-            travel_time = random.randint(truck_min_t, truck_max_t)
-            self.update_arc_infos(location, depot_sink, travel_time, True)
-            truck_net.add_edge(location, depot_sink)
-
-        # randomly generate arcs from hubs
-        for location in hubs:
-            # to customers
-            for term in customers:
-                if random.random() < 0.5:
-                    continue
-                travel_time = random.randint(truck_min_t, truck_max_t)
-                self.update_arc_infos(location, term, travel_time, True)
-                truck_net.add_edge(location, term)
-
-        # Randomly generate additional arcs for truck routes (between hubs customers)
-        all_locations = customers + hubs
-        for i in all_locations:
-            for j in all_locations:
-                if j == i:
-                    continue
-                if random.random() > 0.5:  # Randomly decide if an arc exists
-                    travel_time = random.randint(truck_min_t, truck_max_t)
-                    self.update_arc_infos(i, j, travel_time, True)
-                    truck_net.add_edge(i, j)
-
-        # generate arcs for drones ********************************
-        for i in hubs:
-            for j in customers:
-                travel_time = random.randint(drone_min_t, drone_max_t)
-                self.update_arc_infos(i, j, travel_time, False)
-                drone_net.add_edge(i, j)
-
-        self.truck_net = truck_net
-        self.drone_net = drone_net
-
-        # self.t_lb = self.get_shortest_arrival_times()
-
-        self.demand_weights = {}
-        for n_name in customers:
-            n = self.all_nodes_indices[n_name]
-            self.demand_weights[n] = random.uniform(demand_weight_min, demand_weight_max)
-        for s_name in hubs:
-            s = self.all_nodes_indices[s_name]
-            self.demand_weights[s] = epsilon
-        for n_name in [self.depot_source, self.depot_sink]:
-            n = self.all_nodes_indices[n_name]
-            self.demand_weights[n] = 0
-        print(self.demand_weights)
-
-    def get_shortest_arrival_times(self):
-        # Create a dictionary of edge weights based on drone travel time
-        drone_travel_times = {
-            (u, v): d['travel_time']['drone']
-            for u, v, d in self.G.edges(data=True)
-        }
-
-        # Set the drone travel time as the weight of the edges in the graph
-        nx.set_edge_attributes(self.G, drone_travel_times, 'weight')
-
-        # Calculate the shortest travel time from depot_source to each customer using Dijkstra's algorithm
-        shortest_drone_times = {}
-        for customer in self.customers:
-            try:
-                # Use Dijkstra's algorithm to get the shortest path and travel time
-                path_length = nx.single_source_dijkstra_path_length(self.G, self.depot_source, weight='weight')[
-                    customer]
-                shortest_drone_times[customer] = path_length
-            except KeyError:
-                # If there's no path to the customer, we can store inf or some other indication
-                shortest_drone_times[customer] = float('inf')
-
-        return shortest_drone_times
+        self.all_nodes = net.all_nodes
+        self.all_nodes_indices = net.all_nodes_indices
+        self.truck_in_arcs = net.truck_in_arcs
+        self.truck_out_arcs = net.truck_out_arcs
+        self.drone_in_arcs = net.drone_in_arcs
+        self.drone_out_arcs = net.drone_out_arcs
+        self.customers = net.customers
+        self.depot_source = net.depot_source
+        self.depot_sink = net.depot_sink
+        self.hubs = net.hubs
+        self.drone_travel_times = net.drone_travel_times
+        self.truck_travel_times = net.truck_travel_times
+        self.demand_weights = net.demand_weights
 
     def visualize(self):
         # pos = nx.spring_layout(self.truck_net, seed=self.seed)
@@ -266,20 +140,12 @@ class ToyTest:
 
         # add objective function
         obj_expr = 0
-        # first term
-        # for k in range(self.num_trucks):
-        #     for n_name in self.all_nodes:
-        #         for j_name in self.truck_out_arcs[n_name]:
-        #             travel_time = self.truck_travel_times[(n_name, j_name)]
-        #             n, j = self.all_nodes_indices[n_name], self.all_nodes_indices[j_name]
-        #             obj_expr += travel_time * x_dict[(n, j, k)]
-        #     for n_name in self.hubs:
-        #         n = self.hub_indices[n_name]
-        #         obj_expr += t_dict[(n, k)]
-        # second term
         for n_name in self.customers:
             n = self.all_nodes_indices[n_name]
             obj_expr += a_dict[n]
+        for k in range(self.num_trucks):
+            n = self.all_nodes_indices[self.depot_sink]
+            obj_expr += ak_dict[(n, k)]
         model.setObjective(obj_expr, GRB.MINIMIZE)
 
         # flow conservation ************************************************************
@@ -497,14 +363,26 @@ class ToyTest:
         # Retrieve the values
         if model.status == GRB.OPTIMAL:
             print(f"Objective value: {model.objVal}")
-            # Extract and store the solution values for the decision variables
-            self.x_values = {(i, j, k): var.X for (i, j, k), var in x_dict.items()}
-            self.y_values = {(i, j, d): var.X for (i, j, d), var in y_dict.items()}
+            # # Extract and store the solution values for the decision variables
+            # self.x_values = {(i, j, k): var.X for (i, j, k), var in x_dict.items()}
+            # self.y_values = {(i, j, d): var.X for (i, j, d), var in y_dict.items()}
             self.t_values = {(n, d): var.X for (n, d), var in t_dict.items()}
-            self.w_values = {(n, d): var.X for (n, d), var in wk_dict.items()}
+            self.wk_values = {(n, d): var.X for (n, d), var in wk_dict.items()}
             self.ak_value = {(n, k): var.X for (n, k), var in ak_dict.items()}
             self.ad_value = {(n, d): var.X for (n, d), var in ad_dict.items()}
-            dasd = 0
+            self.a_value = {n: var.X for n, var in a_dict.items()}
+            # dasd = 0
+
+            # construct the route
+            truck_routes = {k: [] for k in range(self.num_trucks)}
+            for (i, j, k), var in x_dict.items():
+                if math.isclose(var.X, 1):
+                    truck_routes[k].append((self.all_nodes[i], self.all_nodes[j]))
+            drone_routes = []
+            for (i, j, d), var in y_dict.items():
+                if math.isclose(var.X, 1):
+                    drone_routes.append((self.all_nodes[i], self.all_nodes[j], d))
+            sdas = 0
 
     def visualize_routes(self):
         pos = nx.circular_layout(self.truck_net)
