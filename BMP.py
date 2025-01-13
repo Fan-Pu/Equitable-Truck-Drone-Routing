@@ -189,34 +189,42 @@ class BMP:
 
     def update_objective_and_BSP_Lb(self, net, duals):
         # update the BSP lower bound
-        GeneralHelper.BSP_LB = sum(
-            [-duals[net.customers.index(n_name)] * len(net.drone_in_arcs[n_name]) * num_drones_per_truck for n_name in
-             net.customers if duals[net.customers.index(n_name)] > 0])
+        GeneralHelper.BSP_LB = 0
+        for i in range(len(duals['origin']) - 1):
+            dual = duals['origin'][i]
+            if dual < 0:
+                continue
+            n_name = net.customers[i]
+            GeneralHelper.BSP_LB += -dual * len(net.drone_in_arcs[n_name]) * num_drones_per_truck
         self.phi.LB = GeneralHelper.BSP_LB
         # add objective
-        obj_expr = self.phi + duals[-2] - duals[-1]
-        for n_name in net.customers:
-            n_idx = net.customers.index(n_name)
-            dual = duals[n_idx]
+        obj_expr = self.phi + duals['origin'][-1]
+        for i in range(len(duals['origin']) - 1):
+            dual = duals['origin'][i]
+            n_name = net.customers[i]
             for i_name in net.truck_in_arcs[n_name]:
                 i, n = net.all_nodes_indices[i_name], net.all_nodes_indices[n_name]
-                obj_expr -= dual * self.x_dict[(i, n)]
+                obj_expr += -dual * self.x_dict[(i, n)]
         self.model.setObjective(obj_expr, GRB.MINIMIZE)
 
         # update phi_cons
-        BSP_obj_expr = gp.quicksum(
-            -duals[net.customers.index(n_name)] * self.y_dict[
-                (net.all_nodes_indices[i_name], net.all_nodes_indices[n_name], d)]
-            for n_name in net.customers
-            for i_name in net.drone_in_arcs[n_name]
-            for d in range(num_drones_per_truck)
-        )
+        BSP_obj_expr = 0
+        for i in range(len(duals['origin']) - 1):
+            dual = duals['origin'][i]
+            n_name = net.customers[i]
+            for i_name in net.drone_in_arcs[n_name]:
+                for d in range(num_drones_per_truck):
+                    BSP_obj_expr += -dual * self.y_dict[
+                        (net.all_nodes_indices[i_name], net.all_nodes_indices[n_name], d)]
+        # get the route cost
         route_cost = gp.quicksum(
             cost_scale * (self.a_dict[net.all_nodes_indices[n_name]] - net.a_lb[n_name])
             for n_name in net.customers
         )
         route_cost += self.ak_dict[net.all_nodes_indices[net.depot_sink]]
+
         BSP_obj_expr += route_cost
+        # update the phi constraint
         if self.phi_cons is not None:
             self.model.remove(self.phi_cons)
         self.phi_cons = self.model.addConstr(self.phi >= BSP_obj_expr, "phi_cons")
@@ -227,7 +235,7 @@ class BMP:
         # self.model.write('BMP.lp')
         self.model.optimize()
         if self.model.Status == GRB.OPTIMAL:
-            print(f"BMP phi value: {self.phi.X:.4f}", end="    ")
+            # print(f"BMP phi value: {self.phi.X:.4f}", end="    ")
             x_vals = {key: var.X for key, var in self.x_dict.items()}
             phi_value = self.phi.X
             return self.model.ObjVal, x_vals, phi_value
@@ -235,6 +243,9 @@ class BMP:
             raise Exception("BMP did not converge")
 
     def remove_cuts(self):
+        """
+        remove all Benders cuts
+        """
         self.model.remove(self.subgradient_cuts)
         self.model.remove(self.Lshaped_cuts)
         self.subgradient_cuts.clear()

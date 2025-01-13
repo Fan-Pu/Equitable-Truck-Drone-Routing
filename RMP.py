@@ -1,18 +1,21 @@
+import re
+
 import gurobipy as gp
 from gurobipy import GRB
 
+import BranchAndPrice
+
 
 class RMP:
-    def __init__(self, net, route_dict):
+    def __init__(self, net):
+        route_dict = BranchAndPrice.route_dict
+        self.z_vars = None
         self.sum_z_val = None  # branching term
         self.model = gp.Model("model")
         self.duals = None
-        self.sum_z = None
-        self.branch_cons_LB = None
-        self.branch_cons_UB = None
 
         # add decision variables
-        self.z_list = []
+        self.z_list = []  # no updates
         self.z_keys = []  # value: key of z variable
         obj_expr = 0
         for route_key, route in route_dict.items():
@@ -21,8 +24,6 @@ class RMP:
             obj_expr += var * cost
             self.z_list.append(var)
             self.z_keys.append(route_key)
-
-        self.sum_z = gp.quicksum(self.z_list)
 
         # set objective
         self.model.setObjective(obj_expr, GRB.MINIMIZE)
@@ -41,22 +42,14 @@ class RMP:
                 name=f"visit_customer_{i}"
             )
             self.constraints.append(cons)
-        # cons 2 (truck fleet LB)
-        cons = self.model.addConstr(
-            gp.quicksum(self.z_list) >= 0,
-            name=f"truck_fleet1"
-        )
-        self.constraints.append(cons)
-        self.branch_cons_LB = cons
         # cons 2 (truck fleet UB)
         cons = self.model.addConstr(
             gp.quicksum(self.z_list) <= net.num_trucks,
-            name=f"truck_fleet2"
+            name=f"truck_fleet"
         )
         self.constraints.append(cons)
-        self.branch_cons_UB = cons
 
-    def solve(self):
+    def solve(self, node_id):
         """Solve the master problem"""
         self.model.setParam("OutputFlag", 0)
         # self.model.setParam("NumericFocus", 3)  # Maximize numerical robustness
@@ -67,9 +60,12 @@ class RMP:
 
         self.model.optimize()
         if self.model.Status == GRB.OPTIMAL:
-            print(f"RMP obj value: {self.model.objVal:.4f}")
-            self.duals = [c.Pi for c in self.constraints]
-            self.sum_z_val = self.sum_z.getValue()
+            # print(f"RMP obj value: {self.model.objVal:.4f}")
+            node = BranchAndPrice.node_infos[node_id]
+            self.duals = {'origin': [c.Pi for c in self.constraints],
+                          'branch': [self.model.getConstrByName(branch_info[-1]).Pi for branch_info in node.branches]}
+            self.z_vars = [var for var in self.model.getVars() if re.match(r"z_\d+", var.VarName)]
+            self.sum_z_val = sum([var.X for var in self.z_vars])
             return self.model.Status, self.duals
         else:
             return self.model.Status, None

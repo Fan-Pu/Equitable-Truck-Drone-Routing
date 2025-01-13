@@ -57,7 +57,7 @@ class PSP:
                 else:
                     raise Exception("Errors in BSP objective value")
 
-            print()
+            # print()
 
     def separate_subgradient_cut(self, LP_obj_val, duals, x_vals):
         rhs = LP_obj_val
@@ -110,8 +110,10 @@ class PSP:
 
         # for drone
         drone_route = [net.all_nodes[j] for (i, j, d), value in y_vals.items() if is_close(1, value)]
+        launches = [net.all_nodes[i] for (i, j, d), value in y_vals.items() if is_close(1, value)]
         drone_links = [(net.all_nodes[i], net.all_nodes[j]) for (i, j, d), value in y_vals.items() if
                        math.isclose(1, value)]
-        route = {'truck': truck_route, 'drone': drone_route, 'cost': route_cost, 'drone links': drone_links}
+        route = {'truck': truck_route, 'drone': drone_route, 'launches': launches, 'cost': route_cost,
+                 'drone links': drone_links}
 
         return route

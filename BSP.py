@@ -142,13 +142,15 @@ class BSP:
 
     def update_objective(self, net, duals):
         # add objective
-        obj_expr = gp.quicksum(
-            -duals[net.customers.index(n_name)] * self.y_dict[
-                (net.all_nodes_indices[i_name], net.all_nodes_indices[n_name], d)]
-            for n_name in net.customers
-            for i_name in net.drone_in_arcs[n_name]
-            for d in range(num_drones_per_truck)
-        )
+        obj_expr = 0
+        for i in range(len(duals['origin']) - 1):
+            dual = duals['origin'][i]
+            n_name = net.customers[i]
+            for i_name in net.drone_in_arcs[n_name]:
+                for d in range(num_drones_per_truck):
+                    obj_expr += -dual * self.y_dict[
+                        (net.all_nodes_indices[i_name], net.all_nodes_indices[n_name], d)]
+
         # obj_expr = gp.quicksum(
         #     -1000 * self.y_dict[
         #         (net.all_nodes_indices[i_name], net.all_nodes_indices[n_name], d)]
@@ -177,7 +179,7 @@ class BSP:
         # self.model.write('BSP.lp')
         self.model.optimize()
         if self.model.Status == GRB.OPTIMAL:
-            print(f"BSP IP obj: {self.model.objVal:.4f}", end="")
+            # print(f"BSP IP obj: {self.model.objVal:.4f}", end="")
             y_vals = {key: var.X for key, var in self.y_dict.items()}
             ak_vals = {key: var.X for key, var in self.ak_dict.items()}
             if abs(self.model.ObjVal) <= 0.001:
@@ -201,7 +203,7 @@ class BSP:
         self.model.write('BSP.lp')
         self.model.optimize()
         if self.model.Status == GRB.OPTIMAL:
-            print(f"BSP LP obj: {self.model.objVal:.4f}", end="    ")
+            # print(f"BSP LP obj: {self.model.objVal:.4f}", end="    ")
             # vals = {key: var.X for key, var in self.y_dict.items()}
             duals = {key: c.Pi for key, c in self.binding_constraints.items()}
             return self.model.ObjVal, duals

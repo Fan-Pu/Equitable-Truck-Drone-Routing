@@ -187,7 +187,7 @@ class PSPIntM:
 
     def update_objective(self, net, duals):
         # add objective
-        obj_expr = + duals[-2] - duals[-1]
+        obj_expr = duals[-2] - duals[-1]
         for n_name in net.customers:
             n_idx = net.customers.index(n_name)
             dual = duals[n_idx]
