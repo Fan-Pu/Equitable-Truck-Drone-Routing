@@ -1,71 +1,129 @@
-import re
+from pyscipopt import Model, SCIP_PARAMSETTING
 
-import gurobipy as gp
-from gurobipy import GRB
+import GeneralHelper
+from GeneralHelper import *
+from MyBranchingRule import MyBranchingRule
+from MyPricer import MyPricer
 
-import BranchAndPrice
+node_infos = {}
+route_dict = {}  # key (truck_route, drone_route)
+route_key_id_pairs = {}  # key: route key. value: route id
+initial_route = []
+constraints = []
+sum_z_val = None  # branching term
+z_list = []
+z_keys = []  # value: key of z variable
 
 
 class RMP:
-    def __init__(self, net):
-        route_dict = BranchAndPrice.route_dict
-        self.z_vars = None
-        self.sum_z_val = None  # branching term
-        self.model = gp.Model("model")
-        self.duals = None
+    def __init__(self):
+        self.model = Model("RMP")
+        self.init_master_problem()
 
-        # add decision variables
-        self.z_list = []  # no updates
-        self.z_keys = []  # value: key of z variable
-        obj_expr = 0
+    def init_master_problem(self):
+        # add initial routes
+        for route in self.find_initial_routes():
+            route_key = (tuple(route['truck']), tuple(route['drone']))
+            route['id'] = len(route_key_id_pairs)
+            route_dict[route_key] = route
+            route_key_id_pairs[route_key] = route['id']
+            initial_route.append(route_key)
+
+        # Add variables
         for route_key, route in route_dict.items():
             idx, cost = route['id'], route['cost']
-            var = self.model.addVar(name=f"z_{idx}", vtype=GRB.CONTINUOUS, lb=0)
-            obj_expr += var * cost
-            self.z_list.append(var)
-            self.z_keys.append(route_key)
+            var = self.model.addVar(name=f"z_{idx}", vtype="B", obj=cost)
+            z_list.append(var)
+            z_keys.append(route_key)
 
-        # set objective
-        self.model.setObjective(obj_expr, GRB.MINIMIZE)
-
-        self.constraints = []
         # cons 1
-        for i in range(len(net.customers)):
-            n_name = net.customers[i]
-            visit_route_ids = []
-            for idx in range(len(self.z_keys)):
-                if n_name in route_dict[self.z_keys[idx]]['truck']:
+        for i in range(len(GeneralHelper.net.customers)):
+            n_name = GeneralHelper.net.customers[i]
+            visit_route_ids = []  # the routes that visits the node
+            for idx in range(len(z_keys)):
+                if n_name in route_dict[z_keys[idx]]['truck']:
                     visit_route_ids.append(idx)
-
-            cons = self.model.addConstr(
-                gp.quicksum(self.z_list[j] for j in visit_route_ids) == 1,
-                name=f"visit_customer_{i}"
-            )
-            self.constraints.append(cons)
+            cons = self.model.addCons(sum(z_list[j] for j in visit_route_ids) == 1, name=f"visit_customer_{i}",
+                                      modifiable=True)
+            constraints.append(cons)
         # cons 2 (truck fleet UB)
-        cons = self.model.addConstr(
-            gp.quicksum(self.z_list) <= net.num_trucks,
-            name=f"truck_fleet"
-        )
-        self.constraints.append(cons)
+        cons = self.model.addCons(sum(z_list) <= GeneralHelper.net.num_trucks, name=f"truck_fleet", modifiable=True)
+        constraints.append(cons)
 
-    def solve(self, node_id):
-        """Solve the master problem"""
-        self.model.setParam("OutputFlag", 0)
-        # self.model.setParam("NumericFocus", 3)  # Maximize numerical robustness
-        self.model.setParam("FeasibilityTol", 1e-9)
-        self.model.setParam("OptimalityTol", 1e-9)
-        self.model.update()
-        self.model.write("RMP.lp")
+    def branch_and_price(self):
+        self.model.setPresolve(SCIP_PARAMSETTING.OFF)
+        self.model.setSeparating(SCIP_PARAMSETTING.OFF)
+        self.model.setHeuristics(SCIP_PARAMSETTING.OFF)
 
+        pricer = MyPricer()
+        self.model.includePricer(pricer, "MyPricer", "Column generation pricing", priority=5000000)
+
+        branch_rule = MyBranchingRule()
+        self.model.includeBranchrule(branch_rule, "sum_z", "branch on the sum of z",
+                                     priority=10000000, maxdepth=-1, maxbounddist=1)
+
+        # Solve the model
+        self.model.writeProblem("RMP.lp")
         self.model.optimize()
-        if self.model.Status == GRB.OPTIMAL:
-            # print(f"RMP obj value: {self.model.objVal:.4f}")
-            node = BranchAndPrice.node_infos[node_id]
-            self.duals = {'origin': [c.Pi for c in self.constraints],
-                          'branch': [self.model.getConstrByName(branch_info[-1]).Pi for branch_info in node.branches]}
-            self.z_vars = [var for var in self.model.getVars() if re.match(r"z_\d+", var.VarName)]
-            self.sum_z_val = sum([var.X for var in self.z_vars])
-            return self.model.Status, self.duals
+
+        # Print the solution
+        if self.model.getStatus() == "optimal":
+            print("Optimal solution found!")
+            for var in self.model.getVars():
+                if self.model.getVal(var) > 0.5:
+                    print(f"{var.name} = {self.model.getVal(var)}")
         else:
-            return self.model.Status, None
+            print("No optimal solution found.")
+
+    def find_initial_routes(self):
+        routes = []
+        # the route that visits all nodes
+        truck_route = [GeneralHelper.net.depot_source, GeneralHelper.net.customers[0]]
+        arrive_time = GeneralHelper.net.truck_travel_times[
+            (GeneralHelper.net.depot_source, GeneralHelper.net.customers[0])]
+        # cost = (arrive_time - GeneralHelper.net.a_lb[GeneralHelper.net.customers[0]]) ** 2
+        cost = cost_scale * (arrive_time - GeneralHelper.net.a_lb[GeneralHelper.net.customers[0]])
+        return_time = arrive_time  # the time it returns to depot sink
+        for i in range(len(GeneralHelper.net.customers) - 1):
+            n = GeneralHelper.net.customers[i]
+            n_next = GeneralHelper.net.customers[i + 1]
+            arrive_time += GeneralHelper.net.truck_travel_times[(n, n_next)]
+            # cost += (arrive_time - GeneralHelper.net.a_lb[n_next]) ** 2
+            cost += cost_scale * (arrive_time - GeneralHelper.net.a_lb[n_next])
+            return_time += GeneralHelper.net.truck_travel_times[(n, n_next)]
+            truck_route.append(n_next)
+        return_time += GeneralHelper.net.truck_travel_times[
+            (GeneralHelper.net.customers[-1], GeneralHelper.net.depot_sink)]
+        cost += return_time
+        truck_route.append(GeneralHelper.net.depot_sink)
+        route = {'truck': truck_route, 'drone': [], 'launches': [], 'cost': cost, 'drone links': []}
+        routes.append(route)
+
+        # the route that visit only a node
+        for n_name in GeneralHelper.net.customers + GeneralHelper.net.hubs:
+            truck_route = [GeneralHelper.net.depot_source, n_name, GeneralHelper.net.depot_sink]
+            arrive_time = GeneralHelper.net.truck_travel_times[(GeneralHelper.net.depot_source, n_name)]
+            # cost = (arrive_time - GeneralHelper.net.a_lb[GeneralHelper.net.customers[0]]) ** 2
+            cost = cost_scale * (arrive_time - GeneralHelper.net.a_lb[n_name])
+            return_time = arrive_time + GeneralHelper.net.truck_travel_times[(n_name, GeneralHelper.net.depot_sink)]
+            cost += return_time
+            drone_route = []
+            route = {'truck': truck_route, 'drone': drone_route, 'cost': cost, 'drone links': []}
+            routes.append(route)
+
+        return routes
+
+    def construct_final_route(self):
+        solution = []
+        cost = 0
+        z_vals = [self.model.getVal(var) for var in z_list]
+        self.model.writeProblem("RMP.lp")
+        for i, var in enumerate(z_list):
+            # Check if the variable is close to 1 in the solution
+            if self.model.getVal(var) + close_tolerance >= 1:
+                key = z_keys[i]
+                route = route_dict[key]
+                solution.append(route)
+                cost += route['cost']
+
+        return solution, cost

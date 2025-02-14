@@ -1,6 +1,5 @@
-from BranchAndPrice import *
-from GeneralHelper import *
-from toy_test import ToyTest
+# from BranchAndPrice import *
+from RMP import *
 
 if __name__ == '__main__':
     # test_case = ToyTest(8, 2, 3, 2)
@@ -10,10 +9,19 @@ if __name__ == '__main__':
     # test_case.visualize_routes()
     # plt.show()
     # ss = 0
-    net = create_random_truck_drone_network()
 
-    test_case = ToyTest(net)
+    # test_cuttingstock()
+
+    create_random_truck_drone_network()
+    transform_network()
+
+    rmp = RMP()
+    rmp.branch_and_price()
+    solution, cost = rmp.construct_final_route()
+    sdas = 0
+
+    # test_case = ToyTest(net)
     # test_case.solve()
 
-    bc_solver = BranchAndPrice(net)
-    bc_solver.solve()
+    # bc_solver = BranchAndPrice(net)
+    # bc_solver.solve()

@@ -1,0 +1,69 @@
+from pyscipopt import Branchrule, quicksum, SCIP_RESULT
+
+import RMP
+from GeneralHelper import *
+from NodeInfo import NodeInfo
+
+
+class MyBranchingRule(Branchrule):
+
+    def branchexeclp(self, allowaddcons):
+        """
+        Executes the branching rule during LP relaxation.
+        """
+
+        branch_cands, branch_cand_sols, branch_cand_fracs, ncands, npriocands, nimplcands = self.model.getLPBranchCands()
+
+        if ncands == 0:
+            return {"result": "didnotrun"}
+
+        # rank the candidate solution according to the value of |x-0.5|
+        # Compute distance to 0.5
+        frac_dist = [(cand, frac, abs(frac - 0.5)) for cand, frac in zip(branch_cands, branch_cand_fracs)]
+
+        # Sort candidates based on proximity to 0.5 (ascending order)
+        sorted_cands = sorted(frac_dist, key=lambda x: x[2])
+
+        # branching variables
+        remove_var_names = []
+        sum_branch_z_val = sum(branch_cand_sols)
+
+        if is_integer(sum_branch_z_val):
+            for z, frac_val, _ in reversed(sorted_cands):
+                temp_sum_val = sum_branch_z_val - frac_val
+                if not is_integer(temp_sum_val):
+                    remove_var_names.append(z.name)
+                    sum_branch_z_val = temp_sum_val
+                    break
+            if len(remove_var_names) == 0:
+                raise Exception("error in branch")
+        branch_z_set = [var for var in branch_cands if var.name not in remove_var_names]
+        branch_z_names = [var.name for var in branch_z_set]
+
+        node_left = self.model.createChild(0.0, self.model.getLocalEstimate())
+        node_right = self.model.createChild(0.0, self.model.getLocalEstimate())
+
+        left_cons = self.model.createConsFromExpr(quicksum(branch_z_set) <= int(sum_branch_z_val))
+        right_cons = self.model.createConsFromExpr(quicksum(branch_z_set) >= int(sum_branch_z_val) + 1)
+
+        self.model.addConsNode(node_left, left_cons)
+        self.model.addConsNode(node_right, right_cons)
+
+        # update the node info
+        current_node = self.model.getCurrentNode()
+        current_id = current_node.getNumber()
+        current_node_info = RMP.node_infos[current_id]
+        node_left_id = node_left.getNumber()
+        node_right_id = node_right.getNumber()
+        # left
+        RMP.node_infos[node_left_id] = NodeInfo(current_id)
+        RMP.node_infos[node_left_id].columns, RMP.node_infos[
+            node_left_id].branches = current_node_info.columns.copy(), current_node_info.branches.copy()
+        RMP.node_infos[node_left_id].branches.append((branch_z_names, int(sum_branch_z_val)))
+        # right
+        RMP.node_infos[node_right_id] = NodeInfo(current_id)
+        RMP.node_infos[node_right_id].columns, RMP.node_infos[
+            node_right_id].branches = current_node_info.columns.copy(), current_node_info.branches.copy()
+        RMP.node_infos[node_right_id].branches.append((branch_z_names, int(sum_branch_z_val) + 1))
+
+        return {"result": SCIP_RESULT.BRANCHED}

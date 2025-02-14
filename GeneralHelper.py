@@ -3,8 +3,12 @@ import random
 import networkx as nx
 
 from Network import Network
+from TransformedNetwork import TransformedNetwork
 
 seed = 2024
+
+net = None  # the network object
+transformed_net = None  # the transformed network object
 
 # drone travel time
 drone_min_t = 2
@@ -30,7 +34,7 @@ num_hubs = 2
 num_trucks = 2
 num_drones_per_truck = 2
 
-M = 100000
+M = 10000
 
 # cost_scale = 0.01
 cost_scale = 1
@@ -168,11 +172,40 @@ def create_random_truck_drone_network():
         n = all_nodes_indices[n_name]
         demand_weights[n] = 0
 
-    net = Network(depot_source, depot_sink, customers, hubs, all_nodes, all_nodes_indices, customer_indices,
-                  hub_indices, truck_net, drone_net, truck_out_arcs, truck_in_arcs, drone_out_arcs, drone_in_arcs,
-                  truck_travel_times, drone_travel_times, demand_weights, num_trucks, num_drones_per_truck, a_lb)
-    return net
+    global net
+    params = {
+        "depot_source": depot_source,
+        "depot_sink": depot_sink,
+        "customers": customers,
+        "hubs": hubs,
+        "all_nodes": all_nodes,
+        "all_nodes_indices": all_nodes_indices,
+        "customer_indices": customer_indices,
+        "hub_indices": hub_indices,
+        "truck_net": truck_net,
+        "drone_net": drone_net,
+        "truck_out_arcs": truck_out_arcs,
+        "truck_in_arcs": truck_in_arcs,
+        "drone_out_arcs": drone_out_arcs,
+        "drone_in_arcs": drone_in_arcs,
+        "truck_travel_times": truck_travel_times,
+        "drone_travel_times": drone_travel_times,
+        "demand_weights": demand_weights
+    }
+    net = Network(num_trucks, num_drones_per_truck, a_lb, **params)
+
+
+def transform_network():
+    """
+    Turn the original network into the transformed network
+    """
+    global net, transformed_net
+    transformed_net = TransformedNetwork(net)
 
 
 def is_close(x, y):
     return True if abs(x - y) < close_tolerance else False
+
+
+def is_integer(num):
+    return abs(num - round(num)) <= close_tolerance
