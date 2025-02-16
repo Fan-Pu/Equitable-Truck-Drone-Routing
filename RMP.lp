@@ -3,7 +3,7 @@
 \   Variables        : 7 (7 binary, 0 integer, 0 implicit integer, 0 continuous)
 \   Constraints      : 5
 Minimize
- Obj: +533 z_0 +106 z_1 +86 z_2 +119 z_3 +108 z_4 +85 z_5 +104 z_6
+ Obj: +594 z_0 +106 z_1 +86 z_2 +119 z_3 +108 z_4 +85 z_5 +104 z_6
 Subject to
  visit_customer_0: +1 z_0 +1 z_1 = +1
  visit_customer_1: +1 z_0 +1 z_2 = +1

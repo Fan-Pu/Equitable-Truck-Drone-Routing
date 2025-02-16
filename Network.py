@@ -1,3 +1,6 @@
+epsilon_weight = 0.01
+
+
 class Network:
     def __init__(self, num_trucks, num_drones, a_lb, **kwargs):
         """Class for storing network data"""
@@ -18,3 +21,6 @@ class Network:
         self.num_trucks = num_trucks
         self.num_drones = num_drones
         self.a_lb = a_lb
+
+        for node in self.hubs:
+            self.demand_weights[self.all_nodes_indices[node]] = epsilon_weight

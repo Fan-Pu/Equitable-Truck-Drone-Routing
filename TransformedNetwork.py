@@ -1,8 +1,10 @@
 import copy
+import heapq
 from itertools import combinations
 
 
 class TransformedNetwork:
+
     def __init__(self, net):
         """
         the class of the transformed network
@@ -16,9 +18,18 @@ class TransformedNetwork:
         self.depot_sink = copy.deepcopy(net.depot_sink)
         self.all_nodes = copy.deepcopy(net.all_nodes)
         self.all_nodes_indices = copy.deepcopy(net.all_nodes_indices)
-        self.out_arcs = {key: [] for key in self.all_nodes}
-        self.in_arcs = {key: [] for key in self.all_nodes}
+        self.out_arcs = None
+        self.in_arcs = None
         self.travel_times = {}
+        self.a_lb = {}
+        self.a_ub = {}
+        self.demand_weights = {}
+        self.arcs_1 = []  # black links
+        self.arcs_2 = []  # blue links
+        self.arcs_3 = []  # green links
+        self.arcs_4 = []  # orange links
+        self.arcs_5 = []  # purple links
+        self.max_timespan = -1
 
         # duplicate the nodes
         new_nodes = []
@@ -27,8 +38,8 @@ class TransformedNetwork:
             if node in net.hubs:
                 needs_duplicate = True
             elif node in net.customers:
-                for node_j in net.truck_in_arcs[node]:
-                    if node_j in net.hubs:
+                for node_i in net.drone_in_arcs[node]:
+                    if node_i in net.hubs:
                         needs_duplicate = True
                         break
 
@@ -37,8 +48,6 @@ class TransformedNetwork:
                 new_nodes.append(new_node)
                 self.all_nodes.append(new_node)
                 self.all_nodes_indices[new_node] = len(self.all_nodes) - 1
-                self.out_arcs[new_node] = []
-                self.in_arcs[new_node] = []
         for new_node in new_nodes:
             node = new_node.replace("_prime", "")
             if node in net.hubs:
@@ -46,12 +55,16 @@ class TransformedNetwork:
             elif node in net.customers:
                 self.customers.append(new_node)
 
+        self.out_arcs = {key: [] for key in self.all_nodes}
+        self.in_arcs = {key: [] for key in self.all_nodes}
+
         # black arcs
         for node, arcs in net.truck_out_arcs.items():
             for node_j in arcs:
                 self.out_arcs[node].append(node_j)
                 self.in_arcs[node_j].append(node)
                 self.travel_times[(node, node_j)] = net.truck_travel_times[(node, node_j)]
+                self.arcs_1.append((node, node_j))
 
         # blue arc
         for node in self.hubs:
@@ -61,6 +74,7 @@ class TransformedNetwork:
             self.out_arcs[node].append(node_prime)
             self.in_arcs[node_prime].append(node)
             self.travel_times[(node, node_prime)] = 0
+            self.arcs_2.append((node, node_prime))
 
         # green arc
         for node in net.hubs:
@@ -70,6 +84,7 @@ class TransformedNetwork:
                 self.out_arcs[node_prime].append(node_j_prime)
                 self.in_arcs[node_j_prime].append(node_prime)
                 self.travel_times[(node_prime, node_j_prime)] = net.drone_travel_times[(node, node_j)]
+                self.arcs_3.append((node_prime, node_j_prime))
 
         # orange arc
         omega_D_set = {}
@@ -85,10 +100,12 @@ class TransformedNetwork:
                 self.out_arcs[node_i_prime].append(node_j_prime)
                 self.in_arcs[node_j_prime].append(node_i_prime)
                 self.travel_times[(node_i_prime, node_j_prime)] = self.travel_times[(node_prime, node_j_prime)]
+                self.arcs_4.append((node_i_prime, node_j_prime))
                 # j to i
                 self.out_arcs[node_j_prime].append(node_i_prime)
                 self.in_arcs[node_i_prime].append(node_j_prime)
                 self.travel_times[(node_j_prime, node_i_prime)] = self.travel_times[(node_prime, node_i_prime)]
+                self.arcs_4.append((node_j_prime, node_i_prime))
 
         # purple arc
         omega_K_set = {}
@@ -105,3 +122,62 @@ class TransformedNetwork:
                     self.out_arcs[node_i_prime].append(node_j)
                     self.in_arcs[node_j].append(node_i_prime)
                     self.travel_times[(node_i_prime, node_j)] = net.truck_travel_times[(node, node_j)]
+                    self.arcs_5.append((node_i_prime, node_j))
+
+        # get the lower bound of the arrival times at the customer nodes
+        for node in self.all_nodes:
+            self.a_lb[node] = 0
+
+        # set the delivery demand
+        for n, demand in net.demand_weights.items():
+            node = net.all_nodes[n]
+            self.demand_weights[node] = demand
+            node_prime = node + "_prime"
+            if node_prime in self.all_nodes:
+                self.demand_weights[node_prime] = demand
+
+        self.max_timespan = self.astar_longest_path()
+
+    def astar_longest_path(self):
+        """
+        A* Search for the Longest Elementary Path.
+        """
+        start_node = self.depot_source
+        end_node = self.depot_sink
+
+        # Priority queue (max-heap), elements are (-f(n), cur_node, visited_nodes, g(n))
+        Q = [(-self.heuristic(start_node), start_node, [start_node], 0)]
+        heapq.heapify(Q)
+
+        # Longest path travel time estimate
+        T = {node: float('-inf') for node in self.all_nodes}
+        T[start_node] = 0
+
+        while Q:
+            _, node, visited, g_n = heapq.heappop(Q)
+
+            if node == end_node:
+                return T[node]  # Return longest travel time
+
+            for node_prime in self.out_arcs[node]:
+                if node_prime not in visited:
+                    g_n_prime = g_n + self.travel_times[node, node_prime]
+                    h_n_prime = self.heuristic(node_prime)
+                    f_n_prime = g_n_prime + h_n_prime
+
+                    if g_n_prime > T[node_prime]:  # Update T if found a longer path
+                        T[node_prime] = g_n_prime
+
+                    # Insert new state into priority queue
+                    heapq.heappush(Q, (-f_n_prime, node_prime, visited + [node_prime], g_n_prime))
+
+        return float('-inf')  # No path found
+
+    def heuristic(self, node):
+        """
+        Heuristic function: Returns the maximum travel time of an outgoing edge.
+        """
+        if len(self.out_arcs[node]) > 0:
+            return max([self.travel_times[(node, node_j)] for node_j in self.out_arcs[node]])
+        else:
+            return 0

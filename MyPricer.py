@@ -1,10 +1,9 @@
 from pyscipopt import Pricer, SCIP_RESULT
 
-import GeneralHelper
 import RMP
 from BMP import BMP
 from BSP import BSP
-from GeneralHelper import *
+from LSA import *
 from NodeInfo import NodeInfo
 
 
@@ -24,9 +23,10 @@ class MyPricer(Pricer):
             RMP.node_infos[node_id].columns = RMP.initial_route
 
         # retrieve the dual solutions
-        duals = []
-        for c in RMP.constraints:
-            duals.append(self.model.getDualsolLinear(c))
+        duals = {"mu": [], "nu": -1}
+        for c in RMP.constraints[:-1]:
+            duals["mu"].append(self.model.getDualsolLinear(c))
+        duals["nu"] = self.model.getDualsolLinear(RMP.constraints[-1])
 
         var_vals = []
         for var in RMP.z_list:
@@ -50,6 +50,10 @@ class MyPricer(Pricer):
                 # add the most promising route to the RMP
                 self.add_column_to_master(route_key, node_id)
                 RMP.node_infos[node_id].columns.append(route_key)
+
+        # bi-directional label setting
+        label_setting = BiDirectionalLabelSetting(duals)
+        label_setting.solve()
 
         # solve the pricing problem (Benders loop)
         iter_num = 0

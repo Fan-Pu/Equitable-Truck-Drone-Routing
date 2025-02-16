@@ -131,7 +131,7 @@ def create_random_truck_drone_network():
         for j in all_locations:
             if j == i:
                 continue
-            if random.random() > 0.5:  # Randomly decide if an arc exists
+            if random.random() > 0.5 and i not in hubs and j not in hubs:  # Randomly decide if an arc exists
                 travel_time = random.randint(truck_min_t, truck_max_t)
                 update_arc_infos(i, j, travel_time, True, truck_travel_times, truck_out_arcs, truck_in_arcs,
                                  drone_travel_times, drone_out_arcs, drone_in_arcs)
@@ -209,3 +209,9 @@ def is_close(x, y):
 
 def is_integer(num):
     return abs(num - round(num)) <= close_tolerance
+
+
+def is_subsequence(sub, full):
+    """Check if 'sub' is a subsequence of 'full' while preserving order."""
+    it = iter(full)
+    return all(node in it for node in sub)
