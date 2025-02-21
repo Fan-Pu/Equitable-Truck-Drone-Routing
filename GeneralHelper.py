@@ -1,9 +1,12 @@
 import random
+import re
 
 import networkx as nx
 
 from Network import Network
 from TransformedNetwork import TransformedNetwork
+
+test_path = ["H2", "H2_prime", "C1_prime", "Sink"]
 
 seed = 2024
 
@@ -29,7 +32,7 @@ drone_endurance = 150
 # for sub-tour elimination
 epsilon = 1
 
-num_customers = 4
+num_customers = 3
 num_hubs = 2
 num_trucks = 2
 num_drones_per_truck = 2
@@ -96,7 +99,7 @@ def create_random_truck_drone_network():
     drone_in_arcs = {n: [] for n in all_nodes}
 
     truck_travel_times = {}
-    drone_travel_times = {}
+    drone_travel_times = {}  # for round trip
 
     # generate truck arcs *************************************************************
 
@@ -215,3 +218,46 @@ def is_subsequence(sub, full):
     """Check if 'sub' is a subsequence of 'full' while preserving order."""
     it = iter(full)
     return all(node in it for node in sub)
+
+
+def is_sublist_ordered(sub, main):
+    return bool(re.search(r'\b' + r', '.join(map(str, sub)) + r'\b', ', '.join(map(str, main))))
+
+
+def get_latest_hub(network, path):
+    """
+    given a path, return the latest arrived hub
+    """
+    result = None
+    for node in reversed(path):
+        if node in network.hubs:
+            result = node.replace("_prime", "")
+            break
+    return result
+
+
+def get_arrive_time(arrival_time, node_i, node_j, last_hub, sync_time, network):
+    """
+    return the arrival time at node_j
+    """
+    if (node_i, node_j) in network.arcs_1:
+        arrival_time += network.travel_times[(node_i, node_j)]
+    elif (node_i, node_j) in network.arcs_5:
+        if last_hub is None:
+            travel_time = min(network.travel_times[(node_i, node_j)].values())
+        else:
+            travel_time = network.travel_times[(node_i, node_j)][last_hub]
+        arrival_time += travel_time
+    elif (node_i, node_j) in network.arcs_2:
+        pass
+    # arcs 2 and 4
+    else:
+        if (node_i, node_j) in network.arcs_4:
+            if last_hub is None:
+                travel_time = min(network.travel_times[(node_i, node_j)].values())
+            else:
+                travel_time = network.travel_times[(node_i, node_j)][last_hub]
+            arrival_time += travel_time
+        else:
+            arrival_time = sync_time + network.travel_times[(node_i, node_j)]
+    return arrival_time

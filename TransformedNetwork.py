@@ -18,6 +18,8 @@ class TransformedNetwork:
         self.depot_sink = copy.deepcopy(net.depot_sink)
         self.all_nodes = copy.deepcopy(net.all_nodes)
         self.all_nodes_indices = copy.deepcopy(net.all_nodes_indices)
+        self.origin_truck_arcs = copy.deepcopy(net.truck_arcs)
+        self.origin_drone_arcs = copy.deepcopy(net.drone_arcs)
         self.out_arcs = None
         self.in_arcs = None
         self.travel_times = {}
@@ -58,6 +60,9 @@ class TransformedNetwork:
         self.out_arcs = {key: [] for key in self.all_nodes}
         self.in_arcs = {key: [] for key in self.all_nodes}
 
+        self.node_hubs_set_for_drone = {node: [] for node in self.all_nodes if node not in self.hubs}
+        self.node_hubs_set_for_truck = {node: [] for node in self.all_nodes if node not in self.hubs}
+
         # black arcs
         for node, arcs in net.truck_out_arcs.items():
             for node_j in arcs:
@@ -89,7 +94,6 @@ class TransformedNetwork:
         # orange arc
         omega_D_set = {}
         for node in net.hubs:
-            node_prime = node + "_prime"
             omega_D_set[node] = []
             for node_j in net.drone_out_arcs[node]:
                 omega_D_set[node].append(node_j)
@@ -99,12 +103,10 @@ class TransformedNetwork:
                 # i to j
                 self.out_arcs[node_i_prime].append(node_j_prime)
                 self.in_arcs[node_j_prime].append(node_i_prime)
-                self.travel_times[(node_i_prime, node_j_prime)] = self.travel_times[(node_prime, node_j_prime)]
                 self.arcs_4.append((node_i_prime, node_j_prime))
                 # j to i
                 self.out_arcs[node_j_prime].append(node_i_prime)
                 self.in_arcs[node_i_prime].append(node_j_prime)
-                self.travel_times[(node_j_prime, node_i_prime)] = self.travel_times[(node_prime, node_i_prime)]
                 self.arcs_4.append((node_j_prime, node_i_prime))
 
         # purple arc
@@ -121,8 +123,33 @@ class TransformedNetwork:
                     # i to j
                     self.out_arcs[node_i_prime].append(node_j)
                     self.in_arcs[node_j].append(node_i_prime)
-                    self.travel_times[(node_i_prime, node_j)] = net.truck_travel_times[(node, node_j)]
                     self.arcs_5.append((node_i_prime, node_j))
+
+        # update self.node_hubs_set
+        for node in self.node_hubs_set_for_drone.keys():
+            _node = node.replace("_prime", "")
+            for hub, node_list in omega_D_set.items():
+                # the node is accessible from the hub
+                self.node_hubs_set_for_drone[node].append(hub) if (
+                        _node in node_list and hub not in self.node_hubs_set_for_drone[node]) else None
+        for node in self.node_hubs_set_for_truck.keys():
+            _node = node.replace("_prime", "")
+            for hub, node_list in omega_K_set.items():
+                # the node is accessible from the hub
+                self.node_hubs_set_for_truck[node].append(hub) if (
+                        _node in node_list and hub not in self.node_hubs_set_for_truck[node]) else None
+
+        # set travel times for orange and purple arcs
+        for node_i_prime, node_j_prime in self.arcs_4:
+            key = (node_i_prime, node_j_prime)
+            self.travel_times[key] = {}
+            for hub in self.node_hubs_set_for_drone[node_j_prime]:
+                self.travel_times[key][hub] = net.drone_travel_times[(hub, node_j_prime.replace("_prime", ""))]
+        for node_i_prime, node_j in self.arcs_5:
+            key = (node_i_prime, node_j)
+            self.travel_times[key] = {}
+            for hub in self.node_hubs_set_for_truck[node_j]:
+                self.travel_times[key][hub] = net.truck_travel_times[(hub, node_j)]
 
         # get the lower bound of the arrival times at the customer nodes
         for node in self.all_nodes:
@@ -136,6 +163,8 @@ class TransformedNetwork:
             if node_prime in self.all_nodes:
                 self.demand_weights[node_prime] = demand
 
+        self.out_arcs = {node: list(dict.fromkeys(arc_list)) for node, arc_list in self.out_arcs.items()}
+        self.in_arcs = {node: list(dict.fromkeys(arc_list)) for node, arc_list in self.in_arcs.items()}
         self.max_timespan = self.astar_longest_path()
 
     def astar_longest_path(self):

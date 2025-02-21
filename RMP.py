@@ -82,7 +82,7 @@ class RMP:
         arrive_time = GeneralHelper.net.truck_travel_times[
             (GeneralHelper.net.depot_source, GeneralHelper.net.customers[0])]
         # cost = (arrive_time - GeneralHelper.net.a_lb[GeneralHelper.net.customers[0]]) ** 2
-        cost = cost_scale * (arrive_time - GeneralHelper.net.a_lb[GeneralHelper.net.customers[0]])
+        cost = cost_scale * (arrive_time - GeneralHelper.net.a_lb[GeneralHelper.net.customers[0]]) ** 2
         return_time = arrive_time  # the time it returns to depot sink
         for i in range(len(GeneralHelper.net.customers) - 1):
             n = GeneralHelper.net.customers[i]
@@ -104,7 +104,7 @@ class RMP:
             truck_route = [GeneralHelper.net.depot_source, n_name, GeneralHelper.net.depot_sink]
             arrive_time = GeneralHelper.net.truck_travel_times[(GeneralHelper.net.depot_source, n_name)]
             # cost = (arrive_time - GeneralHelper.net.a_lb[GeneralHelper.net.customers[0]]) ** 2
-            cost = cost_scale * (arrive_time - GeneralHelper.net.a_lb[n_name])
+            cost = cost_scale * (arrive_time - GeneralHelper.net.a_lb[n_name]) ** 2
             return_time = arrive_time + GeneralHelper.net.truck_travel_times[(n_name, GeneralHelper.net.depot_sink)]
             cost += return_time
             drone_route = []

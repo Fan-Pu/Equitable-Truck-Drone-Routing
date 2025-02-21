@@ -21,6 +21,14 @@ class Network:
         self.num_trucks = num_trucks
         self.num_drones = num_drones
         self.a_lb = a_lb
+        self.truck_arcs = []
+        self.drone_arcs = []
+        for node_i, arcs in self.truck_out_arcs.items():
+            for node_j in arcs:
+                self.truck_arcs.append((node_i, node_j))
+        for node_i, arcs in self.drone_out_arcs.items():
+            for node_j in arcs:
+                self.drone_arcs.append((node_i, node_j))
 
         for node in self.hubs:
             self.demand_weights[self.all_nodes_indices[node]] = epsilon_weight
