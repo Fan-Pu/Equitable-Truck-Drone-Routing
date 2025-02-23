@@ -6,7 +6,11 @@ import networkx as nx
 from Network import Network
 from TransformedNetwork import TransformedNetwork
 
-test_path = ["H2", "H2_prime", "C1_prime", "Sink"]
+test_path = ["Source", "H2", "H2_prime", "C1_prime", "Sink"]
+
+forward_dominance_num = 0
+backward_dominance_num = 0
+label_merge_num = 0
 
 seed = 2024
 
@@ -32,8 +36,8 @@ drone_endurance = 150
 # for sub-tour elimination
 epsilon = 1
 
-num_customers = 3
-num_hubs = 2
+num_customers = 5
+num_hubs = 3
 num_trucks = 2
 num_drones_per_truck = 2
 
@@ -229,11 +233,13 @@ def get_latest_hub(network, path):
     given a path, return the latest arrived hub
     """
     result = None
+    idx = -1
     for node in reversed(path):
         if node in network.hubs:
             result = node.replace("_prime", "")
+            idx = path.index(node)
             break
-    return result
+    return result, idx
 
 
 def get_arrive_time(arrival_time, node_i, node_j, last_hub, sync_time, network):

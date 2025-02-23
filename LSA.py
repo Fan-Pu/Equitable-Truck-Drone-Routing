@@ -1,13 +1,11 @@
 import concurrent.futures
 import copy
+import time
 
 import numpy as np
 
 import GeneralHelper
 from GeneralHelper import *
-
-forward_dominance_num = 0
-backward_dominance_num = 0
 
 
 class LabelForward:
@@ -20,7 +18,7 @@ class LabelForward:
         self.cost = cost  # Accumulated cost
         self.net = GeneralHelper.transformed_net
 
-    def dominates(self, other):
+    def dominates(self, other, duals=None):
         """Check if this label dominates another."""
         strict = False  # check whether contains a strict condition
 
@@ -61,8 +59,7 @@ class LabelForward:
             strict = True
 
         if strict:
-            global forward_dominance_num
-            forward_dominance_num += 1
+            GeneralHelper.forward_dominance_num += 1
 
         # here all conditions are satisfied, we need at least one is strict
         return strict
@@ -71,7 +68,6 @@ class LabelForward:
         """
         check whether we can extend the current label to node_j
         """
-        result = True
         node_i = self.path[-1]
         _node_j = node_j.replace("_prime", "")
         arc = (node_i, node_j)
@@ -83,37 +79,37 @@ class LabelForward:
             else:
                 dup_node = node_j + "_prime"
             if node_j in self.path or dup_node in self.path:
-                result = False
+                return False
         else:  # not a customer node
             if node_j in self.path:
-                result = False
+                return False
 
         # check condition 2
         if arc in self.net.arcs_4:
-            hub = get_latest_hub(self.net, self.path)
+            hub, _ = get_latest_hub(self.net, self.path)
             if (hub, _node_j) not in self.net.origin_drone_arcs:
-                result = False
+                return False
 
         # check condition 3
         if arc in self.net.arcs_5:
-            hub = get_latest_hub(self.net, self.path)
+            hub, _ = get_latest_hub(self.net, self.path)
             if (hub, _node_j) not in self.net.origin_truck_arcs:
-                result = False
+                return False
 
         # check condition 4
         if self.arrival_time < self.net.a_lb[node_i]:
-            result = False
+            return False
 
         # check condition 5
         if self.truck_load + self.net.demand_weights[node_j] > truck_max_weight:
-            result = False
+            return False
 
         # check condition 6
         if arc in self.net.arcs_3 or arc in self.net.arcs_4:
             if self.drones_used >= num_drones_per_truck:
-                result = False
+                return False
 
-        return result
+        return True
 
     def extend(self, node_j, duals):
         """
@@ -129,7 +125,7 @@ class LabelForward:
             label_j.drones_used = 0
 
         # update a
-        hub = get_latest_hub(self.net, self.path)
+        hub, _ = get_latest_hub(self.net, self.path)
         label_j.arrival_time = get_arrive_time(self.arrival_time, node_i, node_j, hub, self.sync_time, self.net)
 
         # update sync time
@@ -216,8 +212,7 @@ class LabelBackward:
             strict = True
 
         if strict:
-            global backward_dominance_num
-            backward_dominance_num += 1
+            GeneralHelper.backward_dominance_num += 1
 
         # here all conditions are satisfied, we need at least one is strict
         return strict
@@ -226,12 +221,8 @@ class LabelBackward:
         """
         check whether we can extend the current label to node_j
         """
-        result = True
         node_i = self.path[0]
         _node_j = node_j.replace("_prime", "")
-
-        if self.path == test_path and node_j == "Source":
-            sdas = 0
 
         # check condition 1
         if node_j in self.net.customers:  # a customer node
@@ -240,19 +231,19 @@ class LabelBackward:
             else:
                 dup_node = node_j + "_prime"
             if node_j in self.path or dup_node in self.path:
-                result = False
+                return False
         else:  # not a customer node
             if node_j in self.path:
-                result = False
+                return False
 
         # check condition 2
         if self.truck_load + self.net.demand_weights[node_j] > truck_max_weight:
-            result = False
+            return False
 
         # check condition 3
         if (node_i, node_j) in self.net.arcs_3 or (node_i, node_j) in self.net.arcs_4:
             if self.drones_used >= num_drones_per_truck:
-                result = False
+                return False
 
         # check condition 4
         if node_j in self.net.hubs and "_prime" in node_j:
@@ -271,12 +262,12 @@ class LabelBackward:
                 _node = node.replace("_prime", "")
                 if node == prefix[-1]:
                     if (_node_j, _node) not in self.net.origin_truck_arcs:
-                        result = False
+                        return False
                 else:
                     if (_node_j, _node) not in self.net.origin_drone_arcs:
-                        result = False
+                        return False
 
-        return result
+        return True
 
     def extend(self, node_j):
         """
@@ -348,34 +339,28 @@ class BiDirectionalLabelSetting:
                 is_feasible = label.allow_extend(node_j)
                 if is_feasible:
                     label_j = label.extend(node_j, self.duals)
+                    is_new_label = True if label_j not in self.forward_labels[node_j] else False
                     # check dominance
-                    dominated_by_j = []
-                    other_dominates_j = False
-                    for other_label in self.forward_labels[node_j]:
-                        if label_j.dominates(other_label):
-                            dominated_by_j.append(other_label)
-                        elif other_label.dominates(label_j):
-                            other_dominates_j = True
-                            break  # discard label_j
+                    dominated_by_j, other_dominates_j = (
+                        self.dominance_check(label_j, self.forward_labels[node_j]))
                     # remove the labels dominated by j
                     self.forward_labels[node_j] = list(set(self.forward_labels[node_j]) - set(dominated_by_j))
                     self.forward_label_list = list(set(self.forward_label_list) - set(dominated_by_j))
                     # if j is not dominated, save it
                     if not other_dominates_j:
-                        self.forward_labels[node_j].append(label_j) if label_j not in self.forward_labels[
-                            node_j] else None
+                        self.forward_labels[node_j].append(label_j) if is_new_label else None
                         # only if this label are possible to be extended
-                        if label_j.path[-1] != self.net.depot_sink and len(self.net.out_arcs[label_j.path[-1]]) > 0:
+                        if node_j != self.net.depot_sink and len(self.net.out_arcs[node_j]) > 0:
                             self.forward_label_list.append(label_j)
                             self.explored_forward_paths.append(label_j.path)
                         # check whether it is completed
-                        if label_j.path[-1] == self.net.depot_sink:
+                        if node_j == self.net.depot_sink:
                             if label_j.cost < self.best_solution[0]:
                                 self.best_solution = (label_j.cost, label_j.path)
                             if label_j.path not in self.explored_solutions:
                                 self.explored_solutions.append(label_j.path)
-
-                        new_labels.append(label_j)
+                        # only append the labels that have not been added
+                        new_labels.append(label_j) if is_new_label else None
                         new_labels_terminations.append(node_j) if node_j not in new_labels_terminations else None
         return new_labels_terminations, new_labels
 
@@ -396,21 +381,16 @@ class BiDirectionalLabelSetting:
                 is_feasible = label.allow_extend(node_j)
                 if is_feasible:
                     label_j = label.extend(node_j)
+                    is_new_label = True if label_j not in self.backward_labels[node_j] else False
                     complete = False  # whether label_j is complete
-                    if label_j.path[0] == self.net.depot_source:  # check whether it is completed
+                    if node_j == self.net.depot_source:  # check whether it is completed
                         complete = True
                         label_j.cost = self.calculate_cost(0, 0, -self.duals["nu"],
                                                            label_j.path, self.duals)
 
                     # check dominance
-                    dominated_by_j = []
-                    other_dominates_j = False
-                    for other_label in self.backward_labels[node_j]:
-                        if label_j.dominates(other_label, self.duals):
-                            dominated_by_j.append(other_label)
-                        elif other_label.dominates(label_j, self.duals):
-                            other_dominates_j = True
-                            break  # discard label_j
+                    dominated_by_j, other_dominates_j = (
+                        self.dominance_check(label_j, self.backward_labels[node_j]))
                     # remove the labels dominated by j
                     self.backward_labels[node_j] = list(set(self.backward_labels[node_j]) - set(dominated_by_j))
                     self.backward_label_list = list(set(self.backward_label_list) - set(dominated_by_j))
@@ -419,7 +399,7 @@ class BiDirectionalLabelSetting:
                         self.backward_labels[node_j].append(label_j) if label_j not in self.backward_labels[
                             node_j] else None
                         # only if this label are possibly to be extended
-                        if label_j.path[0] != self.net.depot_source and len(self.net.in_arcs[label_j.path[0]]) > 0:
+                        if node_j != self.net.depot_source and len(self.net.in_arcs[node_j]) > 0:
                             self.backward_label_list.append(label_j)
                             self.explored_backward_paths.append(label_j.path)
                         # check whether it is completed, update incumbent
@@ -429,7 +409,7 @@ class BiDirectionalLabelSetting:
                             if label_j.path not in self.explored_solutions:
                                 self.explored_solutions.append(label_j.path)
 
-                        new_labels.append(label_j)
+                        new_labels.append(label_j) if is_new_label else None
                         new_labels_terminations.append(node_j) if node_j not in new_labels_terminations else None
         return new_labels_terminations, new_labels
 
@@ -441,19 +421,67 @@ class BiDirectionalLabelSetting:
                 if f_label not in new_forward and b_label not in new_backwards:
                     continue
                 # at least one is the new label
-                if (set(f_label.path) & set(b_label.path)) == {node} and \
-                        f_label.truck_load + b_label.truck_load <= truck_max_weight and \
-                        f_label.drones_used + b_label.drones_used <= num_drones_per_truck:
+                if self.check_merge_feasibility(f_label, b_label, f_label.path[-1]):
                     complete_path = f_label.path + b_label.path[1:]
                     # avoid multi comparisons
                     if complete_path in self.explored_solutions:
                         continue
+                    if complete_path == test_path:
+                        sdas = 0
+                    # this is a new unexplored label
+                    last_hub = next(
+                        (node.replace("_prime", "") for node in reversed(f_label.path) if node in self.net.hubs), None)
                     total_cost = self.calculate_cost(f_label.arrival_time, f_label.sync_time, f_label.cost,
-                                                     b_label.path, self.duals)
+                                                     b_label.path, self.duals, last_hub)
+                    GeneralHelper.label_merge_num += 1
+                    # update incumbent
                     if total_cost < self.best_solution[0]:
                         self.best_solution = (total_cost, complete_path)
                     if complete_path not in self.explored_solutions:
                         self.explored_solutions.append(complete_path)
+
+    def check_merge_feasibility(self, f_label, b_label, common_node):
+        if (set(f_label.path) & set(b_label.path)) != {common_node}:
+            return False
+        if f_label.truck_load + b_label.truck_load > truck_max_weight:
+            return False
+        if f_label.drones_used + b_label.drones_used > num_drones_per_truck:
+            return False
+        hub, idx = get_latest_hub(self.net, f_label.path)
+        # condition 2
+        if "_prime" in common_node and common_node in self.net.customers:
+            # find the prefix
+            prefix = f_label.path[idx + 1:-1] + [b_label.path[0]]
+
+            for i, (node, node_next) in enumerate(zip(b_label.path, b_label.path[1:])):
+                prefix.append(node_next)
+                if (node, node_next) in self.net.arcs_5:
+                    break
+            else:
+                raise Exception("prefix is not found!")
+            # check the validity
+            for node in prefix:
+                _node = node.replace("_prime", "")
+                if node == prefix[-1]:
+                    if (hub, _node) not in self.net.origin_truck_arcs:
+                        return False
+                else:
+                    if (hub, _node) not in self.net.origin_drone_arcs:
+                        return False
+        # condition 3
+        node_i = common_node
+        arrive_time = f_label.arrival_time
+        sync_time = f_label.sync_time
+        for node_j in b_label.path[1:]:
+            arrive_time = get_arrive_time(arrive_time, node_i, node_j, hub, sync_time, self.net)
+            if node_j in self.net.customers and arrive_time < self.net.a_lb[node_j.replace("_prime", "")]:
+                return False
+            node_i = node_j
+            if node_j in self.net.hubs:
+                sync_time = arrive_time
+                hub = node_j.replace("_prime", "")
+
+        return True
 
     def solve(self):
         """
@@ -467,7 +495,7 @@ class BiDirectionalLabelSetting:
         self.backward_label_list.append(LabelBackward(
             [self.net.depot_sink], 0, 0, [self.net.max_timespan])
         )
-
+        s_time = time.time()
         while True:
             # forward and backward labeling are feasible
             if len(self.forward_label_list) > 0 and len(self.backward_label_list) > 0:
@@ -512,17 +540,18 @@ class BiDirectionalLabelSetting:
 
                     arrival_times.append(arrive_time)
                     sync_times.append(sync_time)
-                print(forward_dominance_num)
-                print(backward_dominance_num)
+                print(f"forward dominance check passed: {GeneralHelper.forward_dominance_num}")
+                print(f"backward dominance check passed: {GeneralHelper.backward_dominance_num}")
+                print(f"label merge found unexplored solutions: {GeneralHelper.label_merge_num}")
+                runtime = time.time() - s_time
                 return self.best_solution
 
-    def calculate_cost(self, arrival_time_i, sync_time_i, cost_i, partial_path, duals):
+    def calculate_cost(self, arrival_time_i, sync_time_i, cost_i, partial_path, duals, last_hub=None):
         """
         node_i is the first point on the partial path, calculate the cost of this partial path
         """
         sync_time = sync_time_i
         arrival_time = arrival_time_i
-        last_hub = None
         full_cost = cost_i
         for j in range(1, len(partial_path)):
             node_pre = partial_path[j - 1]
@@ -549,3 +578,20 @@ class BiDirectionalLabelSetting:
                 pass
 
         return full_cost
+
+    def dominance_check(self, label_j, other_labels):
+        """Check if label_j dominates any other label in a parallelized manner."""
+        dominated_by_j = []
+        other_dominates_j = False
+
+        for other in other_labels:
+            j_dominates = label_j.dominates(other, self.duals)
+            other_dominates = other.dominates(label_j, self.duals)
+
+            if j_dominates:
+                dominated_by_j.append(other)
+            if other_dominates:
+                other_dominates_j = True
+                break  # Stop checking if label_j is already dominated
+
+        return dominated_by_j, other_dominates_j
