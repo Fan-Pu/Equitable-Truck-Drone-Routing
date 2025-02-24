@@ -12,10 +12,11 @@ class MyBranchingRule(Branchrule):
         Executes the branching rule during LP relaxation.
         """
 
-        branch_cands, branch_cand_sols, branch_cand_fracs, ncands, npriocands, nimplcands = self.model.getLPBranchCands()
+        branch_cands, branch_cand_sols, branch_cand_fracs, ncands, npriocands, nimplcands = \
+            self.model.getLPBranchCands()
 
         if ncands == 0:
-            return {"result": "didnotrun"}
+            return SCIP_RESULT.DIDNOTRUN
 
         # rank the candidate solution according to the value of |x-0.5|
         # Compute distance to 0.5
@@ -66,4 +67,35 @@ class MyBranchingRule(Branchrule):
             node_right_id].branches = current_node_info.columns.copy(), current_node_info.branches.copy()
         RMP.node_infos[node_right_id].branches.append((branch_z_names, int(sum_branch_z_val) + 1))
 
-        return {"result": SCIP_RESULT.BRANCHED}
+        return SCIP_RESULT.BRANCHED
+
+    def branchexecps(self, allowaddcons):
+        """
+        Handles branching for pseudo solutions (no LP relaxation available).
+        This method is needed to ensure SCIP can still branch even if LP is skipped.
+        """
+
+        # Get variables that can be branched on
+        branch_cands, ncands, npriocands = self.model.getPseudoBranchCands()
+
+        if ncands == 0:
+            return SCIP_RESULT.DIDNOTRUN  # No branching needed
+
+        # Choose a variable to branch on (e.g., first unfixed variable)
+        for var in branch_cands:
+            if var.vtype in ["BINARY", "INTEGER"]:
+                var_val = self.model.getVal(var)  # Get the variable's current value
+
+                node_left = self.model.createChild(0.0, self.model.getLocalEstimate())
+                node_right = self.model.createChild(0.0, self.model.getLocalEstimate())
+
+                # Branching by forcing the variable to take an integer value
+                left_cons = self.model.createConsFromExpr(var <= int(var_val))
+                right_cons = self.model.createConsFromExpr(var >= int(var_val) + 1)
+
+                self.model.addConsNode(node_left, left_cons)
+                self.model.addConsNode(node_right, right_cons)
+
+                return SCIP_RESULT.BRANCHED  # SCIP recognizes branching was done
+
+        return SCIP_RESULT.DIDNOTFIND  # No branching performed

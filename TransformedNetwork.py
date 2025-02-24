@@ -26,11 +26,11 @@ class TransformedNetwork:
         self.a_lb = {}
         self.a_ub = {}
         self.demand_weights = {}
-        self.arcs_1 = []  # black links
-        self.arcs_2 = []  # blue links
-        self.arcs_3 = []  # green links
-        self.arcs_4 = []  # orange links
-        self.arcs_5 = []  # purple links
+        self.arcs_1 = set()  # black links
+        self.arcs_2 = set()  # blue links
+        self.arcs_3 = set()  # green links
+        self.arcs_4 = set()  # orange links
+        self.arcs_5 = set()  # purple links
         self.max_timespan = -1
 
         # duplicate the nodes
@@ -69,7 +69,7 @@ class TransformedNetwork:
                 self.out_arcs[node].append(node_j)
                 self.in_arcs[node_j].append(node)
                 self.travel_times[(node, node_j)] = net.truck_travel_times[(node, node_j)]
-                self.arcs_1.append((node, node_j))
+                self.arcs_1.add((node, node_j))
 
         # blue arc
         for node in self.hubs:
@@ -79,7 +79,7 @@ class TransformedNetwork:
             self.out_arcs[node].append(node_prime)
             self.in_arcs[node_prime].append(node)
             self.travel_times[(node, node_prime)] = 0
-            self.arcs_2.append((node, node_prime))
+            self.arcs_2.add((node, node_prime))
 
         # green arc
         for node in net.hubs:
@@ -89,7 +89,7 @@ class TransformedNetwork:
                 self.out_arcs[node_prime].append(node_j_prime)
                 self.in_arcs[node_j_prime].append(node_prime)
                 self.travel_times[(node_prime, node_j_prime)] = net.drone_travel_times[(node, node_j)]
-                self.arcs_3.append((node_prime, node_j_prime))
+                self.arcs_3.add((node_prime, node_j_prime))
 
         # orange arc
         omega_D_set = {}
@@ -103,11 +103,11 @@ class TransformedNetwork:
                 # i to j
                 self.out_arcs[node_i_prime].append(node_j_prime)
                 self.in_arcs[node_j_prime].append(node_i_prime)
-                self.arcs_4.append((node_i_prime, node_j_prime))
+                self.arcs_4.add((node_i_prime, node_j_prime))
                 # j to i
                 self.out_arcs[node_j_prime].append(node_i_prime)
                 self.in_arcs[node_i_prime].append(node_j_prime)
-                self.arcs_4.append((node_j_prime, node_i_prime))
+                self.arcs_4.add((node_j_prime, node_i_prime))
 
         # purple arc
         omega_K_set = {}
@@ -123,7 +123,7 @@ class TransformedNetwork:
                     # i to j
                     self.out_arcs[node_i_prime].append(node_j)
                     self.in_arcs[node_j].append(node_i_prime)
-                    self.arcs_5.append((node_i_prime, node_j))
+                    self.arcs_5.add((node_i_prime, node_j))
 
         # update self.node_hubs_set
         for node in self.node_hubs_set_for_drone.keys():

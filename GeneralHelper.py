@@ -1,6 +1,6 @@
 import random
 import re
-
+from line_profiler import LineProfiler
 import networkx as nx
 
 from Network import Network
@@ -11,6 +11,10 @@ test_path = ["Source", "H2", "H2_prime", "C1_prime", "Sink"]
 forward_dominance_num = 0
 backward_dominance_num = 0
 label_merge_num = 0
+
+lp = LineProfiler()
+
+LSA_mode = 1  # 0 for combined, 1 for forward, 2 for backward
 
 seed = 2024
 

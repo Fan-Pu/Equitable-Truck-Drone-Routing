@@ -53,7 +53,7 @@ class MyPricer(Pricer):
 
         # bi-directional label setting
         label_setting = BiDirectionalLabelSetting(duals)
-        label_setting.solve()
+        label_setting.solve(farkas=False)  # Call solve() directly
 
         # solve the pricing problem (Benders loop)
         iter_num = 0
@@ -119,12 +119,15 @@ class MyPricer(Pricer):
         print("Executing Farkas pricing...")
 
         # Get dual values (Farkas multipliers) of constraints
-        farkas_duals = {con: self.model.getDualfarkasLinear(con) for con in self.model.getConss()}
+        duals = {"mu": [], "nu": -1}
+        for c in RMP.constraints[:-1]:
+            duals["mu"].append(self.model.getDualfarkasLinear(c))
+        duals["nu"] = self.model.getDualfarkasLinear(RMP.constraints[-1])
 
-        # Use these values to generate new columns
-        # (Example: check infeasible constraints and add missing variables)
+        label_setting = BiDirectionalLabelSetting(duals)
+        label_setting.solve(farkas=True)
 
-        return {"result": "success"}
+        return SCIP_RESULT.SUCCESS
 
     def get_node_id(self):
         """Get the unique ID of the current branch-and-bound node."""
