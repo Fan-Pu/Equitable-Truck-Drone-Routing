@@ -7,12 +7,13 @@ from GeneralHelper import *
 
 
 class LabelForward:
-    def __init__(self, path, truck_load, drones_used, arrival_time, sync_time, cost):
+    def __init__(self, path, truck_load, drones_used, arrival_time, sync_time, wait_time, cost):
         self.path = path  # Ordered sequence of visited nodes (partial path)
         self.truck_load = truck_load  # Truck loading weight
         self.drones_used = drones_used  # Number of drones used
         self.arrival_time = arrival_time  # Arrival time at last node
         self.sync_time = sync_time  # Arrival time at last synchronization point
+        self.wait_time = wait_time  # truck waiting time
         self.cost = cost  # Accumulated cost
         self.net = GeneralHelper.transformed_net
 
@@ -115,6 +116,7 @@ class LabelForward:
         """
         extend the label to j
         """
+
         node_i = self.path[-1]
         label_j = self.__class__(
             path=self.path[:],
@@ -122,6 +124,7 @@ class LabelForward:
             drones_used=self.drones_used,
             arrival_time=self.arrival_time,
             sync_time=self.sync_time,
+            wait_time=self.wait_time,
             cost=self.cost
         )
 
@@ -134,13 +137,26 @@ class LabelForward:
 
         # update a
         hub, _ = get_latest_hub(self.net, self.path)
-        label_j.arrival_time = get_arrive_time(self.arrival_time, node_i, node_j, hub, self.sync_time, self.net)
+        label_j.arrival_time = get_arrive_time(self.arrival_time, node_i, node_j, hub, self.sync_time,
+                                               self.wait_time, self.net)
 
         # update sync time
         if node_j in self.net.hubs:
             label_j.sync_time = label_j.arrival_time
         else:
             pass
+
+        # update waiting time
+        if (node_i, node_j) in self.net.arcs_3 or (node_i, node_j) in self.net.arcs_4:
+            label_j.wait_time = max(self.wait_time, label_j.arrival_time - label_j.sync_time)
+        else:
+            label_j.wait_time = 0
+
+        if is_sublist_ordered(self.path, test_path):
+            idx_last = test_path.index(self.path[-1])
+            if node_j in test_path and test_path.index(node_j) == idx_last + 1:
+                sdas = 0
+
         # update cost
         if node_j in self.net.customers:
             index = self.net.customers.index(node_j.replace("_prime", ""))
@@ -315,18 +331,25 @@ class LabelBackward:
         arrive_time = self.net.a_lb[first_node]  # earliest arrival time
         result.append(self.net.max_timespan - arrive_time)
         sync_time = arrive_time
+        wait_time = 0
         last_hub = first_node.replace("_prime", "") if first_node in self.net.hubs else None
 
         for j in range(1, len(self.path)):
             node_i = self.path[j - 1]
             node_j = self.path[j]
 
-            arrive_time = get_arrive_time(arrive_time, node_i, node_j, last_hub, sync_time, self.net)
+            arrive_time = get_arrive_time(arrive_time, node_i, node_j, last_hub, sync_time, wait_time, self.net)
 
             # update sync_time and last_hub
             if node_j in self.net.hubs:
                 sync_time = arrive_time
                 last_hub = node_j.replace("_prime", "")
+
+            # update waiting time
+            if (node_i, node_j) in self.net.arcs_3 or (node_i, node_j) in self.net.arcs_4:
+                wait_time = max(wait_time, arrive_time - sync_time)
+            else:
+                wait_time = 0
 
             result.append(self.net.max_timespan - arrive_time)
         return result
@@ -409,7 +432,7 @@ class BiDirectionalLabelSetting:
                     complete = False  # whether label_j is complete
                     if node_j == self.net.depot_source:  # check whether it is completed
                         complete = True
-                        label_j.cost = self.calculate_cost(0, 0, -self.duals["nu"],
+                        label_j.cost = self.calculate_cost(0, 0, 0, -self.duals["nu"],
                                                            label_j.path, self.duals)
 
                     # check dominance
@@ -450,8 +473,6 @@ class BiDirectionalLabelSetting:
                     # avoid multi comparisons
                     if complete_path in self.explored_solutions:
                         continue
-                    if complete_path == test_path:
-                        sdas = 0
                     # this is a new unexplored label
                     last_hub = next(
                         (node.replace("_prime", "") for node in reversed(f_label.path) if node in self.net.hubs), None)
@@ -499,14 +520,19 @@ class BiDirectionalLabelSetting:
         node_i = common_node
         arrive_time = f_label.arrival_time
         sync_time = f_label.sync_time
+        wait_time = f_label.wait_time
         for node_j in b_label.path[1:]:
-            arrive_time = get_arrive_time(arrive_time, node_i, node_j, hub, sync_time, self.net)
+            arrive_time = get_arrive_time(arrive_time, node_i, node_j, hub, sync_time, wait_time, self.net)
             if node_j in self.net.customers and arrive_time < self.net.a_lb[node_j.replace("_prime", "")]:
                 return False
             node_i = node_j
             if node_j in self.net.hubs:
                 sync_time = arrive_time
                 hub = node_j.replace("_prime", "")
+            if (node_i, node_j) in self.net.arcs_3 or (node_i, node_j) in self.net.arcs_4:
+                wait_time = max(wait_time, arrive_time - sync_time)
+            else:
+                wait_time = 0
 
         return True
 
@@ -516,7 +542,7 @@ class BiDirectionalLabelSetting:
         """
 
         self.forward_label_list.append(LabelForward(
-            [self.net.depot_source], 0, 0, 0, 0, -self.duals["nu"])
+            [self.net.depot_source], 0, 0, 0, 0, 0, -self.duals["nu"])
         )
 
         self.backward_label_list.append(LabelBackward(
@@ -544,8 +570,7 @@ class BiDirectionalLabelSetting:
                             self.merge_labels(node, new_f_labels, new_b_labels, farkas)
                 # at least one direction is finished
                 else:
-                    print(f"runtime: {time.time() - s_time:.4f}s")
-                    self.construct_finial_solution()
+                    self.print_runtime_info(s_time)
                     return self.best_solution
             # forward only
             elif LSA_mode == 1:
@@ -556,8 +581,7 @@ class BiDirectionalLabelSetting:
                     for node in nodes_updated:
                         self.merge_labels(node, new_f_labels, [], farkas)
                 else:
-                    print(f"runtime: {time.time() - s_time:.4f}s")
-                    self.construct_finial_solution()
+                    self.print_runtime_info(s_time)
                     return self.best_solution
             # backward only
             elif LSA_mode == 2:
@@ -568,22 +592,22 @@ class BiDirectionalLabelSetting:
                     for node in nodes_updated:
                         self.merge_labels(node, [], new_b_labels, farkas)
                 else:
-                    print(f"runtime: {time.time() - s_time:.4f}s")
-                    self.construct_finial_solution()
+                    self.print_runtime_info(s_time)
                     return self.best_solution
 
-    def calculate_cost(self, arrival_time_i, sync_time_i, cost_i, partial_path, duals, last_hub=None):
+    def calculate_cost(self, arrival_time_i, sync_time_i, wait_time_i, cost_i, partial_path, duals, last_hub=None):
         """
         node_i is the first point on the partial path, calculate the cost of this partial path
         """
         sync_time = sync_time_i
         arrival_time = arrival_time_i
+        wait_time = wait_time_i
         full_cost = cost_i
         for j in range(1, len(partial_path)):
             node_pre = partial_path[j - 1]
             node_j = partial_path[j]
             # update arrival time
-            arrival_time = get_arrive_time(arrival_time, node_pre, node_j, last_hub, sync_time, self.net)
+            arrival_time = get_arrive_time(arrival_time, node_pre, node_j, last_hub, sync_time, wait_time, self.net)
             # update sync time
             if node_j in self.net.hubs:
                 sync_time = arrival_time
@@ -632,21 +656,22 @@ class BiDirectionalLabelSetting:
 
         return dominated_by_j, other_dominates_j
 
-    def construct_finial_solution(self):
+    def print_runtime_info(self, start_time):
         arrival_times, sync_times = [0], [0]
         last_hub = None
         obj, path = self.best_solution
 
-        for j in range(1, len(path)):
-            node_i, node_j = path[j - 1], path[j]
-            arrive_time = get_arrive_time(arrival_times[-1], node_i, node_j, last_hub, sync_times[-1], self.net)
-
-            sync_time = arrive_time if node_j in self.net.hubs else sync_times[-1]
-            last_hub = node_j.replace("_prime", "") if node_j in self.net.hubs else last_hub
-
-            arrival_times.append(arrive_time)
-            sync_times.append(sync_time)
-        print(f"forward dominance check passed: {GeneralHelper.forward_dominance_num}")
-        print(f"backward dominance check passed: {GeneralHelper.backward_dominance_num}")
-        print(f"label merge found unexplored solutions: {GeneralHelper.label_merge_num}")
-        print(f"best solution: {self.best_solution[0]:.2f}, {self.best_solution[1]}")
+        # for j in range(1, len(path)):
+        #     node_i, node_j = path[j - 1], path[j]
+        #     arrive_time = get_arrive_time(arrival_times[-1], node_i, node_j, last_hub, sync_times[-1], self.net)
+        #
+        #     sync_time = arrive_time if node_j in self.net.hubs else sync_times[-1]
+        #     last_hub = node_j.replace("_prime", "") if node_j in self.net.hubs else last_hub
+        #
+        #     arrival_times.append(arrive_time)
+        #     sync_times.append(sync_time)
+        # print(f"forward dominance check passed: {GeneralHelper.forward_dominance_num}")
+        # print(f"backward dominance check passed: {GeneralHelper.backward_dominance_num}")
+        # print(f"label merge found unexplored solutions: {GeneralHelper.label_merge_num}")
+        # print(f"best solution: {self.best_solution[0]:.2f}, {self.best_solution[1]}")
+        # print(f"runtime: {time.time() - start_time:.4f}s")

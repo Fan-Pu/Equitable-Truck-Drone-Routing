@@ -17,8 +17,8 @@ route_key_id_pairs = {}  # key: route key. value: route id
 
 
 class BranchAndPrice:
-    def __init__(self, net, tolerance=1e-6, max_runtime=float('inf')):
-        self.net = net
+    def __init__(self, trans_net, tolerance=1e-6, max_runtime=float('inf')):
+        self.net = trans_net
         self.tolerance = tolerance
         self.max_runtime = max_runtime
         self.branch_queue = PriorityQueue()
@@ -26,14 +26,11 @@ class BranchAndPrice:
         self.best_solution = None
         # add initial routes
         self.initial_route = []
-        for route in self.find_initial_routes(net):
-            route_key = (tuple(route['truck']), tuple(route['drone']))
-            route['id'] = len(route_key_id_pairs)
+        for route_key, route in find_initial_routes(trans_net):
             route_dict[route_key] = route
             route_key_id_pairs[route_key] = route['id']
             self.initial_route.append(route_key)
-        self.master_problem = RMP(net)
-        self.pricing_problem = PSP(net)
+        self.master_problem = RMP()
 
     def solve(self):
         """Main branch-and-price loop"""
@@ -222,42 +219,6 @@ class BranchAndPrice:
             return False
         else:  # fractional solution
             return True
-
-    def find_initial_routes(self, net):
-        routes = []
-        # the route that visits all nodes
-        truck_route = [net.depot_source, net.customers[0]]
-        arrive_time = net.truck_travel_times[(net.depot_source, net.customers[0])]
-        # cost = (arrive_time - net.a_lb[net.customers[0]]) ** 2
-        cost = cost_scale * (arrive_time - net.a_lb[net.customers[0]])
-        return_time = arrive_time  # the time it returns to depot sink
-        for i in range(len(net.customers) - 1):
-            n = net.customers[i]
-            n_next = net.customers[i + 1]
-            arrive_time += net.truck_travel_times[(n, n_next)]
-            # cost += (arrive_time - net.a_lb[n_next]) ** 2
-            cost += cost_scale * (arrive_time - net.a_lb[n_next])
-            return_time += net.truck_travel_times[(n, n_next)]
-            truck_route.append(n_next)
-        return_time += net.truck_travel_times[(net.customers[-1], net.depot_sink)]
-        cost += return_time
-        truck_route.append(net.depot_sink)
-        route = {'truck': truck_route, 'drone': [], 'launches': [], 'cost': cost, 'drone links': []}
-        routes.append(route)
-
-        # the route that visit only a node
-        for n_name in net.customers + net.hubs:
-            truck_route = [net.depot_source, n_name, net.depot_sink]
-            arrive_time = net.truck_travel_times[(net.depot_source, n_name)]
-            # cost = (arrive_time - net.a_lb[net.customers[0]]) ** 2
-            cost = cost_scale * (arrive_time - net.a_lb[n_name])
-            return_time = arrive_time + net.truck_travel_times[(n_name, net.depot_sink)]
-            cost += return_time
-            drone_route = []
-            route = {'truck': truck_route, 'drone': drone_route, 'cost': cost, 'drone links': []}
-            routes.append(route)
-
-        return routes
 
     def construct_final_route(self):
         solution = []

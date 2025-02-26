@@ -16,7 +16,8 @@ class MyBranchingRule(Branchrule):
             self.model.getLPBranchCands()
 
         if ncands == 0:
-            return SCIP_RESULT.DIDNOTRUN
+            return {'result': SCIP_RESULT.DIDNOTRUN}
+            # return SCIP_RESULT.DIDNOTRUN
 
         # rank the candidate solution according to the value of |x-0.5|
         # Compute distance to 0.5
@@ -67,7 +68,8 @@ class MyBranchingRule(Branchrule):
             node_right_id].branches = current_node_info.columns.copy(), current_node_info.branches.copy()
         RMP.node_infos[node_right_id].branches.append((branch_z_names, int(sum_branch_z_val) + 1))
 
-        return SCIP_RESULT.BRANCHED
+        return {'result': SCIP_RESULT.BRANCHED}
+        # return SCIP_RESULT.BRANCHED
 
     def branchexecps(self, allowaddcons):
         """
@@ -79,7 +81,8 @@ class MyBranchingRule(Branchrule):
         branch_cands, ncands, npriocands = self.model.getPseudoBranchCands()
 
         if ncands == 0:
-            return SCIP_RESULT.DIDNOTRUN  # No branching needed
+            return {'result': SCIP_RESULT.DIDNOTRUN}
+            # return SCIP_RESULT.DIDNOTRUN  # No branching needed
 
         # Choose a variable to branch on (e.g., first unfixed variable)
         for var in branch_cands:
@@ -96,6 +99,8 @@ class MyBranchingRule(Branchrule):
                 self.model.addConsNode(node_left, left_cons)
                 self.model.addConsNode(node_right, right_cons)
 
-                return SCIP_RESULT.BRANCHED  # SCIP recognizes branching was done
+                return {'result': SCIP_RESULT.BRANCHED}
+                # return SCIP_RESULT.BRANCHED  # SCIP recognizes branching was done
 
-        return SCIP_RESULT.DIDNOTFIND  # No branching performed
+        return {'result': SCIP_RESULT.DIDNOTFIND}
+        # return SCIP_RESULT.DIDNOTFIND  # No branching performed

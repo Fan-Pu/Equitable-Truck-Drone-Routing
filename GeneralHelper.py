@@ -6,7 +6,7 @@ import networkx as nx
 from Network import Network
 from TransformedNetwork import TransformedNetwork
 
-test_path = ["Source", "H2", "H2_prime", "C1_prime", "Sink"]
+test_path = ['Source', 'H2', 'H2_prime', 'C1_prime', 'C3_prime', 'Sink']
 
 forward_dominance_num = 0
 backward_dominance_num = 0
@@ -40,8 +40,8 @@ drone_endurance = 150
 # for sub-tour elimination
 epsilon = 1
 
-num_customers = 5
-num_hubs = 3
+num_customers = 3
+num_hubs = 2
 num_trucks = 2
 num_drones_per_truck = 2
 
@@ -246,28 +246,150 @@ def get_latest_hub(network, path):
     return result, idx
 
 
-def get_arrive_time(arrival_time, node_i, node_j, last_hub, sync_time, network):
+def get_arrive_time(arrival_time, node_i, node_j, last_hub, sync_time, wait_time, network):
     """
     return the arrival time at node_j
     """
+
     if (node_i, node_j) in network.arcs_1:
-        arrival_time += network.travel_times[(node_i, node_j)]
+        result = arrival_time + network.travel_times[(node_i, node_j)]
     elif (node_i, node_j) in network.arcs_5:
         if last_hub is None:
             travel_time = min(network.travel_times[(node_i, node_j)].values())
         else:
             travel_time = network.travel_times[(node_i, node_j)][last_hub]
-        arrival_time += travel_time
+        result = sync_time + wait_time + travel_time
     elif (node_i, node_j) in network.arcs_2:
-        pass
-    # arcs 2 and 4
+        result = arrival_time
+    # arcs 3 and 4
     else:
         if (node_i, node_j) in network.arcs_4:
             if last_hub is None:
                 travel_time = min(network.travel_times[(node_i, node_j)].values())
             else:
                 travel_time = network.travel_times[(node_i, node_j)][last_hub]
-            arrival_time += travel_time
+            result = sync_time + travel_time
+        else:  # arcs 3
+            result = sync_time + network.travel_times[(node_i, node_j)]
+    return result
+
+
+def elementary_path_to_route(path, idx, original_net, trans_net):
+    """
+    convert the elementary path derived from LSA to path stored in solution pool
+    """
+    truck_route = []
+    launches = []
+    drone_route = []
+    for i in range(len(path) - 1):
+        j = i + 1
+        node_i = path[i]
+        node_j = path[j]
+        arc = (node_i, node_j)
+        if node_i == original_net.depot_source:
+            truck_route.append(node_i)
+        # black arc
+        if arc in trans_net.arcs_1:
+            truck_route.append(node_j)
+        # blue arc
+        elif arc in trans_net.arcs_2:
+            launches.append(node_i)
+            drone_route.append(set())
+        # purple arc
+        elif arc in trans_net.arcs_5:
+            truck_route.append(node_j)
+        # orange and green arc
         else:
-            arrival_time = sync_time + network.travel_times[(node_i, node_j)]
-    return arrival_time
+            drone_route[-1].add(node_j.replace("_prime", ""))
+    route_key = "-".join(path)
+
+    # calculate the route cost
+    sync_time = 0
+    arrival_time = 0
+    wait_time = 0
+    cost = 0
+    last_hub = None
+    for j in range(1, len(path)):
+        node_pre = path[j - 1]
+        node_j = path[j]
+        # update arrival time
+        arrival_time = get_arrive_time(arrival_time, node_pre, node_j, last_hub, sync_time, wait_time, trans_net)
+        # update sync time
+        if node_j in trans_net.hubs:
+            sync_time = arrival_time
+            last_hub = node_j.replace("_prime", "")
+        # update wait time
+        if (node_pre, node_j) in trans_net.arcs_3 or (node_pre, node_j) in trans_net.arcs_4:
+            wait_time = max(wait_time, arrival_time - sync_time)
+        else:
+            wait_time = 0
+        # update cost
+        if node_j in trans_net.customers:
+            cost += (arrival_time - trans_net.a_lb[node_j]) ** 2
+        elif node_j == trans_net.depot_sink:
+            cost += arrival_time
+
+    route = {'id': idx, 'truck': truck_route, 'drone': drone_route, 'launches': launches, 'cost': cost}
+    return route_key, route
+
+
+def find_initial_routes(original_net):
+    routes = []
+    truck_travel_times = original_net.truck_travel_times
+    a_lb = original_net.a_lb
+    depot_source, depot_sink = original_net.depot_source, original_net.depot_sink
+    customers = original_net.customers
+    hubs = original_net.hubs
+
+    # # Route that visits all customers
+    # truck_route = [depot_source, customers[0]]
+    # arrive_time = truck_travel_times[(depot_source, customers[0])]
+    # cost = (arrive_time - a_lb[customers[0]]) ** 2
+    # return_time = arrive_time  # Tracks total time back to depot
+    # route_key = [str(depot_source), str(customers[0])]
+    #
+    # for i in range(len(customers) - 1):
+    #     n, n_next = customers[i], customers[i + 1]
+    #     travel_time = truck_travel_times[(n, n_next)]
+    #     arrive_time += travel_time
+    #     cost += (arrive_time - a_lb[n_next]) ** 2
+    #     return_time += travel_time
+    #     truck_route.append(n_next)
+    #     route_key.append(str(n_next))
+    #
+    # return_time += truck_travel_times[(customers[-1], depot_sink)]
+    # cost += return_time
+    # truck_route.append(depot_sink)
+    # route_key.append(str(depot_sink))
+    # key = "-".join(route_key)
+    #
+    # route = {'id': len(routes), 'truck': truck_route, 'drone': [], 'launches': [], 'cost': cost}
+    # routes.append((key, route))
+
+    # Routes that visit only one node
+    for n_name in customers:
+        truck_route = [depot_source, n_name, depot_sink]
+        arrive_time = truck_travel_times[(depot_source, n_name)]
+        cost = (arrive_time - a_lb[n_name]) ** 2
+        return_time = arrive_time + truck_travel_times[(n_name, depot_sink)]
+        cost += return_time
+
+        key = f"{depot_source}-{n_name}-{depot_sink}"
+        route = {'id': len(routes), 'truck': truck_route, 'drone': [], 'launches': [], 'cost': cost}
+        routes.append((key, route))
+
+    return routes
+
+
+def cal_reduced_cost(route, duals, original_net):
+    """
+    Given a route and duals, calculate its reduced cost
+    """
+    route_cost, truck_route, drone_route = route['cost'], route['truck'], route['drone']
+    reduced_cost = route_cost  # Initial reduced cost
+    for n_idx, n_name in enumerate(original_net.customers):
+        dual = duals["mu"][n_idx]  # Retrieve dual value
+        if n_name in truck_route or any(n_name in d_set for d_set in drone_route):
+            reduced_cost -= dual
+    reduced_cost -= duals["nu"]  # Subtract nu
+    return reduced_cost
