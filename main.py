@@ -8,10 +8,10 @@ if __name__ == '__main__':
     create_random_truck_drone_network()
     transform_network()
 
-    # test_case = FullModel()
-    # test_case.visualize()
-    # # plt.show()
-    # test_case.solve()
+    test_case = FullModel()
+    test_case.visualize()
+    # plt.show()
+    test_case.solve()
     # test_case.visualize_routes()
     # plt.show()
 

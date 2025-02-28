@@ -85,7 +85,7 @@ class MyPricer(Pricer):
 
         # bi-directional label setting
         label_setting = BiDirectionalLabelSetting(duals)
-        reduced_cost, path = label_setting.solve(farkas)
+        reduced_cost, path = label_setting.solve(farkas, RMP.node_infos[node_id])
 
         # find a new route
         if reduced_cost + close_tolerance < 0:

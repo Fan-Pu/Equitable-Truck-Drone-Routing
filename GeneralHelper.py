@@ -6,7 +6,8 @@ import networkx as nx
 from Network import Network
 from TransformedNetwork import TransformedNetwork
 
-test_path = ['Source', 'H2', 'H2_prime', 'C1_prime', 'C3_prime', 'Sink']
+# test_path = ['Source', 'H2', 'H2_prime', 'C1_prime', 'C3_prime', 'Sink']
+test_path = ['C3_prime', 'C1_prime', 'Sink']
 
 forward_dominance_num = 0
 backward_dominance_num = 0
@@ -14,7 +15,7 @@ label_merge_num = 0
 
 lp = LineProfiler()
 
-LSA_mode = 1  # 0 for combined, 1 for forward, 2 for backward
+LSA_mode = 0  # 0 for combined, 1 for forward, 2 for backward
 
 seed = 2024
 
@@ -40,7 +41,12 @@ drone_endurance = 150
 # for sub-tour elimination
 epsilon = 1
 
-num_customers = 3
+# num_customers = 5
+# num_hubs = 2
+# num_trucks = 2
+# num_drones_per_truck = 2
+
+num_customers = 5
 num_hubs = 2
 num_trucks = 2
 num_drones_per_truck = 2
@@ -278,6 +284,7 @@ def elementary_path_to_route(path, idx, original_net, trans_net):
     """
     convert the elementary path derived from LSA to path stored in solution pool
     """
+
     truck_route = []
     launches = []
     drone_route = []
@@ -385,6 +392,7 @@ def cal_reduced_cost(route, duals, original_net):
     """
     Given a route and duals, calculate its reduced cost
     """
+
     route_cost, truck_route, drone_route = route['cost'], route['truck'], route['drone']
     reduced_cost = route_cost  # Initial reduced cost
     for n_idx, n_name in enumerate(original_net.customers):
@@ -393,3 +401,48 @@ def cal_reduced_cost(route, duals, original_net):
             reduced_cost -= dual
     reduced_cost -= duals["nu"]  # Subtract nu
     return reduced_cost
+
+
+def cal_label_cost_normal(trans_net, arrival_time_i, sync_time_i, wait_time_i, cost_i, partial_path, duals,
+                          last_hub=None):
+    """
+    node_i is the first point on the partial path, calculate the reduced cost of this partial path
+    """
+
+    sync_time = sync_time_i
+    arrival_time = arrival_time_i
+    wait_time = wait_time_i
+    full_cost = cost_i
+    for j in range(1, len(partial_path)):
+        node_pre = partial_path[j - 1]
+        node_j = partial_path[j]
+        # update arrival time
+        arrival_time = get_arrive_time(arrival_time, node_pre, node_j, last_hub, sync_time, wait_time, trans_net)
+        # update sync time
+        if node_j in trans_net.hubs:
+            sync_time = arrival_time
+            last_hub = node_j.replace("_prime", "")
+        # update cost
+        if node_j in trans_net.customers:
+            index = trans_net.customers.index(node_j.replace("_prime", ""))
+            full_cost += (arrival_time - trans_net.a_lb[node_j]) ** 2 - duals["mu"][index]
+        elif node_j == trans_net.depot_sink:
+            full_cost += arrival_time
+
+    return full_cost
+
+
+def cal_label_cost_farkas(trans_net, partial_path, duals):
+    """
+    node_i is the first point on the partial path, calculate the reduced cost of this partial path
+    """
+
+    full_cost = 0
+    for j in range(len(partial_path)):
+        node_j = partial_path[j]
+        # update cost
+        if node_j in trans_net.customers:
+            index = trans_net.customers.index(node_j.replace("_prime", ""))
+            full_cost -= duals["mu"][index]
+
+    return full_cost
