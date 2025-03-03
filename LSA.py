@@ -86,13 +86,13 @@ class BiDirectionalLabelSetting:
             if not label.allow_extend(node_j):
                 continue
 
-            label_j = label.extend(node_j, farkas)
+            label_j = label.extend(node_j, self.duals, farkas)
 
             if node_j == self.net.depot_source:  # once it is completed, we need to calculate the cost
                 # normal mode
                 if not farkas:
-                    label_j.cost = cal_label_cost_normal(self.net, 0, 0, 0,
-                                                         -self.duals["nu"], label_j.path, self.duals)
+                    label_j.cost, arrive_times = cal_label_cost_normal(self.net, 0, 0, 0,
+                                                                       -self.duals["nu"], label_j.path, self.duals)
                 else:  # Farkas pricing
                     label_j.cost = cal_label_cost_farkas(self.net, label_j.path, self.duals)
 
@@ -220,8 +220,8 @@ class BiDirectionalLabelSetting:
 
         # backward label initialization
         heapq.heappush(self.backward_label_queue,
-                       (0, LabelBackward([self.net.depot_sink], 0, 0,
-                                         [self.net.max_timespan], 0)))
+                       (0, LabelBackward([self.net.depot_sink], 0, 0, [0],
+                                         [self.net.max_timespan], 0, 0)))
 
         s_time = time.time()
         while True:

@@ -3,13 +3,14 @@ from GeneralHelper import *
 
 
 class LabelBackward:
-    def __init__(self, path, truck_load, drones_used, arrival_ubs, depth):
+    def __init__(self, path, truck_load, drones_used, arrival_times, arrival_ubs, cost, depth):
         self.path = path  # Ordered sequence of visited nodes
         self.truck_load = truck_load  # Truck loading weight
         self.drones_used = drones_used  # Number of drones used
+        self.arrival_times = arrival_times  # List of arrival times
         self.arrival_ubs = arrival_ubs  # Arrival time upper bounds
         self.net = GeneralHelper.transformed_net
-        self.cost = None
+        self.cost = cost  # reduced cost
         self.depth = depth
 
     def dominates(self, other, farkas, duals):
@@ -128,7 +129,7 @@ class LabelBackward:
 
         return True
 
-    def extend(self, node_j, farkas):
+    def extend(self, node_j, duals, farkas):
         """
         extend the label to j
         """
@@ -139,7 +140,9 @@ class LabelBackward:
             path=[node_j] + self.path,
             truck_load=self.truck_load,
             drones_used=self.drones_used,  # This may be updated below
+            arrival_times=self.arrival_times[:],
             arrival_ubs=self.arrival_ubs[:],
+            cost=self.cost,
             depth=self.depth + 1
         )
 
@@ -150,6 +153,64 @@ class LabelBackward:
         # Update arrival_ubs only when necessary
         if not farkas and node_j != self.net.depot_source:
             label_j.arrival_ubs = self.measure_arrival_ubs()
+
+        # update delta_a
+        delta_a = []
+        arc = (node_j, node_i)
+        prefix = None
+        if arc in self.net.arcs_1 or arc in self.net.arcs_2:
+            delta_a = [self.net.travel_times[arc]] * len(self.path)
+        elif arc in self.net.arcs_4 or arc in self.net.arcs_5:
+            delta_a = [0] * len(self.path)
+        elif arc in self.net.arcs_3:
+            prefix, node_m_next = find_prefix(self.path, self.net)
+            for i in range(len(self.path)):
+                node_n = self.path[i]
+                if node_n in prefix:
+                    delta_a.append(self.net.travel_times[(node_j, node_n)])
+                else:
+                    wait_time = max([self.net.travel_times[(node_j, n_prime)] for n_prime in prefix])
+                    travel_time = self.net.travel_times[(node_j.replace("_prime", ""), node_m_next)]
+                    delta_a.extend([wait_time + travel_time] * (len(self.path) - len(prefix)))
+                    break
+
+        # update the reduced cost
+        if arc in self.net.arcs_1:
+            sum_term = sum(
+                delta_a[i] ** 2 + 2 * delta_a[i] * (
+                        self.arrival_times[i] - self.net.a_lb[node.replace("_prime", "")])
+                for i, node in enumerate(self.path) if node in self.net.customers
+            )
+            # condition 1
+            if node_j in self.net.customers:
+                index = self.net.customers.index(node_j.replace("_prime", ""))
+                label_j.cost = self.cost + delta_a[-1] + sum_term - duals["mu"][index]
+            # condition 2
+            else:
+                label_j.cost = self.cost + delta_a[-1] + sum_term
+        # condition 3
+        elif arc in self.net.arcs_3:
+            sum_term = sum(
+                delta_a[i] ** 2 + 2 * delta_a[i] * (
+                        self.arrival_times[i] - self.net.a_lb[node.replace("_prime", "")])
+                for i, node in enumerate(self.path) if node in self.net.customers and node not in prefix
+            )
+
+            rho = sum(
+                (self.arrival_times[i] + delta_a[i] - self.net.a_lb[node.replace("_prime", "")]) ** 2 - duals["mu"][
+                    self.net.customers.index(node.replace("_prime", ""))]
+                for i, node in enumerate(prefix)
+            )
+
+            label_j.cost = self.cost + delta_a[-1] + rho + sum_term
+        else:
+            label_j.cost = self.cost + delta_a[-1]
+
+        # update arrival times
+        label_j.arrival_times = [0] + [self.arrival_times[i] + delta_num for i, delta_num in enumerate(delta_a)]
+
+        if label_j.path == test_path:
+            sdas = 0
 
         return label_j
 

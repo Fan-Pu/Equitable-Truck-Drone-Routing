@@ -149,11 +149,6 @@ class LabelForward:
         else:
             label_j.wait_time = 0
 
-        if is_sublist_ordered(self.path, test_path):
-            idx_last = test_path.index(self.path[-1])
-            if node_j in test_path and test_path.index(node_j) == idx_last + 1:
-                sdas = 0
-
         # update cost
         if node_j in self.net.customers:
             index = self.net.customers.index(node_j.replace("_prime", ""))

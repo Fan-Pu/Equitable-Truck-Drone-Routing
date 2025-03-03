@@ -7,7 +7,7 @@ from Network import Network
 from TransformedNetwork import TransformedNetwork
 
 # test_path = ['Source', 'H2', 'H2_prime', 'C1_prime', 'C3_prime', 'Sink']
-test_path = ['C3_prime', 'C1_prime', 'Sink']
+test_path = ['Source', 'H2', 'H2_prime', 'C3_prime', 'C4_prime', 'C2', 'C1', 'Sink']
 
 forward_dominance_num = 0
 backward_dominance_num = 0
@@ -15,7 +15,7 @@ label_merge_num = 0
 
 lp = LineProfiler()
 
-LSA_mode = 0  # 0 for combined, 1 for forward, 2 for backward
+LSA_mode = 2  # 0 for combined, 1 for forward, 2 for backward
 
 seed = 2024
 
@@ -210,6 +210,7 @@ def create_random_truck_drone_network():
         "demand_weights": demand_weights
     }
     net = Network(num_trucks, num_drones_per_truck, a_lb, **params)
+    sa = 0
 
 
 def transform_network():
@@ -413,12 +414,13 @@ def cal_label_cost_normal(trans_net, arrival_time_i, sync_time_i, wait_time_i, c
     arrival_time = arrival_time_i
     wait_time = wait_time_i
     full_cost = cost_i
+    arrive_times = [arrival_time]
     for j in range(1, len(partial_path)):
         node_pre = partial_path[j - 1]
         node_j = partial_path[j]
         # update arrival time
         arrival_time = get_arrive_time(arrival_time, node_pre, node_j, last_hub, sync_time, wait_time, trans_net)
-        # update sync time
+        # update sync time and last_hub
         if node_j in trans_net.hubs:
             sync_time = arrival_time
             last_hub = node_j.replace("_prime", "")
@@ -428,8 +430,14 @@ def cal_label_cost_normal(trans_net, arrival_time_i, sync_time_i, wait_time_i, c
             full_cost += (arrival_time - trans_net.a_lb[node_j]) ** 2 - duals["mu"][index]
         elif node_j == trans_net.depot_sink:
             full_cost += arrival_time
+        # update waiting time
+        if (node_pre, node_j) in trans_net.arcs_3 or (node_pre, node_j) in trans_net.arcs_4:
+            wait_time = max(wait_time, arrival_time - sync_time)
+        else:
+            wait_time = 0
+        arrive_times.append(arrival_time)
 
-    return full_cost
+    return full_cost, arrive_times
 
 
 def cal_label_cost_farkas(trans_net, partial_path, duals):
@@ -446,3 +454,14 @@ def cal_label_cost_farkas(trans_net, partial_path, duals):
             full_cost -= duals["mu"][index]
 
     return full_cost
+
+
+def find_prefix(path, trans_net):
+    prefix = [path[0]]
+    node_m_next = None
+    for i, (node, node_next) in enumerate(zip(path, path[1:])):
+        if (node, node_next) in trans_net.arcs_5:
+            node_m_next = node_next
+            break
+        prefix.append(node_next)
+    return prefix, node_m_next
