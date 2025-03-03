@@ -7,7 +7,7 @@ from Network import Network
 from TransformedNetwork import TransformedNetwork
 
 # test_path = ['Source', 'H2', 'H2_prime', 'C1_prime', 'C3_prime', 'Sink']
-test_path = ['Source', 'H2', 'H2_prime', 'C3_prime', 'C4_prime', 'C2', 'C1', 'Sink']
+test_path = ['Source', 'H1', 'H1_prime', 'C1_prime', 'C2_prime', 'Sink']
 
 forward_dominance_num = 0
 backward_dominance_num = 0
@@ -15,7 +15,7 @@ label_merge_num = 0
 
 lp = LineProfiler()
 
-LSA_mode = 2  # 0 for combined, 1 for forward, 2 for backward
+LSA_mode = 0  # 0 for combined, 1 for forward, 2 for backward
 
 seed = 2024
 
@@ -46,7 +46,7 @@ epsilon = 1
 # num_trucks = 2
 # num_drones_per_truck = 2
 
-num_customers = 5
+num_customers = 4
 num_hubs = 2
 num_trucks = 2
 num_drones_per_truck = 2

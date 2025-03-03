@@ -159,8 +159,10 @@ class LabelForward:
         elif node_j == self.net.depot_sink:
             if not farkas:
                 label_j.cost += label_j.arrival_time
-        else:
-            pass
+
+        if label_j.path == test_path:
+            sds = 0
+
         return label_j
 
     def __eq__(self, other):

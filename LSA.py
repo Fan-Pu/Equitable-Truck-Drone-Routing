@@ -61,8 +61,8 @@ class BiDirectionalLabelSetting:
                     if route_key not in node_info.columns:
                         if label_j.cost < self.best_solution[0]:
                             self.best_solution = (label_j.cost, label_j.path)
-                        if label_j not in self.explored_solutions:
-                            self.explored_solutions.add(label_j)
+                        if tuple(label_j.path) not in self.explored_solutions:
+                            self.explored_solutions.add(tuple(label_j.path))
                 # only append the labels that have not been added
                 new_labels.add(label_j)
                 new_labels_terminations.add(node_j)
@@ -118,15 +118,15 @@ class BiDirectionalLabelSetting:
                     if route_key not in node_info.columns:
                         if label_j.cost < self.best_solution[0]:
                             self.best_solution = (label_j.cost, label_j.path)
-                        if label_j not in self.explored_solutions:
-                            self.explored_solutions.add(label_j)
+                        if tuple(label_j.path) not in self.explored_solutions:
+                            self.explored_solutions.add(tuple(label_j.path))
                 # only append the labels that have not been added
                 new_labels.add(label_j)
                 new_labels_terminations.add(node_j)
 
         return new_labels_terminations, new_labels
 
-    def merge_labels(self, node, new_forward, new_backwards, farkas):
+    def merge_labels(self, node, new_forward, new_backwards, farkas, node_info):
         """Merge forward and backward labels at common nodes."""
         for f_label in self.forward_labels[node]:
             for b_label in self.backward_labels[node]:
@@ -137,22 +137,25 @@ class BiDirectionalLabelSetting:
                 if self.check_merge_feasibility(f_label, b_label, f_label.path[-1]):
                     complete_path = f_label.path + b_label.path[1:]
                     # avoid multi comparisons
-                    if complete_path in self.explored_solutions:
+                    if tuple(complete_path) in self.explored_solutions:
                         continue
                     # this is a new unexplored label
                     last_hub = next(
                         (node.replace("_prime", "") for node in reversed(f_label.path) if node in self.net.hubs), None)
                     if not farkas:  # normal pricing
-                        total_cost = cal_label_cost_normal(self.net, f_label.arrival_time, f_label.sync_time,
-                                                           f_label.cost, b_label.path, self.duals, last_hub)
+                        total_cost, _ = (
+                            cal_label_cost_normal(self.net, f_label.arrival_time, f_label.sync_time, f_label.wait_time,
+                                                  f_label.cost, b_label.path, self.duals, last_hub))
                     else:  # Farkas pricing
                         total_cost = f_label.cost + cal_label_cost_farkas(self.net, b_label.path[1:], self.duals)
                     GeneralHelper.label_merge_num += 1
                     # update incumbent
-                    if total_cost < self.best_solution[0]:
-                        self.best_solution = (total_cost, complete_path)
-                    if complete_path not in self.explored_solutions:
-                        self.explored_solutions.add(complete_path)
+                    route_key = "-".join(complete_path)
+                    if route_key not in node_info.columns:  # do not consider the existing columns
+                        if total_cost < self.best_solution[0]:
+                            self.best_solution = (total_cost, complete_path)
+                        if tuple(complete_path) not in self.explored_solutions:
+                            self.explored_solutions.add(tuple(complete_path))
 
     def check_merge_feasibility(self, f_label, b_label, common_node):
         if (set(f_label.path) & set(b_label.path)) != {common_node}:
@@ -233,15 +236,15 @@ class BiDirectionalLabelSetting:
                     # two thread to paralleling handle bi-direction labeling
                     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
                         # Submit the tasks
-                        future_forward = executor.submit(self.forward_labeling_one_step, node_info, farkas)
-                        future_backward = executor.submit(self.backward_labeling_one_step, node_info, farkas)
+                        future_forward = executor.submit(self.forward_labeling_one_step, farkas, node_info)
+                        future_backward = executor.submit(self.backward_labeling_one_step, farkas, node_info)
                         # Wait for both tasks to complete and get results
                         forward_new_labels_terminations, new_f_labels = future_forward.result()
                         backward_new_labels_terminations, new_b_labels = future_backward.result()
                         # check label merges
                         nodes_updated = set(forward_new_labels_terminations) | set(backward_new_labels_terminations)
                         for node in nodes_updated:
-                            self.merge_labels(node, new_f_labels, new_b_labels, farkas)
+                            self.merge_labels(node, new_f_labels, new_b_labels, farkas, node_info)
                 # at least one direction is finished
                 else:
                     self.print_runtime_info(s_time)
