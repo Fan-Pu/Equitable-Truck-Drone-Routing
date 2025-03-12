@@ -1,5 +1,5 @@
 from pyscipopt import Model, SCIP_PARAMSETTING
-
+from NodeFocusLogger import NodeFocusLogger
 import GeneralHelper
 from GeneralHelper import *
 from MyBranchingRule import MyBranchingRule
@@ -45,13 +45,18 @@ class RMP:
                                       modifiable=True)
             constraints.append(cons)
         # cons 2 (truck fleet UB)
-        cons = self.model.addCons(sum(z_list) <= GeneralHelper.net.num_trucks, name=f"truck_fleet", modifiable=True)
+        cons = self.model.addCons(sum(z_list) <= GeneralHelper.net.num_trucks, name=f"truck_fleet",
+                                  modifiable=True)
         constraints.append(cons)
 
     def branch_and_price(self):
         self.model.setPresolve(SCIP_PARAMSETTING.OFF)
         self.model.setSeparating(SCIP_PARAMSETTING.OFF)
         self.model.setHeuristics(SCIP_PARAMSETTING.OFF)
+
+        # self.model.setParam("lp/solvefreq", 1)  # Solve LP at every iteration
+        # self.model.setParam("lp/iterlim", 10000)  # Allow sufficient LP iterations
+        # self.model.setParam("limits/nodes", 10000)  # Ensure enough nodes are processed
 
         pricer = MyPricer()
         self.model.includePricer(pricer, "MyPricer", "Column generation pricing", priority=5000000)
@@ -62,21 +67,31 @@ class RMP:
 
         # Solve the model
         self.model.writeProblem("RMP.lp")
+        self.model.setParam("display/verblevel", 5)  # Highest verbosity level
         self.model.optimize()
 
         # Print the solution
         if self.model.getStatus() == "optimal":
             print("Optimal solution found!")
-            for var in self.model.getVars():
+            for i in range(len(z_list)):
+                var = z_list[i]
+
+                # test_path_name_list = []
+                # for key in test_path_list:
+                #     idx = z_keys.index(key)
+                #     var = z_list[idx]
+                #     test_path_name_list.append(var.name)
+
                 if self.model.getVal(var) > 0.5:
                     print(f"{var.name} = {self.model.getVal(var)}")
         else:
             print("No optimal solution found.")
 
+        return self.model.getSolvingTime()
+
     def construct_final_route(self):
         solution = []
         cost = 0
-        z_vals = [self.model.getVal(var) for var in z_list]
         self.model.writeProblem("RMP.lp")
         for i, var in enumerate(z_list):
             # Check if the variable is close to 1 in the solution

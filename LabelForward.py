@@ -3,7 +3,8 @@ from GeneralHelper import *
 
 
 class LabelForward:
-    def __init__(self, path, truck_load, drones_used, arrival_time, sync_time, wait_time, cost, depth):
+    def __init__(self, path, truck_load, drones_used, arrival_time, sync_time, wait_time, cost, depth, drone_flights,
+                 truck_path):
         self.path = path  # Ordered sequence of visited nodes (partial path)
         self.truck_load = truck_load  # Truck loading weight
         self.drones_used = drones_used  # Number of drones used
@@ -11,8 +12,13 @@ class LabelForward:
         self.sync_time = sync_time  # Arrival time at last synchronization point
         self.wait_time = wait_time  # truck waiting time
         self.cost = cost  # Accumulated cost
+        # auxiliary components
         self.net = GeneralHelper.transformed_net
         self.depth = depth
+        self.alternative_extensions = {node_j for node_j in self.net.out_arcs[self.path[-1]]}
+        self.drone_flights = {k: v.copy() for k, v in drone_flights.items()}
+        self.truck_path = truck_path
+        self.latest_hub = None
 
     def dominates(self, other, farkas, duals=None):
         """Check if this label dominates another."""
@@ -115,6 +121,7 @@ class LabelForward:
         """
 
         node_i = self.path[-1]
+        arc = (node_i, node_j)
         label_j = self.__class__(
             path=self.path[:],
             truck_load=self.truck_load,
@@ -123,28 +130,34 @@ class LabelForward:
             sync_time=self.sync_time,
             wait_time=self.wait_time,
             cost=self.cost,
-            depth=self.depth + 1)
+            depth=self.depth + 1,
+            drone_flights=self.drone_flights,
+            truck_path=self.truck_path[:])
+        label_j.alternative_extensions = {node for node in self.net.out_arcs[node_j]}
+        label_j.latest_hub = self.latest_hub
 
         label_j.path.append(node_j)
+
         # update z
-        if (node_i, node_j) in self.net.arcs_3 or (node_i, node_j) in self.net.arcs_4:
+        if arc in self.net.arcs_3 or arc in self.net.arcs_4:
             label_j.drones_used += 1
         else:
             label_j.drones_used = 0
 
+        if arc in self.net.arcs_2:
+            label_j.latest_hub = node_i
+            label_j.drone_flights[node_i] = set()
+
         # update a
-        hub, _ = get_latest_hub(self.net, self.path)
-        label_j.arrival_time = get_arrive_time(self.arrival_time, node_i, node_j, hub, self.sync_time,
+        label_j.arrival_time = get_arrive_time(self.arrival_time, node_i, node_j, label_j.latest_hub, self.sync_time,
                                                self.wait_time, self.net)
 
         # update sync time
         if node_j in self.net.hubs:
             label_j.sync_time = label_j.arrival_time
-        else:
-            pass
 
         # update waiting time
-        if (node_i, node_j) in self.net.arcs_3 or (node_i, node_j) in self.net.arcs_4:
+        if arc in self.net.arcs_3 or arc in self.net.arcs_4:
             label_j.wait_time = max(self.wait_time, label_j.arrival_time - label_j.sync_time)
         else:
             label_j.wait_time = 0
@@ -160,14 +173,17 @@ class LabelForward:
             if not farkas:
                 label_j.cost += label_j.arrival_time
 
-        if label_j.path == test_path:
-            sds = 0
+        # update auxiliary infos
+        if arc in self.net.arcs_3 or arc in self.net.arcs_4:
+            label_j.drone_flights[label_j.latest_hub].add(node_j)
+        elif arc in self.net.arcs_1 or arc in self.net.arcs_5:
+            label_j.truck_path.append(node_j)
 
         return label_j
 
     def __eq__(self, other):
         if isinstance(other, LabelForward):
-            return self.path == other.path  # Consider customers equal if they have the same ID
+            return self.truck_path == other.truck_path and self.drone_flights == other.drone_flights
         return False
 
     def __hash__(self):

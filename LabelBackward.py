@@ -3,15 +3,21 @@ from GeneralHelper import *
 
 
 class LabelBackward:
-    def __init__(self, path, truck_load, drones_used, arrival_times, arrival_ubs, cost, depth):
+    def __init__(self, path, truck_load, drones_used, arrival_times, arrival_ubs, cost, depth, drone_flights,
+                 truck_path, pending_flights):
         self.path = path  # Ordered sequence of visited nodes
         self.truck_load = truck_load  # Truck loading weight
         self.drones_used = drones_used  # Number of drones used
         self.arrival_times = arrival_times  # List of arrival times
         self.arrival_ubs = arrival_ubs  # Arrival time upper bounds
+        # auxiliary components
         self.net = GeneralHelper.transformed_net
         self.cost = cost  # reduced cost
         self.depth = depth
+        self.alternative_extensions = {node_j for node_j in self.net.in_arcs[self.path[0]]}
+        self.drone_flights = {k: v.copy() for k, v in drone_flights.items()}
+        self.truck_path = truck_path
+        self.pending_flights = pending_flights.copy()
 
     def dominates(self, other, farkas, duals):
         """Check if this label dominates another."""
@@ -40,38 +46,54 @@ class LabelBackward:
         elif self.drones_used < other.drones_used:
             strict = True
 
-        customer_on_path1 = [node for node in self.path if node in self.net.customers]
-        customer_on_path2 = [node for node in other.path if node in self.net.customers]
-
-        if not farkas:  # normal pricing
-            lhs = rhs = 0
-            for i in range(len(customer_on_path1)):
-                node = customer_on_path1[i]
-                if i == len(customer_on_path1) - 1:  # depot sink node
-                    lhs += (self.net.a_lb[node] - self.arrival_ubs[i])
-                else:
-                    lhs -= (self.arrival_ubs[i] - self.net.a_lb[node]) ** 2
-
-            for node in customer_on_path2:
-                if node in customer_on_path1:
-                    continue
-                index = self.net.customers.index(node.replace("_prime", ""))
-                rhs += duals["mu"][index]
-
-            if lhs < rhs:
+        # cost-based dominance
+        if len(self.pending_flights) + len(other.pending_flights) == 0:
+            if self.cost > other.cost:
                 return False
-            elif lhs > rhs:
+            elif self.cost < other.cost:
                 strict = True
-        else:  # Farkas pricing
-            c_1 = cal_label_cost_farkas(self.net, self.path, duals)
-            c_2 = cal_label_cost_farkas(self.net, other.path, duals)
-            if c_1 > c_2:
-                return False
-            elif c_1 < c_2:
-                strict = True
+                GeneralHelper.backward_cost_dominance_num += 1
+        else:  # this is not conclusive
+            return False
 
-        if strict:
-            GeneralHelper.backward_dominance_num += 1
+        # if not farkas:  # normal pricing
+        #     # cost-based dominance
+        #     if self.cost < other.cost:
+        #         strict = True
+        #         GeneralHelper.backward_cost_dominance_num += 1
+        #         return strict
+        #
+        #     # # arrival time-based dominance
+        #     # lhs = rhs = 0
+        #     # customer_on_path1 = [node for node in self.path if node in self.net.customers]
+        #     # customer_on_path2 = [node for node in other.path if node in self.net.customers]
+        #     # for i in range(len(customer_on_path1)):
+        #     #     node = customer_on_path1[i]
+        #     #     if i == len(customer_on_path1) - 1:  # depot sink node
+        #     #         lhs += (self.net.a_lb[node] - self.arrival_ubs[i])
+        #     #     else:
+        #     #         lhs -= (self.arrival_ubs[i] - self.net.a_lb[node]) ** 2
+        #     #
+        #     # for node in customer_on_path2:
+        #     #     if node in customer_on_path1:
+        #     #         continue
+        #     #     index = self.net.customers.index(node.replace("_prime", ""))
+        #     #     rhs += duals["mu"][index]
+        #     #
+        #     # if lhs < rhs:
+        #     #     return False
+        #     # elif lhs > rhs:
+        #     #     strict = True
+        # else:  # Farkas pricing
+        #     c_1 = cal_label_cost_farkas(self.net, self.path, duals)
+        #     c_2 = cal_label_cost_farkas(self.net, other.path, duals)
+        #     if c_1 > c_2:
+        #         return False
+        #     elif c_1 < c_2:
+        #         strict = True
+
+        # if strict:
+        #     GeneralHelper.backward_arrival_dominance_num += 1
 
         # here all conditions are satisfied, we need at least one is strict
         return strict
@@ -135,18 +157,26 @@ class LabelBackward:
         """
         node_i = self.path[0]
 
+        if self.path == ['H1_prime', 'C3_prime', 'C1_prime', 'Sink'] and node_j == "H1":
+            sdsa = 0
+
         # Use a shallow copy where possible to avoid unnecessary list duplications
         label_j = self.__class__(
-            path=[node_j] + self.path,
+            path=self.path[:],
             truck_load=self.truck_load,
             drones_used=self.drones_used,  # This may be updated below
             arrival_times=self.arrival_times[:],
             arrival_ubs=self.arrival_ubs[:],
             cost=self.cost,
-            depth=self.depth + 1
-        )
+            depth=self.depth + 1,
+            drone_flights=self.drone_flights,
+            truck_path=self.truck_path[:],
+            pending_flights=self.pending_flights)
+        label_j.alternative_extensions = {node for node in self.net.in_arcs[node_j]}
 
-        # Update drones_used efficiently
+        label_j.path = [node_j] + label_j.path
+
+        # Update drones_used
         label_j.drones_used = self.drones_used + 1 \
             if (node_j, node_i) in self.net.arcs_4 or (node_j, node_i) in self.net.arcs_5 else 0
 
@@ -154,63 +184,83 @@ class LabelBackward:
         if not farkas and node_j != self.net.depot_source:
             label_j.arrival_ubs = self.measure_arrival_ubs()
 
-        # update delta_a
-        delta_a = []
         arc = (node_j, node_i)
-        prefix = None
-        if arc in self.net.arcs_1 or arc in self.net.arcs_2:
-            delta_a = [self.net.travel_times[arc]] * len(self.path)
-        elif arc in self.net.arcs_4 or arc in self.net.arcs_5:
-            delta_a = [0] * len(self.path)
-        elif arc in self.net.arcs_3:
-            prefix, node_m_next = find_prefix(self.path, self.net)
-            for i in range(len(self.path)):
-                node_n = self.path[i]
-                if node_n in prefix:
-                    delta_a.append(self.net.travel_times[(node_j, node_n)])
-                else:
-                    wait_time = max([self.net.travel_times[(node_j, n_prime)] for n_prime in prefix])
-                    travel_time = self.net.travel_times[(node_j.replace("_prime", ""), node_m_next)]
-                    delta_a.extend([wait_time + travel_time] * (len(self.path) - len(prefix)))
-                    break
 
-        # update the reduced cost
-        if arc in self.net.arcs_1:
-            sum_term = sum(
-                delta_a[i] ** 2 + 2 * delta_a[i] * (
-                        self.arrival_times[i] - self.net.a_lb[node.replace("_prime", "")])
-                for i, node in enumerate(self.path) if node in self.net.customers
-            )
-            # condition 1
+        # update cost
+        if not farkas:
+            # update delta_a
+            delta_a = []
+            prefix = None
+            if arc in self.net.arcs_1 or arc in self.net.arcs_2:
+                delta_a = [self.net.travel_times[arc]] * len(self.path)
+            elif arc in self.net.arcs_4 or arc in self.net.arcs_5:
+                delta_a = [0] * len(self.path)
+            elif arc in self.net.arcs_3:
+                prefix, node_m_next = find_prefix(self.path, self.net)
+                for i in range(len(self.path)):
+                    node_n = self.path[i]
+                    if node_n in prefix:
+                        delta_a.append(self.net.travel_times[(node_j, node_n)])
+                    else:
+                        wait_time = max([self.net.travel_times[(node_j, n_prime)] for n_prime in prefix])
+                        travel_time = self.net.travel_times[(node_j.replace("_prime", ""), node_m_next)]
+                        delta_a.extend([wait_time + travel_time] * (len(self.path) - len(prefix)))
+                        break
+
+            # cost update
+            if arc in self.net.arcs_1:
+                sum_term = sum(
+                    delta_a[i] ** 2 + 2 * delta_a[i] * (
+                            self.arrival_times[i] - self.net.a_lb[node.replace("_prime", "")])
+                    for i, node in enumerate(self.path) if node in self.net.customers
+                )
+                # condition 1
+                if node_j in self.net.customers:
+                    index = self.net.customers.index(node_j.replace("_prime", ""))
+                    label_j.cost = self.cost + delta_a[-1] + sum_term - duals["mu"][index]
+                # condition 2
+                else:
+                    label_j.cost = self.cost + delta_a[-1] + sum_term
+            # condition 3
+            elif arc in self.net.arcs_3:
+                sum_term = sum(
+                    delta_a[i] ** 2 + 2 * delta_a[i] * (
+                            self.arrival_times[i] - self.net.a_lb[node.replace("_prime", "")])
+                    for i, node in enumerate(self.path) if node in self.net.customers and node not in prefix
+                )
+
+                rho = sum(
+                    (self.arrival_times[i] + delta_a[i] - self.net.a_lb[node.replace("_prime", "")]) ** 2 - duals["mu"][
+                        self.net.customers.index(node.replace("_prime", ""))]
+                    for i, node in enumerate(prefix)
+                )
+
+                label_j.cost = self.cost + delta_a[-1] + rho + sum_term
+            else:
+                label_j.cost = self.cost + delta_a[-1]
+
+            # update arrival times
+            label_j.arrival_times = [0] + [self.arrival_times[i] + delta_num for i, delta_num in enumerate(delta_a)]
+        else:  # farkas
             if node_j in self.net.customers:
                 index = self.net.customers.index(node_j.replace("_prime", ""))
-                label_j.cost = self.cost + delta_a[-1] + sum_term - duals["mu"][index]
-            # condition 2
+                label_j.cost = self.cost - duals["mu"][index]
             else:
-                label_j.cost = self.cost + delta_a[-1] + sum_term
-        # condition 3
-        elif arc in self.net.arcs_3:
-            sum_term = sum(
-                delta_a[i] ** 2 + 2 * delta_a[i] * (
-                        self.arrival_times[i] - self.net.a_lb[node.replace("_prime", "")])
-                for i, node in enumerate(self.path) if node in self.net.customers and node not in prefix
-            )
+                label_j.cost = self.cost
 
-            rho = sum(
-                (self.arrival_times[i] + delta_a[i] - self.net.a_lb[node.replace("_prime", "")]) ** 2 - duals["mu"][
-                    self.net.customers.index(node.replace("_prime", ""))]
-                for i, node in enumerate(prefix)
-            )
+        # update auxiliary infos
+        if arc in self.net.arcs_4 or arc in self.net.arcs_5:
+            label_j.pending_flights.add(node_j)
 
-            label_j.cost = self.cost + delta_a[-1] + rho + sum_term
-        else:
-            label_j.cost = self.cost + delta_a[-1]
+        if arc in self.net.arcs_2:
+            label_j.drone_flights[node_j] = label_j.pending_flights.copy()
+            label_j.pending_flights.clear()
 
-        # update arrival times
-        label_j.arrival_times = [0] + [self.arrival_times[i] + delta_num for i, delta_num in enumerate(delta_a)]
+        if arc in self.net.arcs_1 or arc in self.net.arcs_2:
+            label_j.truck_path = [node_j] + label_j.truck_path
 
-        if label_j.path == test_path:
-            sdas = 0
+        # if is_route_subset(test_path, (label_j.truck_path, label_j.drone_flights)):
+        #     sdas = 0
 
         return label_j
 

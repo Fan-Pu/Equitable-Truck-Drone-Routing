@@ -42,6 +42,7 @@ class FullModel:
         self.drone_travel_times = self.net.drone_travel_times
         self.truck_travel_times = self.net.truck_travel_times
         self.demand_weights = self.net.demand_weights
+        self.final_route = []
 
     def visualize(self):
         # pos = nx.spring_layout(self.truck_net, seed=self.seed)
@@ -113,11 +114,11 @@ class FullModel:
         for n in range(len(self.all_nodes_indices)):
             a_dict[n] = model.addVar(name=f"t_{n}", vtype=GRB.CONTINUOUS, lb=0)
             for d in range(self.total_drone_num):
-                t_dict[(n, d)] = model.addVar(name=f"t_{(n, d)}", vtype=GRB.CONTINUOUS, lb=0)
                 wk_dict[(n, d)] = model.addVar(name=f"wk_{(n, d)}", vtype=GRB.CONTINUOUS, lb=0)
                 ad_dict[(n, d)] = model.addVar(name=f"ad_{(n, d)}", vtype=GRB.CONTINUOUS, lb=0)
             for k in range(self.net.num_trucks):
                 ak_dict[(n, k)] = model.addVar(name=f"ak_{(n, k)}", vtype=GRB.CONTINUOUS, lb=0)
+                t_dict[(n, k)] = model.addVar(name=f"t_{(n, k)}", vtype=GRB.CONTINUOUS, lb=0)
 
         # add objective function
         obj_expr = 0
@@ -324,15 +325,24 @@ class FullModel:
                     id += 1
 
         # test
-        # self.constraints.append(model.addConstr(z_list[(2, 3, 0, 0)] == 1))
-        # self.constraints.append(model.addConstr(y_dict[(6, 3, 0)] >= 0.5))
-        # self.constraints.append(model.addConstr(y_dict[(6, 2, 0)] >= 1))
-        # self.constraints.append(model.addConstr(x_dict[(3, 7, 0)] == 1))
-        # self.constraints.append(model.addConstr(z_list[(7, 8, 0, 0)] == 1))
+        # for k in range(len(GeneralHelper.route_list)):
+        #     route = GeneralHelper.route_list[k]
+        #     for node_pre, node_next in zip(route['truck'], route['truck'][1:]):
+        #         i = self.net.all_nodes_indices[node_pre]
+        #         j = self.net.all_nodes_indices[node_next]
+        #         model.addConstr(x_dict[(i, j, k)] == 1, "")
+        #     launches = route['launches']
+        #     drone_visits = route['drone']
+        #     for m in range(len(launches)):
+        #         launch_point = launches[m]
+        #         drones = drone_visits[m]
+        #         for d in range(len(drones)):
+        #             i = self.all_nodes_indices[launch_point]
+        #             node_j = drones[d]
+        #             j = self.all_nodes_indices[node_j]
+        #             model.addConstr(y_dict[(i, j, k * num_drones_per_truck + d)] == 1, "")
 
-        # self.constraints.append(model.addConstr(y_dict[(3, 1, 0)] == 1))
-        # self.constraints.append(model.addConstr(y_dict[(1, 4, 0)] == 1))
-
+        # model.setParam(GRB.Param.TimeLimit, 1)
         model.update()
         model.write("full_model.lp")
         model.optimize()
@@ -353,7 +363,7 @@ class FullModel:
             # Extract and store the solution values for the decision variables
             self.x_values = {(i, j, k): var.X for (i, j, k), var in x_dict.items()}
             self.y_values = {(i, j, d): var.X for (i, j, d), var in y_dict.items()}
-            self.t_values = {(n, d): var.X for (n, d), var in t_dict.items()}
+            self.t_values = {(n, k): var.X for (n, k), var in t_dict.items()}
             self.wk_values = {(n, d): var.X for (n, d), var in wk_dict.items()}
             self.ak_value = {(n, k): var.X for (n, k), var in ak_dict.items()}
             self.ad_value = {(n, d): var.X for (n, d), var in ad_dict.items()}
@@ -368,6 +378,11 @@ class FullModel:
             for (i, j, d), var in y_dict.items():
                 if abs(var.X - 1) <= close_tolerance:
                     drone_routes.append((self.all_nodes[i], self.all_nodes[j], d))
+            fdsfsd = 0
+        solving_time = model.Runtime
+        mip_gap_percent = model.MIPGap * 100
+
+        return model.objVal, solving_time, mip_gap_percent
 
     def visualize_routes(self):
         pos = nx.circular_layout(self.net.truck_net)

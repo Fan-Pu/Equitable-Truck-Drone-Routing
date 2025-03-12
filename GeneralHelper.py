@@ -2,20 +2,55 @@ import random
 import re
 from line_profiler import LineProfiler
 import networkx as nx
-
+from collections import defaultdict
 from Network import Network
 from TransformedNetwork import TransformedNetwork
 
 # test_path = ['Source', 'H2', 'H2_prime', 'C1_prime', 'C3_prime', 'Sink']
-test_path = ['Source', 'H1', 'H1_prime', 'C1_prime', 'C2_prime', 'Sink']
+test_path = (tuple(['Source', 'H1', 'Sink']), frozenset(
+    {
+        'H1': frozenset({'C1_prime', 'C3_prime'})
+    }.items()
+))
+# test_path = ['Source', 'H1', 'H1_prime', 'C4_prime', 'Sink']
+# test_path = ['Source', 'C2', 'Sink']
+
+# test_path_list = [
+#     ['Source', 'H1', 'H1_prime', 'C1_prime', 'C3_prime', 'Sink'],
+#     ['Source', 'H1', 'H1_prime', 'C4_prime', 'Sink'],
+#     ['Source', 'C2', 'Sink']
+# ]
+
+final_model = None
+
+test_path_list = [
+    (tuple(['Source', 'H1', 'Sink']), frozenset(
+        {
+            'H1': frozenset({'C1_prime', 'C3_prime'})
+        }.items()
+    )),
+    (tuple(['Source', 'H1', 'Sink']), frozenset(
+        {
+            'H1': frozenset({'C4_prime'})
+        }.items()
+    )),
+    (tuple(['Source', 'C2', 'Sink']), frozenset(
+        {}.items()
+    ))
+]
+
+test_node_ids = []
+
+test_sols = []
 
 forward_dominance_num = 0
-backward_dominance_num = 0
+backward_cost_dominance_num = 0
+backward_arrival_dominance_num = 0
 label_merge_num = 0
 
 lp = LineProfiler()
 
-LSA_mode = 0  # 0 for combined, 1 for forward, 2 for backward
+LSA_mode = 2  # 0 for combined, 1 for forward, 2 for backward
 
 seed = 2024
 
@@ -41,15 +76,34 @@ drone_endurance = 150
 # for sub-tour elimination
 epsilon = 1
 
-# num_customers = 5
-# num_hubs = 2
-# num_trucks = 2
-# num_drones_per_truck = 2
-
+# needs to branch
 num_customers = 4
-num_hubs = 2
-num_trucks = 2
+num_hubs = 3
+num_trucks = 3
 num_drones_per_truck = 2
+
+# num_customers = 10
+# num_hubs = 4
+# num_trucks = 4
+# num_drones_per_truck = 3
+
+# num_customers = 9
+# num_hubs = 4
+# num_trucks = 5
+# num_drones_per_truck = 3
+
+# route_list = [{'id': 4, 'truck': ['Source', 'C5', 'Sink'], 'drone': [], 'launches': [], 'cost': 550},
+#               {'id': 6, 'truck': ['Source', 'C7', 'Sink'], 'drone': [], 'launches': [], 'cost': 745},
+#               {'id': 47, 'truck': ['Source', 'C2', 'C9', 'Sink'], 'drone': [], 'launches': [], 'cost': 1586}]
+
+node_ids = set()
+node_depth = set()
+local_estimates = {}
+node_dict = {}
+node_visit_list = []
+
+last_node_vars = None
+last_node_vals = None
 
 M = 10000
 
@@ -285,7 +339,6 @@ def elementary_path_to_route(path, idx, original_net, trans_net):
     """
     convert the elementary path derived from LSA to path stored in solution pool
     """
-
     truck_route = []
     launches = []
     drone_route = []
@@ -341,6 +394,41 @@ def elementary_path_to_route(path, idx, original_net, trans_net):
     return route_key, route
 
 
+def hashable_path_to_route(path, idx, trans_net):
+    """
+    convert the hashable path derived from LSA to path stored in solution pool
+    """
+    truck_route = path[0]
+    drone_route = {key: value for key, value in path[-1]}
+    launches = list(drone_route.keys())
+
+    # calculate the route cost
+    arrival_time = 0
+    wait_time = 0
+    cost = 0
+    for j in range(1, len(truck_route)):
+        node_pre = truck_route[j - 1]
+        node_j = truck_route[j]
+        arrival_time += trans_net.travel_times[(node_pre, node_j)] + wait_time
+        wait_time = 0
+        # update sync time
+        if node_j in launches:
+            sync_time = arrival_time
+            drone_travel_times = []
+            for drone_visit in drone_route[node_j]:
+                drone_travel_time = trans_net.travel_times[(node_j + "_prime", drone_visit)]
+                drone_travel_times.append(drone_travel_time)
+                cost += (sync_time + drone_travel_time - trans_net.a_lb[drone_visit]) ** 2
+            wait_time = max(drone_travel_times)
+        elif node_j in trans_net.customers:
+            cost += (arrival_time - trans_net.a_lb[node_j]) ** 2
+        elif node_j == trans_net.depot_sink:
+            cost += arrival_time
+
+    route = {'id': idx, 'truck': truck_route, 'drone': drone_route, 'launches': launches, 'cost': cost}
+    return path, route
+
+
 def find_initial_routes(original_net):
     routes = []
     truck_travel_times = original_net.truck_travel_times
@@ -382,8 +470,8 @@ def find_initial_routes(original_net):
         return_time = arrive_time + truck_travel_times[(n_name, depot_sink)]
         cost += return_time
 
-        key = f"{depot_source}-{n_name}-{depot_sink}"
-        route = {'id': len(routes), 'truck': truck_route, 'drone': [], 'launches': [], 'cost': cost}
+        route = {'id': len(routes), 'truck': truck_route, 'drone': {}, 'launches': [], 'cost': cost}
+        key = truck_drone_path_to_hashable(truck_route, {})
         routes.append((key, route))
 
     return routes
@@ -465,3 +553,25 @@ def find_prefix(path, trans_net):
             break
         prefix.append(node_next)
     return prefix, node_m_next
+
+
+def truck_drone_path_to_hashable(truck_path, drone_flights):
+    truck_path_tuple = tuple(truck_path)
+    drone_flight_frozen = {k: frozenset(v) for k, v in drone_flights.items()}
+    return truck_path_tuple, frozenset(drone_flight_frozen.items())
+
+
+def is_route_subset(route_1, route_2):
+    """
+    check whether route_2 is subset of route_1
+    """
+    route_truck_1, route_drone_1 = route_1
+    route_truck_2, route_drone_2 = route_2
+    route_drone_1 = {k: set(v) for k, v in route_drone_1}
+    route_drone_2 = {k: set(v) for k, v in route_drone_2}
+    if not set(route_truck_2).issubset(set(route_truck_1)):
+        return False
+    for key, visit_set in route_drone_2.items():
+        if key not in route_drone_1.keys() or route_drone_1[key] != visit_set:
+            return False
+    return True

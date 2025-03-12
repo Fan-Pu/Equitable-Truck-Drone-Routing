@@ -1,0 +1,18 @@
+STATISTICS
+  Problem name     : RMP
+  Variables        : 4 (4 binary, 0 integer, 0 implicit integer, 0 continuous)
+  Constraints      : 5 initial, 5 maximal
+OBJECTIVE
+  Sense            : minimize
+VARIABLES
+  [binary] <z_0>: obj=1684, original bounds=[0,1]
+  [binary] <z_1>: obj=487, original bounds=[0,1]
+  [binary] <z_2>: obj=2306, original bounds=[0,1]
+  [binary] <z_3>: obj=911, original bounds=[0,1]
+CONSTRAINTS
+  [linear] <visit_customer_0>: <z_0>[B] == 1;
+  [linear] <visit_customer_1>: <z_1>[B] == 1;
+  [linear] <visit_customer_2>: <z_2>[B] == 1;
+  [linear] <visit_customer_3>: <z_3>[B] == 1;
+  [linear] <truck_fleet>: <z_0>[B] +<z_1>[B] +<z_2>[B] +<z_3>[B] <= 3;
+END
