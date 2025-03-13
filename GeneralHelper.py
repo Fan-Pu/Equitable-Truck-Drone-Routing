@@ -50,7 +50,7 @@ label_merge_num = 0
 
 lp = LineProfiler()
 
-LSA_mode = 2  # 0 for combined, 1 for forward, 2 for backward
+LSA_mode = 0  # 0 for combined, 1 for forward, 2 for backward
 
 seed = 2024
 
@@ -77,15 +77,15 @@ drone_endurance = 150
 epsilon = 1
 
 # needs to branch
-num_customers = 4
-num_hubs = 3
-num_trucks = 3
-num_drones_per_truck = 2
+# num_customers = 4
+# num_hubs = 3
+# num_trucks = 3
+# num_drones_per_truck = 2
 
-# num_customers = 10
-# num_hubs = 4
-# num_trucks = 4
-# num_drones_per_truck = 3
+num_customers = 10
+num_hubs = 4
+num_trucks = 4
+num_drones_per_truck = 3
 
 # num_customers = 9
 # num_hubs = 4

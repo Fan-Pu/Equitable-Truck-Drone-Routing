@@ -22,8 +22,8 @@ class BiDirectionalLabelSetting:
         self.backward_label_queue = queue.PriorityQueue()
         self.forward_disposed_labels = set()  # labels dominated by other labels
         self.backward_disposed_labels = set()
-        self.parallel_lock = threading.Lock()
-        self.print_lock = threading.Lock()
+        # self.parallel_lock = threading.Lock()
+        # self.print_lock = threading.Lock()
         self.termination_event = threading.Event()  # Shared flag for stopping threads
 
     def forward_labeling_one_step(self, farkas, node_info):
@@ -44,16 +44,18 @@ class BiDirectionalLabelSetting:
                 self.dominance_check(label_j, self.forward_labels[node_j], farkas))
             self.forward_disposed_labels.update(dominated_by_j)
             # remove the labels dominated by j
-            with self.parallel_lock:
-                self.forward_labels[node_j].difference_update(dominated_by_j)
+            # with self.parallel_lock:
+            #     self.forward_labels[node_j].difference_update(dominated_by_j)
+            self.forward_labels[node_j].difference_update(dominated_by_j)
             # if j is not dominated by others
             if not other_dominates_j:
                 is_new_path = True if label_j not in self.forward_labels[node_j] else False
                 if not is_new_path:
                     continue
                 # is a new path
-                with self.parallel_lock:
-                    self.forward_labels[node_j].add(label_j)
+                # with self.parallel_lock:
+                #     self.forward_labels[node_j].add(label_j)
+                self.forward_labels[node_j].add(label_j)
                 # only if this label are possible to be extended
                 if len(label_j.alternative_extensions) > 0:
                     self.forward_label_queue.put((-label_j.depth, label_j))
@@ -132,7 +134,14 @@ class BiDirectionalLabelSetting:
         return new_labels
 
     def merge_labels(self, node, new_labels, farkas, node_info, mode):
-        """Merge forward and backward labels at common nodes."""
+        """
+        Merge forward and backward labels at common nodes.
+        :param node:
+        :param new_labels:
+        :param farkas:
+        :param node_info:
+        :param mode: 0 for merging new forward labels with existing backward labels, 1 otherwise
+        """
         with self.parallel_lock:
             if mode == 0:
                 label_pairs = [(f_label, b_label) for f_label in new_labels for b_label in
@@ -146,17 +155,24 @@ class BiDirectionalLabelSetting:
                 continue
 
             complete_path = f_label.path + b_label.path[1:]
+            if len(b_label.pending_flights) > 0:
+                complete_truck_path = f_label.truck_path + b_label.truck_path
+            else:
+                complete_truck_path = f_label.truck_path + b_label.truck_path[1:]
+
+            complete_drone_flights = {k: f_label.drone_flights.get(k, set()).union(b_label.drone_flights.get(k, set()))
+                                      for k in f_label.drone_flights.keys() | b_label.drone_flights.keys()}
+            if len(b_label.pending_flights) > 0:
+                complete_drone_flights[f_label.latest_hub].update(b_label.pending_flights)
+
+            hashable_path = truck_drone_path_to_hashable(complete_truck_path, complete_drone_flights)
 
             # Avoid duplicate computations
-            complete_path_tuple = tuple(complete_path)
-            if complete_path_tuple in self.explored_solutions:
+            if hashable_path in self.explored_solutions:
                 continue
 
             # Find last hub in the forward path
-            last_hub = next(
-                (node.replace("_prime", "") for node in reversed(f_label.path) if node in self.net.hubs),
-                None
-            )
+            last_hub = f_label.latest_hub
 
             # Compute total cost
             if not farkas:  # Normal pricing
@@ -171,13 +187,12 @@ class BiDirectionalLabelSetting:
             GeneralHelper.label_merge_num += 1
 
             # Update incumbent solution
-            route_key = "-".join(complete_path)
-            if route_key not in node_info.columns:  # Ignore existing columns
+            if hashable_path not in node_info.columns:  # Ignore existing columns
                 if total_cost < self.best_solution[0]:
-                    self.best_solution = (total_cost, complete_path, 0)
+                    self.best_solution = (total_cost, hashable_path, 0)
 
                 # Store newly explored solution
-                self.explored_solutions.add(complete_path_tuple)
+                self.explored_solutions.add(hashable_path)
 
     def check_merge_feasibility(self, f_label, b_label, common_node):
         if (set(f_label.path) & set(b_label.path)) != {common_node}:
@@ -263,17 +278,28 @@ class BiDirectionalLabelSetting:
                 future_forward = executor.submit(self.forward_thread, farkas, node_info)
                 future_backward = executor.submit(self.backward_thread, farkas, node_info)
 
+                # if len(node_info.columns) > 50:
+                #     lp.add_function(concurrent.futures.wait)
+                #     lp.enable()
+
                 # Wait for either thread to finish
-                done, _ = concurrent.futures.wait(
+                done, not_done = concurrent.futures.wait(
                     [future_forward, future_backward], return_when=concurrent.futures.FIRST_COMPLETED
                 )
 
-                # Stop the other thread as soon as one is done
-                self.termination_event.set()
+                # Cancel the unfinished task (optional)
+                for future in not_done:
+                    future.cancel()  # Attempts to stop the remaining task
 
-                # Ensure both threads terminate
-                future_forward.result()
-                future_backward.result()
+                # Retrieve the result from the completed future (if needed)
+                for future in done:
+                    result = future.result()  # Get result or handle exceptions
+                    print(f"Completed thread result: {result}")
+
+                # if len(node_info.columns) > 50:
+                #     lp.disable()
+                #     lp.print_stats()
+                #     input("")
 
                 self.print_runtime_info(s_time)
 
@@ -352,12 +378,12 @@ class BiDirectionalLabelSetting:
         # Signal the other thread to stop
         self.termination_event.set()
 
-        with self.print_lock:
-            sdas = 0
-            # print(f"****** forward terminate")
-            # print(f"forward queue: {self.forward_label_queue.qsize()}")
-            # print(f"backward queue: {self.backward_label_queue.qsize()}")
-            # print()
+        # with self.print_lock:
+        #     sdas = 0
+        #     print(f"****** forward terminate")
+        #     print(f"forward queue: {self.forward_label_queue.qsize()}")
+        #     print(f"backward queue: {self.backward_label_queue.qsize()}")
+        #     print()
         return None
 
     def backward_thread(self, farkas, node_info):
@@ -373,10 +399,10 @@ class BiDirectionalLabelSetting:
         # Signal the other thread to stop
         self.termination_event.set()
 
-        with self.print_lock:
-            ssdsa = 0
-            # print(f"****** backward terminate")
-            # print(f"forward queue: {self.forward_label_queue.qsize()}")
-            # print(f"backward queue: {self.backward_label_queue.qsize()}")
-            # print()
+        # with self.print_lock:
+        #     ssdsa = 0
+        #     print(f"****** backward terminate")
+        #     print(f"forward queue: {self.forward_label_queue.qsize()}")
+        #     print(f"backward queue: {self.backward_label_queue.qsize()}")
+        #     print()
         return None
