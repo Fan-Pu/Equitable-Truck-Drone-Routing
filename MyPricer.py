@@ -95,17 +95,19 @@ class MyPricer(Pricer):
         # bi-directional label setting
         label_setting = BiDirectionalLabelSetting(duals)
 
-        if not farkas and len(RMP.node_infos[node_id].columns) > 110:
-            profiler = cProfile.Profile()
-            profiler.enable()
-            reduced_cost, hashable_path, where = label_setting.solve(farkas, RMP.node_infos[node_id])
-            profiler.disable()
-            stats = pstats.Stats(profiler).sort_stats('cumulative')
-            stats.print_stats(20)  # print top 20 results
-            if stats.total_tt > 5:
-                sdas = 0
-        else:
-            reduced_cost, hashable_path, where = label_setting.solve(farkas, RMP.node_infos[node_id])
+        reduced_cost, hashable_path, where = label_setting.solve(farkas, RMP.node_infos[node_id])
+
+        # if not farkas and len(RMP.node_infos[node_id].columns) > 110:
+        #     # profiler = cProfile.Profile()
+        #     # profiler.enable()
+        #     reduced_cost, hashable_path, where = label_setting.solve(farkas, RMP.node_infos[node_id])
+        #     # profiler.disable()
+        #     # stats = pstats.Stats(profiler).sort_stats('cumulative')
+        #     # stats.print_stats(20)  # print top 20 results
+        #     # if stats.total_tt > 5:
+        #     #     sdas = 0
+        # else:
+        #     reduced_cost, hashable_path, where = label_setting.solve(farkas, RMP.node_infos[node_id])
 
         GeneralHelper.test_sols.append((farkas, hashable_path, where))
 

@@ -22,7 +22,8 @@ class BiDirectionalLabelSetting:
         self.backward_label_queue = queue.PriorityQueue()
         self.forward_disposed_labels = set()  # labels dominated by other labels
         self.backward_disposed_labels = set()
-        # self.parallel_lock = threading.Lock()
+        self.node_locks = defaultdict(threading.Lock)
+        self.parallel_lock = threading.Lock()
         # self.print_lock = threading.Lock()
         self.termination_event = threading.Event()  # Shared flag for stopping threads
 
@@ -106,7 +107,8 @@ class BiDirectionalLabelSetting:
                 self.dominance_check(label_j, self.backward_labels[node_j], farkas))
             self.backward_disposed_labels.update(dominated_by_j)
             # remove the labels dominated by j
-            with self.parallel_lock:
+            # with self.parallel_lock:
+            with self.node_locks[node_j]:
                 self.backward_labels[node_j].difference_update(dominated_by_j)
             # if j is not dominated by others
             if not other_dominates_j:
@@ -114,7 +116,8 @@ class BiDirectionalLabelSetting:
                 if not is_new_path:
                     continue
                 # is a new path
-                with self.parallel_lock:
+                # with self.parallel_lock:
+                with self.node_locks[node_j]:
                     self.backward_labels[node_j].add(label_j)
                 # only if this label are possibly to be extended
                 if len(label_j.alternative_extensions) > 0:
@@ -142,13 +145,16 @@ class BiDirectionalLabelSetting:
         :param node_info:
         :param mode: 0 for merging new forward labels with existing backward labels, 1 otherwise
         """
-        with self.parallel_lock:
-            if mode == 0:
-                label_pairs = [(f_label, b_label) for f_label in new_labels for b_label in
-                               list(self.backward_labels[node])]
-            else:
-                label_pairs = [(f_label, b_label) for f_label in list(self.forward_labels[node]) for b_label in
-                               new_labels]
+
+        # with self.parallel_lock:
+        #     if mode == 0:
+        #         label_pairs = [(f_label, b_label) for f_label in new_labels for b_label in
+        #                        list(self.backward_labels[node])]
+        #     else:
+        #         label_pairs = [(f_label, b_label) for f_label in list(self.forward_labels[node]) for b_label in
+        #                        new_labels]
+
+        label_pairs = self.compute_label_pairs(node, new_labels, mode)
 
         for f_label, b_label in label_pairs:
             if not self.check_merge_feasibility(f_label, b_label, f_label.path[-1]):
@@ -278,25 +284,24 @@ class BiDirectionalLabelSetting:
                 future_forward = executor.submit(self.forward_thread, farkas, node_info)
                 future_backward = executor.submit(self.backward_thread, farkas, node_info)
 
-                # if len(node_info.columns) > 50:
+                # if len(node_info.columns) > 100:
                 #     lp.add_function(concurrent.futures.wait)
                 #     lp.enable()
 
-                # Wait for either thread to finish
-                done, not_done = concurrent.futures.wait(
-                    [future_forward, future_backward], return_when=concurrent.futures.FIRST_COMPLETED
-                )
+                # # Wait for either thread to finish
+                # done, _ = concurrent.futures.wait(
+                #     [future_forward, future_backward], return_when=concurrent.futures.FIRST_COMPLETED
+                # )
 
-                # Cancel the unfinished task (optional)
-                for future in not_done:
-                    future.cancel()  # Attempts to stop the remaining task
+                for future in concurrent.futures.as_completed([future_forward, future_backward]):
+                    future.result()  # This prevents exceptions from being swallowed
 
-                # Retrieve the result from the completed future (if needed)
-                for future in done:
-                    result = future.result()  # Get result or handle exceptions
-                    print(f"Completed thread result: {result}")
+                self.termination_event.set()
 
-                # if len(node_info.columns) > 50:
+                # future_forward.result()
+                # future_backward.result()
+
+                # if len(node_info.columns) > 100:
                 #     lp.disable()
                 #     lp.print_stats()
                 #     input("")
@@ -406,3 +411,16 @@ class BiDirectionalLabelSetting:
         #     print(f"backward queue: {self.backward_label_queue.qsize()}")
         #     print()
         return None
+
+    def compute_label_pairs(self, node, new_labels, mode):
+        # Determine the label sources based on mode
+        if mode == 0:
+            with self.node_locks[node]:  # Lock only for this specific node
+                backward_labels_copy = list(self.backward_labels[node])  # Minimize locking duration
+            label_pairs = [(f_label, b_label) for f_label in new_labels for b_label in backward_labels_copy]
+        else:
+            with self.node_locks[node]:  # Lock only for this specific node
+                forward_labels_copy = list(self.forward_labels[node])  # Minimize locking duration
+            label_pairs = [(f_label, b_label) for f_label in forward_labels_copy for b_label in new_labels]
+
+        return label_pairs
