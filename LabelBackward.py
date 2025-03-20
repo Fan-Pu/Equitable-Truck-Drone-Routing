@@ -18,6 +18,7 @@ class LabelBackward:
         self.drone_flights = {k: v.copy() for k, v in drone_flights.items()}
         self.truck_path = truck_path
         self.pending_flights = pending_flights.copy()
+        self.hash_path = truck_drone_path_to_hashable(self.truck_path, self.drone_flights)
 
     def dominates(self, other, farkas, duals):
         """Check if this label dominates another."""
@@ -295,11 +296,11 @@ class LabelBackward:
 
     def __eq__(self, other):
         if isinstance(other, LabelBackward):
-            return self.path == other.path  # Consider customers equal if they have the same ID
+            return self.hash_path == other.hash_path  # Consider customers equal if they have the same ID
         return False
 
     def __hash__(self):
-        return hash(tuple(self.path))  # Hash based on ID so customers with same ID are treated as the same
+        return self.hash_path  # Hash based on ID so customers with same ID are treated as the same
 
     def __lt__(self, other):
         """Defines how to compare two LabelForward objects"""

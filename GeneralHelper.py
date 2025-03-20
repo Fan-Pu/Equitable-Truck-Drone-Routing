@@ -5,6 +5,7 @@ import networkx as nx
 from collections import defaultdict
 from Network import Network
 from TransformedNetwork import TransformedNetwork
+from sortedcontainers import SortedSet
 
 # test_path = ['Source', 'H2', 'H2_prime', 'C1_prime', 'C3_prime', 'Sink']
 test_path = (tuple(['Source', 'H1', 'Sink']), frozenset(
@@ -20,6 +21,10 @@ test_path = (tuple(['Source', 'H1', 'Sink']), frozenset(
 #     ['Source', 'H1', 'H1_prime', 'C4_prime', 'Sink'],
 #     ['Source', 'C2', 'Sink']
 # ]
+
+columns_list = []
+
+merge_num = 0
 
 final_model = None
 
@@ -47,10 +52,12 @@ forward_dominance_num = 0
 backward_cost_dominance_num = 0
 backward_arrival_dominance_num = 0
 label_merge_num = 0
+label_forward_num = 0
+label_backward_num = 0
 
 lp = LineProfiler()
 
-LSA_mode = 0  # 0 for combined, 1 for forward, 2 for backward
+LSA_mode = 2  # 0 for combined, 1 for forward, 2 for backward
 
 seed = 2024
 

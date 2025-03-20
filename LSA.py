@@ -7,33 +7,46 @@ import GeneralHelper
 from GeneralHelper import *
 from LabelForward import LabelForward
 from LabelBackward import LabelBackward
+import itertools
+from collections import OrderedDict, defaultdict
 
 
 class BiDirectionalLabelSetting:
     def __init__(self, duals):
         random.seed(seed)
         self.net = GeneralHelper.transformed_net
-        self.forward_labels = {node: set() for node in self.net.all_nodes}
-        self.backward_labels = {node: set() for node in self.net.all_nodes}
+        self.forward_labels = {node: OrderedDict() for node in self.net.all_nodes}  # save forward label keys
+        self.backward_labels = {node: OrderedDict() for node in self.net.all_nodes}  # save backward label keys
+        # self.forward_label_keys = {node: OrderedDict() for node in self.net.all_nodes}  # save forward label keys
+        # self.backward_label_keys = {node: OrderedDict() for node in self.net.all_nodes}  # save backward label keys
+        # self.forward_label_dict = defaultdict()  # save all forward labels
+        # self.backward_label_dict = defaultdict()  # save all backward labels
         self.best_solution = (np.inf, None, -1)  # the third element: 0 from merge, 1 from forward, 2 from backward
-        self.explored_solutions = set()  # explored labels
+        self.explored_solutions = SortedSet()  # explored labels
         self.duals = duals
         self.forward_label_queue = queue.PriorityQueue()  # priority queue, ordered by depth
         self.backward_label_queue = queue.PriorityQueue()
-        self.forward_disposed_labels = set()  # labels dominated by other labels
-        self.backward_disposed_labels = set()
-        self.node_locks = defaultdict(threading.Lock)
-        self.parallel_lock = threading.Lock()
-        # self.print_lock = threading.Lock()
+        self.forward_label_counter = itertools.count()
+        self.backward_label_counter = itertools.count()
+        self.forward_disposed_labels = SortedSet()  # labels dominated by other labels
+        self.backward_disposed_labels = SortedSet()
+        # self.node_locks = defaultdict(threading.Lock)
+        # self.best_sol_lock = threading.Lock()
+        self.print_lock = threading.Lock()
         self.termination_event = threading.Event()  # Shared flag for stopping threads
+        self.forward_label_locks = defaultdict(threading.Lock)
+        self.backward_label_locks = defaultdict(threading.Lock)
+        self.forward_update_cond = threading.Condition()  # the condition signaling the update of forward labels
+        self.backward_update_cond = threading.Condition()  # the condition signaling the update of backward labels
 
     def forward_labeling_one_step(self, farkas, node_info):
         """Forward search from the depot."""
         new_labels = defaultdict(list)
+        awaiting_labels = defaultdict(dict)  # the new labels awaiting to be appended, key: node, value: dict
 
-        _, label = self.forward_label_queue.get()
+        _, _, label = self.forward_label_queue.get()
         # check extending
-        available_extensions = set(label.alternative_extensions)
+        available_extensions = SortedSet(label.alternative_extensions)
         for node_j in available_extensions:
             label.alternative_extensions.remove(node_j)
             if not label.allow_extend(node_j):
@@ -42,44 +55,61 @@ class BiDirectionalLabelSetting:
             label_j = label.extend(node_j, self.duals, farkas)
             # check dominance
             dominated_by_j, other_dominates_j = (
-                self.dominance_check(label_j, self.forward_labels[node_j], farkas))
-            self.forward_disposed_labels.update(dominated_by_j)
+                self.dominance_check(label_j, self.forward_labels[node_j].values(), farkas))
             # remove the labels dominated by j
+            # with self.forward_label_locks[node_j]:
+            #     self.forward_labels[node_j] -= dominated_by_j
+            for key in dominated_by_j.keys():
+                self.forward_labels[node_j].pop(key, None)
+            # self.forward_labels[node_j].difference_update(dominated_by_j)
             # with self.parallel_lock:
             #     self.forward_labels[node_j].difference_update(dominated_by_j)
-            self.forward_labels[node_j].difference_update(dominated_by_j)
+
             # if j is not dominated by others
             if not other_dominates_j:
-                is_new_path = True if label_j not in self.forward_labels[node_j] else False
+                is_new_path = True if tuple(label_j.path) not in self.forward_labels[node_j].keys() else False
                 if not is_new_path:
                     continue
                 # is a new path
                 # with self.parallel_lock:
                 #     self.forward_labels[node_j].add(label_j)
-                self.forward_labels[node_j].add(label_j)
+                # self.forward_labels[node_j].add(label_j)
+                awaiting_labels[node_j][tuple(label_j.path)] = label_j
                 # only if this label are possible to be extended
                 if len(label_j.alternative_extensions) > 0:
-                    self.forward_label_queue.put((-label_j.depth, label_j))
+                    self.forward_label_queue.put((-label_j.depth, next(self.forward_label_counter), label_j))
                 # check whether it is completed, update the incumbent
                 if node_j == self.net.depot_sink:
                     hashable_path = truck_drone_path_to_hashable(label_j.truck_path, label_j.drone_flights)
                     # do not consider the existing columns
                     if hashable_path not in node_info.columns:
+                        # with self.best_sol_lock:
+                        #     if label_j.cost < self.best_solution[0]:
+                        #         self.best_solution = (label_j.cost, hashable_path, 1)
                         if label_j.cost < self.best_solution[0]:
                             self.best_solution = (label_j.cost, hashable_path, 1)
                         if hashable_path not in self.explored_solutions:
                             self.explored_solutions.add(hashable_path)
                 # only append the labels that have not been added
                 new_labels[node_j].append(label_j)
+        # update the forward_labels at once
+        for node, labels in awaiting_labels.items():
+            with self.forward_label_locks[node]:
+                self.forward_labels[node].update(labels)
+
+        if len(awaiting_labels) > 0:
+            with self.forward_update_cond:
+                self.forward_update_cond.notify_all()
 
         return new_labels
 
     def backward_labeling_one_step(self, farkas, node_info):
         """Backward search from the sink."""
         new_labels = defaultdict(list)
+        awaiting_labels = defaultdict(dict)  # the new labels awaiting to be appended
 
-        _, label = self.backward_label_queue.get()
-        available_extensions = set(label.alternative_extensions)
+        _, _, label = self.backward_label_queue.get()
+        available_extensions = SortedSet(label.alternative_extensions)
         for node_j in available_extensions:
             label.alternative_extensions.remove(node_j)
             if not label.allow_extend(node_j):
@@ -95,36 +125,31 @@ class BiDirectionalLabelSetting:
                 else:  # Farkas pricing
                     label_j.cost = cal_label_cost_farkas(self.net, label_j.path, self.duals)
 
-            current_sol = (tuple(label_j.truck_path), label_j.drone_flights)
-            if current_sol == test_path:
-                sdas = 0
-
-            if is_route_subset(test_path, (label_j.truck_path, label_j.drone_flights)):
-                sdas = 0
-
             # check dominance
             dominated_by_j, other_dominates_j = (
-                self.dominance_check(label_j, self.backward_labels[node_j], farkas))
+                self.dominance_check(label_j, self.backward_labels[node_j].values(), farkas))
             self.backward_disposed_labels.update(dominated_by_j)
             # remove the labels dominated by j
             # with self.parallel_lock:
-            with self.node_locks[node_j]:
-                self.backward_labels[node_j].difference_update(dominated_by_j)
+            for key in dominated_by_j.keys():
+                self.backward_labels[node_j].pop(key, None)
             # if j is not dominated by others
             if not other_dominates_j:
-                is_new_path = True if label_j not in self.backward_labels[node_j] else False
+                is_new_path = True if label_j.hash_path not in self.backward_labels[node_j].keys() else False
                 if not is_new_path:
                     continue
                 # is a new path
                 # with self.parallel_lock:
-                with self.node_locks[node_j]:
-                    self.backward_labels[node_j].add(label_j)
+                # with self.node_locks[node_j]:
+                #     self.backward_labels[node_j].add(label_j)
+
+                awaiting_labels[node_j][label_j.hash_path] = label_j
                 # only if this label are possibly to be extended
                 if len(label_j.alternative_extensions) > 0:
-                    self.backward_label_queue.put((-label_j.depth, label_j))
+                    self.backward_label_queue.put((-label_j.depth, next(self.backward_label_counter), label_j))
                 # check whether it is completed, update incumbent
                 if node_j == self.net.depot_source:
-                    hashable_path = truck_drone_path_to_hashable(label_j.truck_path, label_j.drone_flights)
+                    hashable_path = label_j.hash_path
                     # do not consider the existing columns
                     if hashable_path not in node_info.columns:
                         if label_j.cost < self.best_solution[0]:
@@ -134,27 +159,28 @@ class BiDirectionalLabelSetting:
                 # only append the labels that have not been added
                 new_labels[node_j].append(label_j)
 
+        # update the forward_labels at once
+        for node, labels in awaiting_labels.items():
+            with self.backward_label_locks[node]:
+                self.backward_labels[node].update(labels)
+        if len(awaiting_labels) > 0:
+            with self.backward_update_cond:
+                self.backward_update_cond.notify_all()
+
         return new_labels
 
-    def merge_labels(self, node, new_labels, farkas, node_info, mode):
+    def merge_labels(self, new_labels, farkas, node_info, mode, opposite_labels):
         """
         Merge forward and backward labels at common nodes.
-        :param node:
-        :param new_labels:
-        :param farkas:
-        :param node_info:
-        :param mode: 0 for merging new forward labels with existing backward labels, 1 otherwise
+        mode: 0 for merging new forward labels with existing backward labels, 1 otherwise
         """
 
-        # with self.parallel_lock:
-        #     if mode == 0:
-        #         label_pairs = [(f_label, b_label) for f_label in new_labels for b_label in
-        #                        list(self.backward_labels[node])]
-        #     else:
-        #         label_pairs = [(f_label, b_label) for f_label in list(self.forward_labels[node]) for b_label in
-        #                        new_labels]
+        # Determine the label sources based on mode
 
-        label_pairs = self.compute_label_pairs(node, new_labels, mode)
+        if mode == 0:
+            label_pairs = [(f_label, b_label) for f_label in new_labels for b_label in opposite_labels]
+        else:
+            label_pairs = [(f_label, b_label) for f_label in opposite_labels for b_label in new_labels]
 
         for f_label, b_label in label_pairs:
             if not self.check_merge_feasibility(f_label, b_label, f_label.path[-1]):
@@ -166,15 +192,16 @@ class BiDirectionalLabelSetting:
             else:
                 complete_truck_path = f_label.truck_path + b_label.truck_path[1:]
 
-            complete_drone_flights = {k: f_label.drone_flights.get(k, set()).union(b_label.drone_flights.get(k, set()))
-                                      for k in f_label.drone_flights.keys() | b_label.drone_flights.keys()}
+            complete_drone_flights = {
+                k: f_label.drone_flights.get(k, SortedSet()).union(b_label.drone_flights.get(k, SortedSet()))
+                for k in f_label.drone_flights.keys() | b_label.drone_flights.keys()}
             if len(b_label.pending_flights) > 0:
                 complete_drone_flights[f_label.latest_hub].update(b_label.pending_flights)
 
             hashable_path = truck_drone_path_to_hashable(complete_truck_path, complete_drone_flights)
 
             # Avoid duplicate computations
-            if hashable_path in self.explored_solutions:
+            if hashable_path in self.explored_solutions or hashable_path in node_info.columns:
                 continue
 
             # Find last hub in the forward path
@@ -193,12 +220,14 @@ class BiDirectionalLabelSetting:
             GeneralHelper.label_merge_num += 1
 
             # Update incumbent solution
-            if hashable_path not in node_info.columns:  # Ignore existing columns
-                if total_cost < self.best_solution[0]:
-                    self.best_solution = (total_cost, hashable_path, 0)
+            # with self.best_sol_lock:
+            #     if total_cost < self.best_solution[0]:
+            #         self.best_solution = (total_cost, hashable_path, 0)
+            if total_cost < self.best_solution[0]:
+                self.best_solution = (total_cost, hashable_path, 0)
 
-                # Store newly explored solution
-                self.explored_solutions.add(hashable_path)
+            # Store newly explored solution
+            self.explored_solutions.add(hashable_path)
 
     def check_merge_feasibility(self, f_label, b_label, common_node):
         if (set(f_label.path) & set(b_label.path)) != {common_node}:
@@ -256,50 +285,67 @@ class BiDirectionalLabelSetting:
         # forward label initialization
         if not farkas:  # normal pricing
             self.forward_label_queue.put((
-                0,
+                0, next(self.forward_label_counter),
                 LabelForward([self.net.depot_source], 0, 0, 0, 0,
                              0, -self.duals["nu"], 0, {}, [self.net.depot_source])
             ))
         else:  # Farkas pricing
             self.forward_label_queue.put((
-                0,
+                0, next(self.forward_label_counter),
                 LabelForward([self.net.depot_source], 0, 0, 0, 0,
                              0, 0, 0, {}, [self.net.depot_source])
             ))
 
         # backward label initialization
         self.backward_label_queue.put((
-            0,
+            0, next(self.backward_label_counter),
             LabelBackward([self.net.depot_sink], 0, 0, [0],
                           [self.net.max_timespan], 0, 0, {},
-                          [self.net.depot_sink], set())
+                          [self.net.depot_sink], SortedSet())
         ))
 
         s_time = time.time()
 
         # parallel mode
         if LSA_mode == 0:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+                # # Submit the tasks
+                # futures = [
+                #     executor.submit(self.forward_thread, farkas, node_info),
+                #     executor.submit(self.backward_thread, farkas, node_info),
+                #     executor.submit(self.label_merge_thread, farkas, node_info)
+                # ]
+                #
+                # # Ensure all threads complete before proceeding
+                # concurrent.futures.wait(futures)
+                #
+                # # 🚀 Set termination flag to stop all waiting threads
+                # self.termination_event.set()
+                #
+                # # 🚀 Ensure no thread is stuck waiting on conditions
+                # with self.forward_update_cond:
+                #     self.forward_update_cond.notify_all()
+                #
+                # with self.backward_update_cond:
+                #     self.backward_update_cond.notify_all()
+                #
+                # # 🚀 Ensure all threads exit cleanly before continuing
+                # for future in futures:
+                #     future.result()  # Handle any exceptions properly
+
                 # Submit the tasks
                 future_forward = executor.submit(self.forward_thread, farkas, node_info)
                 future_backward = executor.submit(self.backward_thread, farkas, node_info)
+                future_merge = executor.submit(self.label_merge_thread, farkas, node_info)
 
                 # if len(node_info.columns) > 100:
                 #     lp.add_function(concurrent.futures.wait)
                 #     lp.enable()
 
-                # # Wait for either thread to finish
-                # done, _ = concurrent.futures.wait(
-                #     [future_forward, future_backward], return_when=concurrent.futures.FIRST_COMPLETED
-                # )
-
-                for future in concurrent.futures.as_completed([future_forward, future_backward]):
+                for future in concurrent.futures.as_completed([future_forward, future_backward, future_merge]):
                     future.result()  # This prevents exceptions from being swallowed
 
                 self.termination_event.set()
-
-                # future_forward.result()
-                # future_backward.result()
 
                 # if len(node_info.columns) > 100:
                 #     lp.disable()
@@ -328,7 +374,7 @@ class BiDirectionalLabelSetting:
 
     def dominance_check(self, label_j, other_labels, farkas):
         """Check if label_j dominates any other label in a parallelized manner."""
-        dominated_by_j = set()
+        dominated_by_j = {}
         other_dominates_j = False
 
         for other in other_labels:
@@ -336,7 +382,7 @@ class BiDirectionalLabelSetting:
             other_dominates = other.dominates(label_j, farkas, self.duals)
 
             if j_dominates:
-                dominated_by_j.add(other)
+                dominated_by_j[tuple(other.path)] = other
             if other_dominates:
                 other_dominates_j = True
                 break  # Stop checking if label_j is already dominated
@@ -373,12 +419,21 @@ class BiDirectionalLabelSetting:
         """
         A separate thread for solving the forward labeling
         """
-        while (not self.termination_event.is_set() and
-               self.best_solution[0] + close_tolerance >= 0 and self.forward_label_queue.qsize() > 0):
+        while True:
+            # termination condition 1
+            if not self.termination_event.is_set():
+                break
+            # termination condition 2
+            # with self.best_sol_lock:
+            #     if self.best_solution[0] + close_tolerance < 0:
+            #         break
+            if self.best_solution[0] + close_tolerance < 0:
+                break
+            # termination condition 3
+            if self.forward_label_queue.qsize() == 0:
+                break
 
             new_f_labels = self.forward_labeling_one_step(farkas, node_info)
-            for node, labels in new_f_labels.items():
-                self.merge_labels(node, labels, farkas, node_info, 0)
 
         # Signal the other thread to stop
         self.termination_event.set()
@@ -395,11 +450,21 @@ class BiDirectionalLabelSetting:
         """
         A separate thread for solving the backward labeling
         """
-        while (not self.termination_event.is_set() and
-               self.best_solution[0] + close_tolerance >= 0 and self.backward_label_queue.qsize() > 0):
+        while True:
+            # termination condition 1
+            if not self.termination_event.is_set():
+                break
+            # termination condition 2
+            # with self.best_sol_lock:
+            #     if self.best_solution[0] + close_tolerance < 0:
+            #         break
+            if self.best_solution[0] + close_tolerance < 0:
+                break
+            # termination condition 3
+            if self.backward_label_queue.qsize() == 0:
+                break
+
             new_b_labels = self.backward_labeling_one_step(farkas, node_info)
-            for node, labels in new_b_labels.items():
-                self.merge_labels(node, labels, farkas, node_info, 1)
 
         # Signal the other thread to stop
         self.termination_event.set()
@@ -412,15 +477,41 @@ class BiDirectionalLabelSetting:
         #     print()
         return None
 
-    def compute_label_pairs(self, node, new_labels, mode):
-        # Determine the label sources based on mode
-        if mode == 0:
-            with self.node_locks[node]:  # Lock only for this specific node
-                backward_labels_copy = list(self.backward_labels[node])  # Minimize locking duration
-            label_pairs = [(f_label, b_label) for f_label in new_labels for b_label in backward_labels_copy]
-        else:
-            with self.node_locks[node]:  # Lock only for this specific node
-                forward_labels_copy = list(self.forward_labels[node])  # Minimize locking duration
-            label_pairs = [(f_label, b_label) for f_label in forward_labels_copy for b_label in new_labels]
+    def label_merge_thread(self, farkas, node_info):
+        forward_seen_labels = defaultdict(set)
+        backward_seen_labels = defaultdict(set)
 
-        return label_pairs
+        while not self.termination_event.is_set():
+            # wait for forward updates
+            with self.forward_update_cond:
+                if self.forward_update_cond.wait(timeout=1) or self.termination_event.is_set():
+                    break
+
+                if self.termination_event.is_set():
+                    print("[DEBUG] Termination event set. Exiting label_merge_thread.")
+                    return
+
+                keys_in_forward_labels = self.forward_labels.keys()
+                for node in keys_in_forward_labels:
+                    new_forward_labels = self.forward_labels[node] - forward_seen_labels[node]
+                    self.merge_labels(new_forward_labels, farkas, node_info, 0, backward_seen_labels[node])
+                    forward_seen_labels[node].update(new_forward_labels)
+
+            # wait for backward updates
+            with self.backward_update_cond:
+                while not self.termination_event.is_set():
+                    notified = self.backward_update_cond.wait(timeout=1)
+                    if notified or self.termination_event.is_set():
+                        break
+
+                if self.termination_event.is_set():
+                    print("[DEBUG] Termination event set. Exiting label_merge_thread.")
+                    return  # ✅ Exit safely
+
+                keys_in_backward_labels = self.backward_labels.keys()
+                for node in keys_in_backward_labels:
+                    new_backward_labels = self.backward_labels[node] - backward_seen_labels[node]
+                    self.merge_labels(new_backward_labels, farkas, node_info, 1, forward_seen_labels[node])
+                    backward_seen_labels[node].update(new_backward_labels)
+
+        sdsa = 0

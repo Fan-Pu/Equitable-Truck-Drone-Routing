@@ -97,6 +97,13 @@ class MyPricer(Pricer):
 
         reduced_cost, hashable_path, where = label_setting.solve(farkas, RMP.node_infos[node_id])
 
+        if where == 0:
+            GeneralHelper.label_merge_num += 1
+        elif where == 1:
+            GeneralHelper.label_forward_num += 1
+        else:
+            GeneralHelper.label_backward_num += 1
+
         # if not farkas and len(RMP.node_infos[node_id].columns) > 110:
         #     # profiler = cProfile.Profile()
         #     # profiler.enable()
@@ -134,6 +141,7 @@ class MyPricer(Pricer):
     def add_column_to_master(self, route_key, node_id):
         """Add new column (route) to the master problem"""
         route = RMP.route_dict[route_key]
+        GeneralHelper.columns_list.append(route['cost'])
         # generate a new variable and assign the coefficient to objective function
         newVar = self.model.addVar(f"z_{route['id']}", vtype="B", obj=route['cost'], pricedVar=True)
         # customer must be served once

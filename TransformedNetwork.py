@@ -1,6 +1,7 @@
 import copy
 import heapq
 from itertools import combinations
+from sortedcontainers import SortedSet
 
 
 class TransformedNetwork:
@@ -26,11 +27,11 @@ class TransformedNetwork:
         self.a_lb = {}
         self.a_ub = {}
         self.demand_weights = {}
-        self.arcs_1 = set()  # black links
-        self.arcs_2 = set()  # blue links
-        self.arcs_3 = set()  # green links
-        self.arcs_4 = set()  # orange links
-        self.arcs_5 = set()  # purple links
+        self.arcs_1 = SortedSet()  # black links
+        self.arcs_2 = SortedSet()  # blue links
+        self.arcs_3 = SortedSet()  # green links
+        self.arcs_4 = SortedSet()  # orange links
+        self.arcs_5 = SortedSet()  # purple links
         self.max_timespan = -1
 
         # duplicate the nodes

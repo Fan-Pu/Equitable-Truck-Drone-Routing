@@ -183,7 +183,8 @@ class LabelForward:
 
     def __eq__(self, other):
         if isinstance(other, LabelForward):
-            return self.truck_path == other.truck_path and self.drone_flights == other.drone_flights
+            return self.path == other.path
+            # return self.truck_path == other.truck_path and self.drone_flights == other.drone_flights
         return False
 
     def __hash__(self):
