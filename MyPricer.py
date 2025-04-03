@@ -124,6 +124,15 @@ class MyPricer(Pricer):
             #                                                 GeneralHelper.net, GeneralHelper.transformed_net)
             route_key, new_route = hashable_path_to_route(hashable_path, len(RMP.route_key_id_pairs),
                                                           GeneralHelper.transformed_net)
+            if hashable_path == (tuple(['Source', 'H1', 'Sink']), frozenset(
+                    {
+                        'H1': frozenset({'C4_prime', 'C8_prime'})
+                    }.items()
+            )):
+                sdas = 0
+
+            if route_key in GeneralHelper.test_path_list:
+                sdas = 0
 
             # an unexplored route
             if route_key not in RMP.route_dict.keys():
@@ -134,6 +143,10 @@ class MyPricer(Pricer):
                 RMP.node_infos[node_id].columns.append(route_key)
                 self.add_column_to_master(route_key, node_id)
         else:
+            node_info = RMP.node_infos[node_id]
+            check_list = []
+            for temp_path in test_path_list:
+                check_list.append(temp_path in node_info.columns)
             sdas = 0
 
         return {'result': SCIP_RESULT.SUCCESS}

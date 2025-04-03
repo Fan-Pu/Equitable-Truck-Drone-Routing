@@ -18,14 +18,15 @@ class LabelBackward:
         self.drone_flights = {k: v.copy() for k, v in drone_flights.items()}
         self.truck_path = truck_path
         self.pending_flights = pending_flights.copy()
-        self.hash_path = truck_drone_path_to_hashable(self.truck_path, self.drone_flights)
+        # hash path is used since it ignores the sequence of flights at each launch
+        self.hash_path = truck_drone_path_to_hashable(self.truck_path, self.drone_flights) if depth == 0 else None
 
     def dominates(self, other, farkas, duals):
         """Check if this label dominates another."""
         strict = False  # check whether contains a strict condition
         # the path is complete
         if self.path[0] == self.net.depot_source:
-            if self.cost < other.cost:
+            if self.cost < other.cost and other.cost + close_tolerance >= 0:
                 strict = True
                 return strict
 
@@ -158,9 +159,6 @@ class LabelBackward:
         """
         node_i = self.path[0]
 
-        if self.path == ['H1_prime', 'C3_prime', 'C1_prime', 'Sink'] and node_j == "H1":
-            sdsa = 0
-
         # Use a shallow copy where possible to avoid unnecessary list duplications
         label_j = self.__class__(
             path=self.path[:],
@@ -253,12 +251,14 @@ class LabelBackward:
         if arc in self.net.arcs_4 or arc in self.net.arcs_5:
             label_j.pending_flights.add(node_j)
 
-        if arc in self.net.arcs_2:
-            label_j.drone_flights[node_j] = label_j.pending_flights.copy()
+        if arc in self.net.arcs_3:
+            label_j.drone_flights[node_j.replace("_prime", "")] = label_j.pending_flights.copy()
             label_j.pending_flights.clear()
 
-        if arc in self.net.arcs_1 or arc in self.net.arcs_2:
-            label_j.truck_path = [node_j] + label_j.truck_path
+        if arc in self.net.arcs_1 or arc in self.net.arcs_3:
+            label_j.truck_path = [node_j.replace("_prime", "")] + label_j.truck_path
+
+        label_j.hash_path = truck_drone_path_to_hashable(label_j.truck_path, label_j.drone_flights)
 
         # if is_route_subset(test_path, (label_j.truck_path, label_j.drone_flights)):
         #     sdas = 0

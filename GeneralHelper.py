@@ -7,12 +7,13 @@ from Network import Network
 from TransformedNetwork import TransformedNetwork
 from sortedcontainers import SortedSet
 
-# test_path = ['Source', 'H2', 'H2_prime', 'C1_prime', 'C3_prime', 'Sink']
-test_path = (tuple(['Source', 'H1', 'Sink']), frozenset(
-    {
-        'H1': frozenset({'C1_prime', 'C3_prime'})
-    }.items()
-))
+# test_path = ['Source', 'H1', 'C1_prime', 'C3_prime', 'Sink']
+# test_path = (tuple(['Source', 'H1', 'Sink']), frozenset(
+#     {
+#         'H1': frozenset({'C1_prime', 'C3_prime'})
+#     }.items()
+# ))
+
 # test_path = ['Source', 'H1', 'H1_prime', 'C4_prime', 'Sink']
 # test_path = ['Source', 'C2', 'Sink']
 
@@ -28,19 +29,30 @@ merge_num = 0
 
 final_model = None
 
+# test_path_list = [
+#     (tuple(['Source', 'H1', 'Sink']), frozenset(
+#         {
+#             'H1': frozenset({'C1_prime', 'C3_prime'})
+#         }.items()
+#     )),
+#     (tuple(['Source', 'H1', 'Sink']), frozenset(
+#         {
+#             'H1': frozenset({'C4_prime'})
+#         }.items()
+#     ))
+# ]
+
+
 test_path_list = [
-    (tuple(['Source', 'H1', 'Sink']), frozenset(
+    (tuple(['Source', 'H3', 'Sink']), frozenset(
         {
-            'H1': frozenset({'C1_prime', 'C3_prime'})
+            'H3': frozenset({'C4_prime', 'C8_prime'})
         }.items()
     )),
-    (tuple(['Source', 'H1', 'Sink']), frozenset(
+    (tuple(['Source', 'H3', 'Sink']), frozenset(
         {
-            'H1': frozenset({'C4_prime'})
+            'H3': frozenset({'C1_prime', 'C3_prime', 'C6_prime'})
         }.items()
-    )),
-    (tuple(['Source', 'C2', 'Sink']), frozenset(
-        {}.items()
     ))
 ]
 
@@ -57,7 +69,7 @@ label_backward_num = 0
 
 lp = LineProfiler()
 
-LSA_mode = 2  # 0 for combined, 1 for forward, 2 for backward
+LSA_mode = 1  # 0 for combined, 1 for forward, 2 for backward
 
 seed = 2024
 
@@ -89,15 +101,20 @@ epsilon = 1
 # num_trucks = 3
 # num_drones_per_truck = 2
 
-num_customers = 10
-num_hubs = 4
-num_trucks = 4
-num_drones_per_truck = 3
+# num_customers = 10
+# num_hubs = 4
+# num_trucks = 4
+# num_drones_per_truck = 3
 
 # num_customers = 9
 # num_hubs = 4
 # num_trucks = 5
 # num_drones_per_truck = 3
+
+num_customers = 8
+num_hubs = 1
+num_trucks = 8
+num_drones_per_truck = 3
 
 # route_list = [{'id': 4, 'truck': ['Source', 'C5', 'Sink'], 'drone': [], 'launches': [], 'cost': 550},
 #               {'id': 6, 'truck': ['Source', 'C7', 'Sink'], 'drone': [], 'launches': [], 'cost': 745},
@@ -407,7 +424,7 @@ def hashable_path_to_route(path, idx, trans_net):
     """
     truck_route = path[0]
     drone_route = {key: value for key, value in path[-1]}
-    launches = list(drone_route.keys())
+    launches = [key.replace("_prime", "") for key in drone_route.keys()]
 
     # calculate the route cost
     arrival_time = 0
@@ -433,6 +450,7 @@ def hashable_path_to_route(path, idx, trans_net):
             cost += arrival_time
 
     route = {'id': idx, 'truck': truck_route, 'drone': drone_route, 'launches': launches, 'cost': cost}
+
     return path, route
 
 

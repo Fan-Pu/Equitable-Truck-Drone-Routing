@@ -15,8 +15,12 @@ class BiDirectionalLabelSetting:
     def __init__(self, duals):
         random.seed(seed)
         self.net = GeneralHelper.transformed_net
+        # the ordered dict is used to ensure the exact visit sequence of the dict (code reproduction)
         self.forward_labels = {node: OrderedDict() for node in self.net.all_nodes}  # save forward label keys
         self.backward_labels = {node: OrderedDict() for node in self.net.all_nodes}  # save backward label keys
+        # store the labels which will non-empty pending flights. Pending_flights + hash_path can be used to check "="
+        self.backward_pending_labels = defaultdict(OrderedDict)  # key: pending flights, values: labels
+
         # self.forward_label_keys = {node: OrderedDict() for node in self.net.all_nodes}  # save forward label keys
         # self.backward_label_keys = {node: OrderedDict() for node in self.net.all_nodes}  # save backward label keys
         # self.forward_label_dict = defaultdict()  # save all forward labels
@@ -36,6 +40,7 @@ class BiDirectionalLabelSetting:
         self.termination_event = threading.Event()  # Shared flag for stopping threads
         self.forward_label_locks = defaultdict(threading.Lock)
         self.backward_label_locks = defaultdict(threading.Lock)
+        self.backward_pending_label_lock = threading.Lock()
         self.forward_update_cond = threading.Condition()  # the condition signaling the update of forward labels
         self.backward_update_cond = threading.Condition()  # the condition signaling the update of backward labels
 
@@ -49,12 +54,26 @@ class BiDirectionalLabelSetting:
         available_extensions = SortedSet(label.alternative_extensions)
         for node_j in available_extensions:
             label.alternative_extensions.remove(node_j)
+
+            if label.path == ['Source', 'H1', 'H1_prime', 'C1_prime', 'C3_prime', 'C6_prime'] and node_j == 'Sink':
+                sdas = 0
+
+            if label.path == ['Source'] and node_j == 'H3':
+                sdas = 0
+
             if not label.allow_extend(node_j):
                 continue
 
             label_j = label.extend(node_j, self.duals, farkas)
+
+            if label_j.hash_path == (
+                    ('Source', 'H3', 'Sink'), frozenset({('H3', frozenset({'C3_prime', 'C4_prime', 'C8_prime'}))})):
+                sdas = 0
+
+            # if label_j.hash_path==
+
             # check dominance
-            dominated_by_j, other_dominates_j = (
+            dominated_by_j, other_dominates_j, other_dom_label = (
                 self.dominance_check(label_j, self.forward_labels[node_j].values(), farkas))
             # remove the labels dominated by j
             # with self.forward_label_locks[node_j]:
@@ -71,16 +90,13 @@ class BiDirectionalLabelSetting:
                 if not is_new_path:
                     continue
                 # is a new path
-                # with self.parallel_lock:
-                #     self.forward_labels[node_j].add(label_j)
-                # self.forward_labels[node_j].add(label_j)
                 awaiting_labels[node_j][tuple(label_j.path)] = label_j
                 # only if this label are possible to be extended
                 if len(label_j.alternative_extensions) > 0:
                     self.forward_label_queue.put((-label_j.depth, next(self.forward_label_counter), label_j))
                 # check whether it is completed, update the incumbent
                 if node_j == self.net.depot_sink:
-                    hashable_path = truck_drone_path_to_hashable(label_j.truck_path, label_j.drone_flights)
+                    hashable_path = label_j.hash_path
                     # do not consider the existing columns
                     if hashable_path not in node_info.columns:
                         # with self.best_sol_lock:
@@ -107,11 +123,21 @@ class BiDirectionalLabelSetting:
         """Backward search from the sink."""
         new_labels = defaultdict(list)
         awaiting_labels = defaultdict(dict)  # the new labels awaiting to be appended
+        awaiting_labels_non_empty_pending = defaultdict(
+            dict)  # same as awaiting_labels but for labels with non-empty pending flights
 
         _, _, label = self.backward_label_queue.get()
         available_extensions = SortedSet(label.alternative_extensions)
+        if label.path == ['C1_prime', 'C3_prime', 'Sink']:
+            sdsa = 0
         for node_j in available_extensions:
             label.alternative_extensions.remove(node_j)
+            if label.path == ['Sink'] and node_j == 'C4_prime':
+                sdas = 0
+
+            if label.path == ['H1', 'H1_prime', 'C4_prime', 'Sink'] and node_j == 'Source':
+                sdas = 0
+
             if not label.allow_extend(node_j):
                 continue
 
@@ -125,8 +151,15 @@ class BiDirectionalLabelSetting:
                 else:  # Farkas pricing
                     label_j.cost = cal_label_cost_farkas(self.net, label_j.path, self.duals)
 
+            if label_j.hash_path == (tuple(['Source', 'H1', 'Sink']), frozenset(
+                    {
+                        'H1_prime': frozenset({'C1_prime', 'C3_prime'})
+                    }.items()
+            )):
+                dsadas = 0
+
             # check dominance
-            dominated_by_j, other_dominates_j = (
+            dominated_by_j, other_dominates_j, other_dom_label = (
                 self.dominance_check(label_j, self.backward_labels[node_j].values(), farkas))
             self.backward_disposed_labels.update(dominated_by_j)
             # remove the labels dominated by j
@@ -135,16 +168,17 @@ class BiDirectionalLabelSetting:
                 self.backward_labels[node_j].pop(key, None)
             # if j is not dominated by others
             if not other_dominates_j:
-                is_new_path = True if label_j.hash_path not in self.backward_labels[node_j].keys() else False
+                # check whether it is a new path
+                is_new_path = self.check_back_label_existence(label_j)
+                # skip the existing path
                 if not is_new_path:
                     continue
                 # is a new path
-                # with self.parallel_lock:
-                # with self.node_locks[node_j]:
-                #     self.backward_labels[node_j].add(label_j)
-
-                awaiting_labels[node_j][label_j.hash_path] = label_j
-                # only if this label are possibly to be extended
+                if len(label_j.pending_flights) == 0:
+                    awaiting_labels[node_j][label_j.hash_path] = label_j
+                else:
+                    awaiting_labels_non_empty_pending[tuple(label_j.pending_flights)][label_j.hash_path] = label_j
+                # only if this label is possibly to be extended
                 if len(label_j.alternative_extensions) > 0:
                     self.backward_label_queue.put((-label_j.depth, next(self.backward_label_counter), label_j))
                 # check whether it is completed, update incumbent
@@ -159,11 +193,14 @@ class BiDirectionalLabelSetting:
                 # only append the labels that have not been added
                 new_labels[node_j].append(label_j)
 
-        # update the forward_labels at once
+        # update the backward_labels at once
         for node, labels in awaiting_labels.items():
             with self.backward_label_locks[node]:
                 self.backward_labels[node].update(labels)
-        if len(awaiting_labels) > 0:
+        with self.backward_pending_label_lock:
+            for pending_flights, labels in awaiting_labels_non_empty_pending.items():
+                self.backward_pending_labels[tuple(pending_flights)].update(labels)
+        if len(awaiting_labels) > 0 or len(awaiting_labels_non_empty_pending) > 0:
             with self.backward_update_cond:
                 self.backward_update_cond.notify_all()
 
@@ -376,6 +413,7 @@ class BiDirectionalLabelSetting:
         """Check if label_j dominates any other label in a parallelized manner."""
         dominated_by_j = {}
         other_dominates_j = False
+        other_dom_label = None
 
         for other in other_labels:
             j_dominates = label_j.dominates(other, farkas, self.duals)
@@ -385,9 +423,10 @@ class BiDirectionalLabelSetting:
                 dominated_by_j[tuple(other.path)] = other
             if other_dominates:
                 other_dominates_j = True
+                other_dom_label = other
                 break  # Stop checking if label_j is already dominated
 
-        return dominated_by_j, other_dominates_j
+        return dominated_by_j, other_dominates_j, other_dom_label
 
     def print_runtime_info(self, start_time):
         arrival_times, sync_times, wait_times = [0], [0], [0]
@@ -515,3 +554,17 @@ class BiDirectionalLabelSetting:
                     backward_seen_labels[node].update(new_backward_labels)
 
         sdsa = 0
+
+    def check_back_label_existence(self, label):
+        """
+        check whether it is a new path
+        """
+
+        node_j = label.path[0]
+        if len(label.pending_flights) == 0:
+            # if it has an empty pending_flights, check self.backward_labels[node_j]
+            is_new_path = True if label.hash_path not in self.backward_labels[node_j].keys() else False
+        else:  # check backward_pending_labels
+            is_new_path = True if label.hash_path not in self.backward_pending_labels[
+                tuple(label.pending_flights)].keys() else False
+        return is_new_path

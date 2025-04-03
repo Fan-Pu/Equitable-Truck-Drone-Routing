@@ -374,11 +374,22 @@ class FullModel:
             for (i, j, k), var in x_dict.items():
                 if abs(var.X - 1) <= close_tolerance:
                     truck_routes[k].append((self.all_nodes[i], self.all_nodes[j]))
-            drone_routes = []
+            drone_routes = defaultdict(list)
             for (i, j, d), var in y_dict.items():
                 if abs(var.X - 1) <= close_tolerance:
-                    drone_routes.append((self.all_nodes[i], self.all_nodes[j], d))
-            fdsfsd = 0
+                    drone_routes[d].append((self.all_nodes[i], self.all_nodes[j]))
+
+            solutions = {k: defaultdict(list) for k in range(self.net.num_trucks)}
+            for k, path in truck_routes.items():
+                if len(path) == 0:
+                    continue
+                for pre_node, next_node in path:
+                    solutions[k]['truck'].append(pre_node)
+                solutions[k]['truck'].append(path[-1][-1])
+            for d, path in drone_routes.items():
+                k = int(d / num_drones_per_truck)
+                for _, node in path:
+                    solutions[k]['drone'].append(node)
         solving_time = model.Runtime
         mip_gap_percent = model.MIPGap * 100
 
