@@ -52,9 +52,14 @@ class MyBranchingRule(Branchrule):
         node_right = self.model.createChild(-(current_id + 2), self.model.getLPObjVal())
         node_left.getNumber()
 
-        left_cons = self.model.createConsFromExpr(quicksum(branch_z_set) <= int(sum_branch_z_val),
+        # left_cons = self.model.createConsFromExpr(quicksum(branch_z_set) <= int(sum_branch_z_val),
+        #                                           f"{current_id}-left")
+        # right_cons = self.model.createConsFromExpr(quicksum(branch_z_set) >= int(sum_branch_z_val) + 1,
+        #                                            f"{current_id}-right")
+
+        left_cons = self.model.createConsFromExpr(branch_cands[0] <= int(branch_cand_sols[0]),
                                                   f"{current_id}-left")
-        right_cons = self.model.createConsFromExpr(quicksum(branch_z_set) >= int(sum_branch_z_val) + 1,
+        right_cons = self.model.createConsFromExpr(branch_cands[0] >= int(branch_cand_sols[0]) + 1,
                                                    f"{current_id}-right")
 
         self.model.addConsNode(node_left, left_cons)
@@ -63,6 +68,12 @@ class MyBranchingRule(Branchrule):
         # update the node info
         node_left_id = node_left.getNumber()
         node_right_id = node_right.getNumber()
+        current_node_info.child_ids = [node_left_id, node_right_id]
+
+        include_z_nums = 0
+        for z_name in branch_z_names:
+            if z_name in RMP.OPT_z_names:
+                include_z_nums += 1
 
         if current_id == 1:
             sdsa = 0
@@ -71,15 +82,25 @@ class MyBranchingRule(Branchrule):
             test_node_ids.extend([node_left_id, node_right_id])
 
         # left
+        # RMP.node_infos[node_left_id] = NodeInfo(current_id)
+        # RMP.node_infos[node_left_id].columns, RMP.node_infos[
+        #     node_left_id].branches = current_node_info.columns.copy(), current_node_info.branches.copy()
+        # RMP.node_infos[node_left_id].branches.append((branch_z_names, int(sum_branch_z_val), "<="))
+        # # right
+        # RMP.node_infos[node_right_id] = NodeInfo(current_id)
+        # RMP.node_infos[node_right_id].columns, RMP.node_infos[
+        #     node_right_id].branches = current_node_info.columns.copy(), current_node_info.branches.copy()
+        # RMP.node_infos[node_right_id].branches.append((branch_z_names, int(sum_branch_z_val) + 1, ">="))
+
         RMP.node_infos[node_left_id] = NodeInfo(current_id)
         RMP.node_infos[node_left_id].columns, RMP.node_infos[
             node_left_id].branches = current_node_info.columns.copy(), current_node_info.branches.copy()
-        RMP.node_infos[node_left_id].branches.append((branch_z_names, int(sum_branch_z_val), "<="))
+        RMP.node_infos[node_left_id].branches.append((branch_cands[0], int(branch_cand_sols[0]), "<="))
         # right
         RMP.node_infos[node_right_id] = NodeInfo(current_id)
         RMP.node_infos[node_right_id].columns, RMP.node_infos[
             node_right_id].branches = current_node_info.columns.copy(), current_node_info.branches.copy()
-        RMP.node_infos[node_right_id].branches.append((branch_z_names, int(sum_branch_z_val) + 1, ">="))
+        RMP.node_infos[node_right_id].branches.append((branch_cands[0], int(branch_cand_sols[0]) + 1, ">="))
 
         GeneralHelper.local_estimates[node_left_id] = node_left.getEstimate()
         GeneralHelper.local_estimates[node_right_id] = node_right.getEstimate()

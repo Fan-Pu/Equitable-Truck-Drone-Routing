@@ -101,20 +101,20 @@ epsilon = 1
 # num_trucks = 3
 # num_drones_per_truck = 2
 
-# num_customers = 10
-# num_hubs = 4
-# num_trucks = 4
-# num_drones_per_truck = 3
+num_customers = 10
+num_hubs = 4
+num_trucks = 4
+num_drones_per_truck = 3
 
 # num_customers = 9
 # num_hubs = 4
 # num_trucks = 5
 # num_drones_per_truck = 3
 
-num_customers = 8
-num_hubs = 1
-num_trucks = 8
-num_drones_per_truck = 3
+# num_customers = 8
+# num_hubs = 1
+# num_trucks = 8
+# num_drones_per_truck = 3
 
 # route_list = [{'id': 4, 'truck': ['Source', 'C5', 'Sink'], 'drone': [], 'launches': [], 'cost': 550},
 #               {'id': 6, 'truck': ['Source', 'C7', 'Sink'], 'drone': [], 'launches': [], 'cost': 745},

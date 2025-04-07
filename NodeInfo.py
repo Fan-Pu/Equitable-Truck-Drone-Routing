@@ -3,3 +3,4 @@ class NodeInfo:
         self.parent_id = parent_id
         self.columns = set()  # value: the keys of routes
         self.branches = []  # value: (lhs_var_names, rhs, sense)
+        self.child_ids = []

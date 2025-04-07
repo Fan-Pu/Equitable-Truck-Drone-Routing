@@ -13,6 +13,8 @@ constraints = []
 sum_z_val = None  # branching term
 z_list = []
 z_keys = []  # value: key of z variable
+infeasible_nodes = []
+OPT_z_names = ['z_6', 'z_29', 'z_4', 'z_1', 'z_12']
 
 
 class RMP:
@@ -92,6 +94,7 @@ class RMP:
     def construct_final_route(self):
         solution = []
         cost = 0
+        test = node_infos
         self.model.writeProblem("RMP.lp")
         for i, var in enumerate(z_list):
             # Check if the variable is close to 1 in the solution

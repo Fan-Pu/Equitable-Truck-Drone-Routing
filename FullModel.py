@@ -342,7 +342,7 @@ class FullModel:
         #             j = self.all_nodes_indices[node_j]
         #             model.addConstr(y_dict[(i, j, k * num_drones_per_truck + d)] == 1, "")
 
-        model.setParam(GRB.Param.TimeLimit, 1)
+        # model.setParam(GRB.Param.TimeLimit, 1)
         model.update()
         model.write("full_model.lp")
         model.optimize()
