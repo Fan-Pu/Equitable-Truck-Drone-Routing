@@ -47,8 +47,7 @@ class RMP:
                                       modifiable=True)
             constraints.append(cons)
         # cons 2 (truck fleet UB)
-        cons = self.model.addCons(sum(z_list) <= GeneralHelper.net.num_trucks, name=f"truck_fleet",
-                                  modifiable=True)
+        cons = self.model.addCons(sum(z_list) <= GeneralHelper.net.num_trucks, name=f"truck_fleet", modifiable=True)
         constraints.append(cons)
 
     def branch_and_price(self):
@@ -77,13 +76,6 @@ class RMP:
             print("Optimal solution found!")
             for i in range(len(z_list)):
                 var = z_list[i]
-
-                # test_path_name_list = []
-                # for key in test_path_list:
-                #     idx = z_keys.index(key)
-                #     var = z_list[idx]
-                #     test_path_name_list.append(var.name)
-
                 if self.model.getVal(var) > 0.5:
                     print(f"{var.name} = {self.model.getVal(var)}")
         else:
@@ -94,7 +86,6 @@ class RMP:
     def construct_final_route(self):
         solution = []
         cost = 0
-        test = node_infos
         self.model.writeProblem("RMP.lp")
         for i, var in enumerate(z_list):
             # Check if the variable is close to 1 in the solution

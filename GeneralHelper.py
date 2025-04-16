@@ -101,13 +101,14 @@ epsilon = 1
 # num_trucks = 3
 # num_drones_per_truck = 2
 
-num_customers = 10
-num_hubs = 4
-num_trucks = 4
+num_customers = 8
+num_hubs = 2
+num_trucks = 5
 num_drones_per_truck = 3
 
-# num_customers = 9
-# num_hubs = 4
+# # directly goes to second branch rule
+# num_customers = 10
+# num_hubs = 3
 # num_trucks = 5
 # num_drones_per_truck = 3
 
@@ -513,7 +514,7 @@ def cal_reduced_cost(route, duals, original_net):
         dual = duals["mu"][n_idx]  # Retrieve dual value
         if n_name in truck_route or any(n_name in d_set for d_set in drone_route):
             reduced_cost -= dual
-    reduced_cost -= duals["nu"]  # Subtract nu
+    reduced_cost -= duals["cons_term"]  # Subtract nu
     return reduced_cost
 
 

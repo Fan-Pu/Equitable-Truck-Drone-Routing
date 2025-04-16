@@ -24,10 +24,14 @@ class MyPricer(Pricer):
 
         # set up the node infos
         current_node = self.model.getCurrentNode()
-        self.model.constructLP()
-        self.model.writeLP("RMP.lp")
+        # self.model.constructLP()
         parent_node = current_node.getParent()
+        if parent_node is not None:
+            parent_id = parent_node.getNumber()
         node_id = current_node.getNumber()
+        if node_id == 3:
+            sdsa = 0
+        self.model.writeLP(f"RMP_{node_id}.lp")
         node_dep = current_node.getDepth()
         node_ids.add(node_id)
         node_depth.add(node_dep)
@@ -38,10 +42,31 @@ class MyPricer(Pricer):
             RMP.node_infos[node_id].columns = RMP.initial_route
 
         # retrieve the dual solutions
-        duals = {"mu": [], "nu": -1}
+        duals = {"mu": []}
         for c in RMP.constraints[:-1]:
             duals["mu"].append(self.model.getDualsolLinear(c))
-        duals["nu"] = self.model.getDualsolLinear(RMP.constraints[-1])
+
+        nu = self.model.getDualsolLinear(RMP.constraints[-1])
+
+        xi = 0
+        if RMP.node_infos[node_id].vehicle_fleet_branch_lb_cons is not None:
+            xi = self.model.getDualsolLinear(RMP.node_infos[node_id].vehicle_fleet_branch_lb_cons)
+
+        kappa = 0
+        if RMP.node_infos[node_id].vehicle_fleet_branch_ub_cons is not None:
+            kappa = self.model.getDualsolLinear(RMP.node_infos[node_id].vehicle_fleet_branch_ub_cons)
+
+        duals["constant_term"] = -nu + xi - kappa
+
+        duals["gamma"] = {}
+        for i, j, frac_val, cons in RMP.node_infos[node_id].arc_flow_ub_cons_list:
+            dual = self.model.getDualsolLinear(cons)
+            duals["gamma"][(i, j, frac_val)] = dual
+
+        duals["pi"] = {}
+        for i, j, frac_val, cons in RMP.node_infos[node_id].arc_flow_lb_cons_list:
+            dual = self.model.getDualsolLinear(cons)
+            duals["pi"][(i, j, frac_val)] = dual
 
         result = self.run_pricer(parent_node, node_id, duals, False)
         return result
@@ -50,10 +75,16 @@ class MyPricer(Pricer):
         """Farkas pricing: Add columns for infeasible LP relaxation."""
         # set up the node infos
         current_node = self.model.getCurrentNode()
-        self.model.constructLP()
-        self.model.writeLP("RMP.lp")
+        # self.model.constructLP()
         parent_node = current_node.getParent()
+        if parent_node is not None:
+            parent_id = parent_node.getNumber()
         node_id = current_node.getNumber()
+        if node_id == 3:
+            row_data = self.model.getLPRowsData()
+            node_added_rows = current_node.getAddedConss()
+            dsa = 0
+        self.model.writeLP(f"RMP_{node_id}.lp")
         node_dep = current_node.getDepth()
         node_ids.add(node_id)
         node_depth.add(node_dep)
@@ -64,33 +95,54 @@ class MyPricer(Pricer):
             RMP.node_infos[node_id].columns = RMP.initial_route
 
         # Get dual values (Farkas multipliers) of constraints
-        duals = {"mu": [], "nu": -1}
+        duals = {"mu": []}
         for c in RMP.constraints[:-1]:
             duals["mu"].append(self.model.getDualfarkasLinear(c))
-        duals["nu"] = self.model.getDualfarkasLinear(RMP.constraints[-1])
-        result = self.run_pricer(parent_node, node_id, duals, True)
 
+        nu = self.model.getDualfarkasLinear(RMP.constraints[-1])
+
+        xi = 0
+        if RMP.node_infos[node_id].vehicle_fleet_branch_lb_cons is not None:
+            xi = self.model.getDualfarkasLinear(RMP.node_infos[node_id].vehicle_fleet_branch_lb_cons)
+
+        kappa = 0
+        if RMP.node_infos[node_id].vehicle_fleet_branch_ub_cons is not None:
+            kappa = self.model.getDualfarkasLinear(RMP.node_infos[node_id].vehicle_fleet_branch_ub_cons)
+
+        duals["constant_term"] = -nu + xi - kappa
+
+        duals["gamma"] = {}
+        for i, j, frac_val, cons in RMP.node_infos[node_id].arc_flow_ub_cons_list:
+            dual = self.model.getDualfarkasLinear(cons)
+            duals["gamma"][(i, j, frac_val)] = dual
+
+        duals["pi"] = {}
+        for i, j, frac_val, cons in RMP.node_infos[node_id].arc_flow_lb_cons_list:
+            dual = self.model.getDualfarkasLinear(cons)
+            duals["pi"][(i, j, frac_val)] = dual
+
+        result = self.run_pricer(parent_node, node_id, duals, True)
         return result
 
     def run_pricer(self, parent_node, node_id, duals, farkas):
         # not the root node, check the column pool to add promising columns
-        if parent_node:
-            # routes that are not added to the node
-            alternative_routes = [key for key in RMP.route_key_id_pairs.keys() if
-                                  key not in RMP.node_infos[node_id].columns]
-            promising_routes = []  # routes in alternative_routes with negative reduced cost
-            for route_key in alternative_routes:
-                route = RMP.route_dict[route_key]
-                reduced_cost = cal_reduced_cost(route, duals, GeneralHelper.net)
-                if reduced_cost + close_tolerance < 0:
-                    promising_routes.append((route_key, reduced_cost))
-            # sort the promising routes
-            promising_routes = sorted(promising_routes, key=lambda elem: elem[1])
-            if len(promising_routes) > 0:
-                route_key = promising_routes[0][0]
-                # add the most promising route to the RMP
-                self.add_column_to_master(route_key, node_id)
-                RMP.node_infos[node_id].columns.append(route_key)
+        # if parent_node:
+        #     # routes that are not added to the node
+        #     alternative_routes = [key for key in RMP.route_key_id_pairs.keys() if
+        #                           key not in RMP.node_infos[node_id].columns]
+        #     promising_routes = []  # routes in alternative_routes with negative reduced cost
+        #     for route_key in alternative_routes:
+        #         route = RMP.route_dict[route_key]
+        #         reduced_cost = cal_reduced_cost(route, duals, GeneralHelper.net)
+        #         if reduced_cost + close_tolerance < 0:
+        #             promising_routes.append((route_key, reduced_cost))
+        #     # sort the promising routes
+        #     promising_routes = sorted(promising_routes, key=lambda elem: elem[1])
+        #     if len(promising_routes) > 0:
+        #         route_key = promising_routes[0][0]
+        #         # add the most promising route to the RMP
+        #         self.add_column_to_master(route_key, node_id)
+        #         RMP.node_infos[node_id].columns.append(route_key)
 
         # bi-directional label setting
         label_setting = BiDirectionalLabelSetting(duals)
@@ -103,18 +155,6 @@ class MyPricer(Pricer):
             GeneralHelper.label_forward_num += 1
         else:
             GeneralHelper.label_backward_num += 1
-
-        # if not farkas and len(RMP.node_infos[node_id].columns) > 110:
-        #     # profiler = cProfile.Profile()
-        #     # profiler.enable()
-        #     reduced_cost, hashable_path, where = label_setting.solve(farkas, RMP.node_infos[node_id])
-        #     # profiler.disable()
-        #     # stats = pstats.Stats(profiler).sort_stats('cumulative')
-        #     # stats.print_stats(20)  # print top 20 results
-        #     # if stats.total_tt > 5:
-        #     #     sdas = 0
-        # else:
-        #     reduced_cost, hashable_path, where = label_setting.solve(farkas, RMP.node_infos[node_id])
 
         GeneralHelper.test_sols.append((farkas, hashable_path, where))
 
@@ -171,6 +211,20 @@ class MyPricer(Pricer):
 
         # truck fleet constraints
         self.model.addConsCoeff(RMP.constraints[-1], newVar, 1)
+
+        # for vehicle fleet branching constraints
+        node_info = RMP.node_infos[node_id]
+        for cons in node_info.vehicle_fleet_branch_lb_cons_list + node_info.vehicle_fleet_branch_ub_cons_list:
+            self.model.addConsCoeff(cons, newVar, 1)
+
+        # for arc flow branching constraints
+        for i, j, _, cons in node_info.arc_flow_lb_cons_list + node_info.arc_flow_ub_cons_list:
+            # the truck travel the arc
+            if (i, j) in zip(route['truck'], route['truck'][1:]):
+                self.model.addConsCoeff(cons, newVar, 1)
+                continue
+            elif i in GeneralHelper.net.hubs and i in route['drone'].keys() and j + "_prime" in route['drone'][i]:
+                self.model.addConsCoeff(cons, newVar, 1)
 
         # update node_infos
         RMP.node_infos[node_id].columns.append(route_key) if route_key not in RMP.node_infos[node_id].columns else None

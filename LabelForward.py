@@ -69,13 +69,31 @@ class LabelForward:
         # here all conditions are satisfied, we need at least one is strict
         return strict
 
-    def allow_extend(self, node_j, farkas=False):
+    def allow_extend(self, node_j, node_info, farkas=False):
         """
         check whether we can extend the current label to node_j
         """
         node_i = self.path[-1]
+        _node_i = node_i.replace("_prime", "")
         _node_j = node_j.replace("_prime", "")
         arc = (node_i, node_j)
+
+        # check if it visits disabled arcs
+        if arc in self.net.arcs_1:  # a truck path
+            if arc in node_info.disabled_arcs:
+                return False
+        elif arc in self.net.arcs_3:  # green arc
+            if (_node_i, _node_j) in node_info.disabled_arcs:
+                return False
+        elif arc in self.net.arcs_4:  # orange arc
+            if (self.latest_hub, _node_j) in node_info.disabled_arcs:
+                return False
+
+        # check if all required arcs is visited
+        if node_j == self.net.depot_sink:
+            for i, _ in node_info.must_visit_arcs:
+                if i not in self.path and i + "_prime" not in self.path:
+                    return False
 
         # check condition 1
         if node_j in self.net.customers:  # a customer node

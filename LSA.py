@@ -55,22 +55,10 @@ class BiDirectionalLabelSetting:
         for node_j in available_extensions:
             label.alternative_extensions.remove(node_j)
 
-            if label.path == ['Source', 'H1', 'H1_prime', 'C1_prime', 'C3_prime', 'C6_prime'] and node_j == 'Sink':
-                sdas = 0
-
-            if label.path == ['Source'] and node_j == 'H3':
-                sdas = 0
-
-            if not label.allow_extend(node_j):
+            if not label.allow_extend(node_j, node_info):
                 continue
 
             label_j = label.extend(node_j, self.duals, farkas)
-
-            if label_j.hash_path == (
-                    ('Source', 'H3', 'Sink'), frozenset({('H3', frozenset({'C3_prime', 'C4_prime', 'C8_prime'}))})):
-                sdas = 0
-
-            # if label_j.hash_path==
 
             # check dominance
             dominated_by_j, other_dominates_j, other_dom_label = (
@@ -128,15 +116,9 @@ class BiDirectionalLabelSetting:
 
         _, _, label = self.backward_label_queue.get()
         available_extensions = SortedSet(label.alternative_extensions)
-        if label.path == ['C1_prime', 'C3_prime', 'Sink']:
-            sdsa = 0
+
         for node_j in available_extensions:
             label.alternative_extensions.remove(node_j)
-            if label.path == ['Sink'] and node_j == 'C4_prime':
-                sdas = 0
-
-            if label.path == ['H1', 'H1_prime', 'C4_prime', 'Sink'] and node_j == 'Source':
-                sdas = 0
 
             if not label.allow_extend(node_j):
                 continue
@@ -147,16 +129,10 @@ class BiDirectionalLabelSetting:
                 # normal mode
                 if not farkas:
                     label_j.cost, arrive_times = cal_label_cost_normal(self.net, 0, 0, 0,
-                                                                       -self.duals["nu"], label_j.path, self.duals)
+                                                                       -self.duals["cons_term"], label_j.path,
+                                                                       self.duals)
                 else:  # Farkas pricing
                     label_j.cost = cal_label_cost_farkas(self.net, label_j.path, self.duals)
-
-            if label_j.hash_path == (tuple(['Source', 'H1', 'Sink']), frozenset(
-                    {
-                        'H1_prime': frozenset({'C1_prime', 'C3_prime'})
-                    }.items()
-            )):
-                dsadas = 0
 
             # check dominance
             dominated_by_j, other_dominates_j, other_dom_label = (
@@ -324,7 +300,7 @@ class BiDirectionalLabelSetting:
             self.forward_label_queue.put((
                 0, next(self.forward_label_counter),
                 LabelForward([self.net.depot_source], 0, 0, 0, 0,
-                             0, -self.duals["nu"], 0, {}, [self.net.depot_source])
+                             0, -self.duals["constant_term"], 0, {}, [self.net.depot_source])
             ))
         else:  # Farkas pricing
             self.forward_label_queue.put((
@@ -396,14 +372,14 @@ class BiDirectionalLabelSetting:
         while True:
             # forward only
             if LSA_mode == 1:
-                while self.best_solution[0] + close_tolerance >= 0 and self.forward_label_queue.qsize() > 0:
+                while self.best_solution[0] + close_tolerance > 0 and self.forward_label_queue.qsize() > 0:
                     self.forward_labeling_one_step(farkas, node_info)
                 else:
                     self.print_runtime_info(s_time)
                     return self.best_solution
             # backward only
             elif LSA_mode == 2:
-                while self.best_solution[0] + close_tolerance >= 0 and self.backward_label_queue.qsize() > 0:
+                while self.best_solution[0] + close_tolerance > 0 and self.backward_label_queue.qsize() > 0:
                     self.backward_labeling_one_step(farkas, node_info)
                 else:
                     self.print_runtime_info(s_time)

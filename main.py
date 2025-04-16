@@ -27,9 +27,6 @@ if __name__ == '__main__':
     test = GeneralHelper.test_sols
     sdsad = GeneralHelper.node_ids
     node_types = {}
-    for idx, node in GeneralHelper.node_dict.items():
-        cur_type = node.getType()
-        node_types[idx] = cur_type
     sdas = 0
 
     # test_case = ToyTest(net)
