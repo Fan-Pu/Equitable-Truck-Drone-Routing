@@ -193,8 +193,6 @@ class MyBranchingRule(Branchrule):
                 node_info_right.arc_flow_lb_cons_list.append((node_i, node_j, flow, left_cons))
                 sdsa = 0
 
-        cons1 = node_left.getAddedConss()
-        cons2 = node_right.getAddedConss()
         return {'result': SCIP_RESULT.BRANCHED}
 
     def branchexecps(self, allowaddcons):

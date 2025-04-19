@@ -8,11 +8,18 @@ from TransformedNetwork import TransformedNetwork
 from sortedcontainers import SortedSet
 
 # test_path = ['Source', 'H1', 'C1_prime', 'C3_prime', 'Sink']
-# test_path = (tuple(['Source', 'H1', 'Sink']), frozenset(
-#     {
-#         'H1': frozenset({'C1_prime', 'C3_prime'})
-#     }.items()
-# ))
+test_path = (tuple(['Source', 'H1', 'Sink']), frozenset(
+    {
+        'H1': frozenset({'C3_prime', 'C6_prime'})
+    }.items()
+))
+
+# already added to node 3 but find it with negative reduced cost?
+test_dom_path = (tuple(['Source', 'H1', 'Sink']), frozenset(
+    {
+        'H1': frozenset({'C3_prime'})
+    }.items()
+))
 
 # test_path = ['Source', 'H1', 'H1_prime', 'C4_prime', 'Sink']
 # test_path = ['Source', 'C2', 'Sink']
@@ -601,3 +608,36 @@ def is_route_subset(route_1, route_2):
         if key not in route_drone_1.keys() or route_drone_1[key] != visit_set:
             return False
     return True
+
+
+def if_route_travel_arc(route, i, j, original_net):
+    """
+    check whether the given route travels the arc (i,j)
+    :param route:
+    :param i:
+    :param j:
+    :param original_net:
+    :return:
+    """
+    if (i, j) in zip(route['truck'], route['truck'][1:]):
+        return True
+    elif i in original_net.hubs and i in route['drone'].keys() and j + "_prime" in route['drone'][i]:
+        return True
+    return False
+
+
+def if_route_visit_node(route, i):
+    """
+    check whether a route visit the given arc
+    :param route:
+    :param i: the node name from the original network
+    :return:
+    """
+
+    if i in route['truck']:
+        return True
+    else:
+        for key, node_set in route['drone'].items():
+            if i + "_prime" in node_set:
+                return True
+    return False

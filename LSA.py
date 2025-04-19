@@ -9,6 +9,7 @@ from LabelForward import LabelForward
 from LabelBackward import LabelBackward
 import itertools
 from collections import OrderedDict, defaultdict
+from NodeInfo import NodeInfo
 
 
 class BiDirectionalLabelSetting:
@@ -44,7 +45,7 @@ class BiDirectionalLabelSetting:
         self.forward_update_cond = threading.Condition()  # the condition signaling the update of forward labels
         self.backward_update_cond = threading.Condition()  # the condition signaling the update of backward labels
 
-    def forward_labeling_one_step(self, farkas, node_info):
+    def forward_labeling_one_step(self, farkas, node_info: NodeInfo):
         """Forward search from the depot."""
         new_labels = defaultdict(list)
         awaiting_labels = defaultdict(dict)  # the new labels awaiting to be appended, key: node, value: dict
@@ -59,6 +60,12 @@ class BiDirectionalLabelSetting:
                 continue
 
             label_j = label.extend(node_j, self.duals, farkas)
+
+            if label_j.hash_path == test_dom_path and node_info.id == 3:
+                sdsa = 0
+
+            if label_j.hash_path == test_path and node_info.id == 3:
+                sdsa = 0
 
             # check dominance
             dominated_by_j, other_dominates_j, other_dom_label = (
@@ -300,7 +307,7 @@ class BiDirectionalLabelSetting:
             self.forward_label_queue.put((
                 0, next(self.forward_label_counter),
                 LabelForward([self.net.depot_source], 0, 0, 0, 0,
-                             0, -self.duals["constant_term"], 0, {}, [self.net.depot_source])
+                             0, self.duals["constant_term"], 0, {}, [self.net.depot_source])
             ))
         else:  # Farkas pricing
             self.forward_label_queue.put((
@@ -372,6 +379,8 @@ class BiDirectionalLabelSetting:
         while True:
             # forward only
             if LSA_mode == 1:
+                if node_info.id == 3:
+                    sdsad = 0
                 while self.best_solution[0] + close_tolerance > 0 and self.forward_label_queue.qsize() > 0:
                     self.forward_labeling_one_step(farkas, node_info)
                 else:
@@ -393,6 +402,8 @@ class BiDirectionalLabelSetting:
 
         for other in other_labels:
             j_dominates = label_j.dominates(other, farkas, self.duals)
+            if other.hash_path == test_dom_path:
+                sdas = 0
             other_dominates = other.dominates(label_j, farkas, self.duals)
 
             if j_dominates:

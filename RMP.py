@@ -1,9 +1,8 @@
-from pyscipopt import Model, SCIP_PARAMSETTING
-from NodeFocusLogger import NodeFocusLogger
 import GeneralHelper
 from GeneralHelper import *
-from MyBranchingRule import MyBranchingRule
-from MyPricer import MyPricer
+import gurobipy as gp
+from gurobipy import GRB
+from NodeInfo import NodeInfo
 
 node_infos = {}
 route_dict = {}  # key (truck_route, drone_route)
@@ -14,13 +13,14 @@ sum_z_val = None  # branching term
 z_list = []
 z_keys = []  # value: key of z variable
 infeasible_nodes = []
-OPT_z_names = ['z_6', 'z_29', 'z_4', 'z_1', 'z_12']
 
 
 class RMP:
-    def __init__(self):
-        self.model = Model("RMP")
-        self.init_master_problem()
+    def __init__(self, node_info: NodeInfo):
+        self.model = gp.Model("RMP")
+        # add decision variables
+        for route_key in node_info.columns:
+            route = route_dict[route_key]
 
     def init_master_problem(self):
         # add initial routes
