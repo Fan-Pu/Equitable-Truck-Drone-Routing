@@ -27,41 +27,32 @@ class TransformedNetwork:
         self.a_lb = {}
         self.a_ub = {}
         self.demand_weights = {}
-        self.arcs_1 = SortedSet()  # black links
-        self.arcs_2 = SortedSet()  # blue links
-        self.arcs_3 = SortedSet()  # green links
-        self.arcs_4 = SortedSet()  # orange links
-        self.arcs_5 = SortedSet()  # purple links
+        self.arcs_ori = SortedSet()  # original truck links
+        self.arcs_scp = SortedSet()  # links sc'
+        self.arcs_cpcp = SortedSet()  # links c'c'
+        self.arcs_cpc = SortedSet()  # links c'c
         self.max_timespan = -1
 
         # duplicate the nodes
         new_nodes = []
-        for node in net.all_nodes:
-            needs_duplicate = False
-            if node in net.hubs:
-                needs_duplicate = True
-            elif node in net.customers:
-                for node_i in net.drone_in_arcs[node]:
-                    if node_i in net.hubs:
-                        needs_duplicate = True
-                        break
-
+        for node in net.customers:
+            needs_duplicate = any(
+                predecessor in net.hubs
+                for predecessor in net.drone_in_arcs[node]
+            )
             if needs_duplicate:
                 new_node = node + "_prime"
                 new_nodes.append(new_node)
                 self.all_nodes.append(new_node)
                 self.all_nodes_indices[new_node] = len(self.all_nodes) - 1
-        for new_node in new_nodes:
-            node = new_node.replace("_prime", "")
-            if node in net.hubs:
-                self.hubs.append(new_node)
-            elif node in net.customers:
                 self.customers.append(new_node)
 
         self.out_arcs = {key: [] for key in self.all_nodes}
         self.in_arcs = {key: [] for key in self.all_nodes}
 
+        # given node n, the list contains the hubs that directly connect to n via drone links
         self.node_hubs_set_for_drone = {node: [] for node in self.all_nodes if node not in self.hubs}
+        # given node n, the list contains the hubs that directly connect to n via truck links
         self.node_hubs_set_for_truck = {node: [] for node in self.all_nodes if node not in self.hubs}
 
         # black arcs
@@ -70,52 +61,38 @@ class TransformedNetwork:
                 self.out_arcs[node].append(node_j)
                 self.in_arcs[node_j].append(node)
                 self.travel_times[(node, node_j)] = net.truck_travel_times[(node, node_j)]
-                self.arcs_1.add((node, node_j))
+                self.arcs_ori.add((node, node_j))
 
-        # blue arc
-        for node in self.hubs:
-            node_prime = node + "_prime"
-            if node_prime not in self.hubs:
-                continue
-            self.out_arcs[node].append(node_prime)
-            self.in_arcs[node_prime].append(node)
-            self.travel_times[(node, node_prime)] = 0
-            self.arcs_2.add((node, node_prime))
-
-        # green arc
+        # green arc sc'
         for node in net.hubs:
-            node_prime = node + "_prime"
             for node_j in net.drone_out_arcs[node]:
                 node_j_prime = node_j + "_prime"
-                self.out_arcs[node_prime].append(node_j_prime)
-                self.in_arcs[node_j_prime].append(node_prime)
-                self.travel_times[(node_prime, node_j_prime)] = net.drone_travel_times[(node, node_j)]
-                self.arcs_3.add((node_prime, node_j_prime))
+                self.out_arcs[node].append(node_j_prime)
+                self.in_arcs[node_j_prime].append(node)
+                self.travel_times[(node, node_j_prime)] = net.drone_travel_times[(node, node_j)]
+                self.arcs_scp.add((node, node_j_prime))
 
-        # orange arc
+        # orange arc c'c'
         omega_D_set = {}
         for node in net.hubs:
             omega_D_set[node] = []
             for node_j in net.drone_out_arcs[node]:
                 omega_D_set[node].append(node_j)
+            omega_D_set[node].sort()
             for node_i, node_j in combinations(omega_D_set[node], 2):
                 node_i_prime = node_i + "_prime"
                 node_j_prime = node_j + "_prime"
-                # i to j
-                self.out_arcs[node_i_prime].append(node_j_prime)
-                self.in_arcs[node_j_prime].append(node_i_prime)
-                self.arcs_4.add((node_i_prime, node_j_prime))
-                # j to i
-                self.out_arcs[node_j_prime].append(node_i_prime)
-                self.in_arcs[node_i_prime].append(node_j_prime)
-                self.arcs_4.add((node_j_prime, node_i_prime))
+                arc = (node_i_prime, node_j_prime)
+                if arc not in self.arcs_cpcp:
+                    self.arcs_cpcp.add(arc)
 
-        # purple arc
+        # purple arc c'c
         omega_K_set = {}
         for node in net.hubs:
             omega_K_set[node] = []
             for node_j in net.truck_out_arcs[node]:
                 omega_K_set[node].append(node_j)
+            omega_K_set[node].sort()
             for node_i in omega_D_set[node]:
                 for node_j in omega_K_set[node]:
                     if node_i == node_j:
@@ -124,7 +101,7 @@ class TransformedNetwork:
                     # i to j
                     self.out_arcs[node_i_prime].append(node_j)
                     self.in_arcs[node_j].append(node_i_prime)
-                    self.arcs_5.add((node_i_prime, node_j))
+                    self.arcs_cpc.add((node_i_prime, node_j))
 
         # update self.node_hubs_set
         for node in self.node_hubs_set_for_drone.keys():
@@ -141,12 +118,12 @@ class TransformedNetwork:
                         _node in node_list and hub not in self.node_hubs_set_for_truck[node]) else None
 
         # set travel times for orange and purple arcs
-        for node_i_prime, node_j_prime in self.arcs_4:
+        for node_i_prime, node_j_prime in self.arcs_cpcp:
             key = (node_i_prime, node_j_prime)
             self.travel_times[key] = {}
             for hub in self.node_hubs_set_for_drone[node_j_prime]:
                 self.travel_times[key][hub] = net.drone_travel_times[(hub, node_j_prime.replace("_prime", ""))]
-        for node_i_prime, node_j in self.arcs_5:
+        for node_i_prime, node_j in self.arcs_cpc:
             key = (node_i_prime, node_j)
             self.travel_times[key] = {}
             for hub in self.node_hubs_set_for_truck[node_j]:
