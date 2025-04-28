@@ -1,4 +1,5 @@
 import GeneralHelper
+from NodeInfo import NodeInfo
 from GeneralHelper import *
 
 
@@ -21,7 +22,7 @@ class LabelForward:
         self.latest_hub = None
         self.hash_path = truck_drone_path_to_hashable(self.truck_path, self.drone_flights) if depth == 0 else None
 
-    def dominates(self, other, farkas, duals=None):
+    def dominates(self, other, farkas: bool, duals=None):
         """Check if this label dominates another."""
         strict = False  # check whether contains a strict condition
 
@@ -69,7 +70,7 @@ class LabelForward:
         # here all conditions are satisfied, we need at least one is strict
         return strict
 
-    def allow_extend(self, node_j, node_info, farkas=False):
+    def allow_extend(self, node_j, node_info: NodeInfo, farkas=False):
         """
         check whether we can extend the current label to node_j
         """
@@ -78,15 +79,20 @@ class LabelForward:
         _node_j = node_j.replace("_prime", "")
         arc = (node_i, node_j)
 
-        # check if it visits disabled arcs
-        if arc in self.net.arcs_1:  # a truck path
+        # check branch arcs in transformed network
+        if arc in node_info.disabled_arcs_trans:
+            return False
+
+        # check branch arcs in original network
+        if arc in self.net.arcs_ori:  # a truck path
             if arc in node_info.disabled_arcs:
                 return False
-        elif arc in self.net.arcs_3:  # green arc
-            if (_node_i, _node_j) in node_info.disabled_arcs:
+        elif arc in self.net.arcs_scp:  # green arc
+            temp_arc = (node_i, _node_j)
+            if temp_arc in node_info.disabled_arcs or temp_arc in node_info.disabled_arcs_drones_left:
                 return False
-        elif arc in self.net.arcs_4:  # orange arc
-            if (self.latest_hub, _node_j) in node_info.disabled_arcs:
+        elif arc in self.net.arcs_cpcp:  # orange arc
+            if (self.latest_hub, _node_j) in node_info.disabled_arcs_drones_left:
                 return False
 
         # check if all required arcs is visited
@@ -94,8 +100,11 @@ class LabelForward:
             for i, _ in node_info.must_visit_arcs:
                 if i not in self.path and i + "_prime" not in self.path:
                     return False
+            for i, j in node_info.must_visit_arcs_trans:
+                if (i, j) not in zip(self.path, self.path[1:]):
+                    return False
 
-        # check condition 1
+        # check Customer Visits Constraints
         if node_j in self.net.customers:  # a customer node
             if "_prime" in node_j:  # node_j is a duplication
                 dup_node = _node_j
@@ -107,28 +116,24 @@ class LabelForward:
             if node_j in self.path:
                 return False
 
-        # check condition 2
-        if arc in self.net.arcs_4:
-            hub, _ = get_latest_hub(self.net, self.path)
-            if (hub, _node_j) not in self.net.origin_drone_arcs:
+        # check Node Accessibility Check
+        if arc in self.net.arcs_cpcp:
+            if (self.latest_hub, node_j) not in self.net.arcs_scp:
+                return False
+        if arc in self.net.arcs_cpc:
+            if (self.latest_hub, node_j) not in self.net.arcs_ori:
                 return False
 
-        # check condition 3
-        if arc in self.net.arcs_5:
-            hub, _ = get_latest_hub(self.net, self.path)
-            if (hub, _node_j) not in self.net.origin_truck_arcs:
-                return False
-
-        # check condition 4
+        # check Arrival Time Constraints
         if self.arrival_time < self.net.a_lb[node_i]:
             return False
 
-        # check condition 5
+        # check Loading Capacity Constraints
         if self.truck_load + self.net.demand_weights[node_j] > truck_max_weight:
             return False
 
-        # check condition 6
-        if arc in self.net.arcs_3 or arc in self.net.arcs_4:
+        # check Drone Fleet Constraints
+        if arc in self.net.arcs_scp or arc in self.net.arcs_cpcp:
             if self.drones_used >= num_drones_per_truck:
                 return False
 
@@ -155,17 +160,23 @@ class LabelForward:
         label_j.alternative_extensions = {node for node in self.net.out_arcs[node_j]}
         label_j.latest_hub = self.latest_hub
 
+        # update path
         label_j.path.append(node_j)
 
+        # update latest_hub
+        if node_j in self.net.hubs:
+            label_j.latest_hub = node_j
+            label_j.drone_flights[node_j] = set()
+
+        # update truck load
+        if node_j in self.net.customers:
+            label_j.truck_load = self.truck_load + self.net.demand_weights[node_j]
+
         # update z
-        if arc in self.net.arcs_3 or arc in self.net.arcs_4:
+        if node_j in self.net.customers_prime:
             label_j.drones_used += 1
         else:
             label_j.drones_used = 0
-
-        if arc in self.net.arcs_2:
-            label_j.latest_hub = node_i
-            label_j.drone_flights[node_i] = set()
 
         # update a
         label_j.arrival_time = get_arrive_time(self.arrival_time, node_i, node_j, label_j.latest_hub, self.sync_time,
@@ -176,7 +187,7 @@ class LabelForward:
             label_j.sync_time = label_j.arrival_time
 
         # update waiting time
-        if arc in self.net.arcs_3 or arc in self.net.arcs_4:
+        if node_j in self.net.customers_prime:
             label_j.wait_time = max(self.wait_time, label_j.arrival_time - label_j.sync_time)
         else:
             label_j.wait_time = 0
@@ -193,9 +204,9 @@ class LabelForward:
                 label_j.cost += label_j.arrival_time
 
         # update auxiliary infos
-        if arc in self.net.arcs_3 or arc in self.net.arcs_4:
+        if arc in self.net.arcs_scp or arc in self.net.arcs_cpcp:
             label_j.drone_flights[label_j.latest_hub].add(node_j)
-        elif arc in self.net.arcs_1 or arc in self.net.arcs_5:
+        elif arc in self.net.arcs_ori or arc in self.net.arcs_cpc:
             label_j.truck_path.append(node_j)
 
         label_j.hash_path = truck_drone_path_to_hashable(label_j.truck_path, label_j.drone_flights)

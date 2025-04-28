@@ -40,19 +40,11 @@ class RMPNode:
             gp.quicksum(self.z_dict.values()) <= node_info.vehicle_fleet_branch_ub, name=f"truck_fleet_ub")
         self.vehicle_fleet_branch_lb_cons = self.model.addConstr(
             gp.quicksum(self.z_dict.values()) >= node_info.vehicle_fleet_branch_lb, name=f"truck_fleet_lb")
-        # arc flow branching
-        for (i, j, frac_val), route_keys in node_info.arc_flow_lb_cons_dict:
-            self.arc_flow_lb_cons_dict[(i, j, frac_val)] = self.model.addConstr(
-                gp.quicksum(self.z_dict[key] for key in route_keys) >= int(frac_val) + 1,
-                name=f"arc_flow_lb_{i},{j}")
-        for (i, j, frac_val), route_keys in node_info.arc_flow_ub_cons_dict:
-            self.arc_flow_ub_cons_dict[(i, j, frac_val)] = self.model.addConstr(
-                gp.quicksum(self.z_dict[key] for key in route_keys) <= int(frac_val),
-                name=f"arc_flow_ub_{i},{j}")
 
     def solve(self):
         self.model.setParam('OutputFlag', 0)
         self.model.setParam('InfUnbdInfo', 1)
+        self.model.setParam('DualReductions', 0)
         self.model.update()
         self.model.optimize()
         self.status = self.model.status
@@ -74,15 +66,7 @@ class RMPNode:
 
             xi = self.vehicle_fleet_branch_lb_cons.Pi
             kappa = self.vehicle_fleet_branch_ub_cons.Pi
-            self.duals["constant_term"] = xi - kappa
-
-            self.duals["gamma"] = {}
-            for (i, j, frac_val), cons in self.arc_flow_ub_cons_dict.items():
-                self.duals["gamma"][(i, j, frac_val)] = cons.Pi
-
-            self.duals["pi"] = {}
-            for (i, j, frac_val), cons in self.arc_flow_lb_cons_dict.items():
-                self.duals["pi"][(i, j, frac_val)] = cons.Pi
+            self.duals["constant_term"] = -xi - kappa
         # get farkas dual
         elif self.status == GRB.INFEASIBLE:
             self.duals = {"mu": []}
@@ -91,15 +75,7 @@ class RMPNode:
 
             xi = -self.vehicle_fleet_branch_lb_cons.FarkasDual
             kappa = -self.vehicle_fleet_branch_ub_cons.FarkasDual
-            self.duals["constant_term"] = xi - kappa
-
-            self.duals["gamma"] = {}
-            for (i, j, frac_val), cons in self.arc_flow_ub_cons_dict.items():
-                self.duals["gamma"][(i, j, frac_val)] = -cons.FarkasDual
-
-            self.duals["pi"] = {}
-            for (i, j, frac_val), cons in self.arc_flow_lb_cons_dict.items():
-                self.duals["pi"][(i, j, frac_val)] = -cons.FarkasDual
+            self.duals["constant_term"] = -xi - kappa
 
     def run_pricer(self, node_info: NodeInfo):
         find_new_column = False
@@ -107,7 +83,7 @@ class RMPNode:
         farkas = True if self.status == GRB.INFEASIBLE else False
         # bi-directional label setting
         label_setting = BiDirectionalLabelSetting(self.duals)
-        reduced_cost, hashable_path, where = label_setting.solve(farkas, node_info)
+        reduced_cost, hashable_path, element_path, where = label_setting.solve(farkas, node_info)
         if where == 0:
             GeneralHelper.label_merge_num += 1
         elif where == 1:
@@ -126,6 +102,7 @@ class RMPNode:
             # add the column to RMP
             if route_key not in bp.node_infos[node_id].columns:
                 bp.node_infos[node_id].columns.append(route_key)
+                bp.node_infos[node_id].column_elementary_paths[route_key] = element_path
                 self._add_column(route_key)
                 find_new_column = True
             else:

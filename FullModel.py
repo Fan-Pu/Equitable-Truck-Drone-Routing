@@ -356,7 +356,7 @@ class FullModel:
                                         name=f"realized5_{cons_id}"))
                     cons_id += 1
 
-        model.setParam(GRB.Param.TimeLimit, 1)
+        # model.setParam(GRB.Param.TimeLimit, 1)
         model.update()
         model.write("full_model.lp")
         model.optimize()
@@ -373,7 +373,7 @@ class FullModel:
             print("No feasible solution found")
 
         # Retrieve the values
-        if model.Status == GRB.OPTIMAL:
+        if model.Status == GRB.OPTIMAL or GRB.SUBOPTIMAL:
             print(f"Objective value: {model.ObjVal}")
             self.x_values = {(i, j, k): var.X for (i, j, k), var in x_dict.items()}
             self.y_values = {(i, j, d): var.X for (i, j, d), var in y_dict.items()}
@@ -395,6 +395,7 @@ class FullModel:
                     drone_routes[d].append((self.all_nodes[i], self.all_nodes[j]))
 
             solutions = {k: defaultdict(list) for k in range(self.net.num_trucks)}
+            truck_routes = {k: self.sort_arcs_to_path(val) for k, val in truck_routes.items()}
             for k, path in truck_routes.items():
                 if not path:
                     continue
@@ -502,3 +503,32 @@ class FullModel:
 
         # Add a legend
         plt.legend()
+
+    def sort_arcs_to_path(self, arcs: list):
+        """
+        Given a list of arcs as (origin, destination) pairs,
+        return a list of arcs ordered into a single path.
+        """
+        if not arcs:
+            return []
+
+        # find the start node: appears as origin but never as destination
+        origins = {u for u, v in arcs}
+        destinations = {v for u, v in arcs}
+        starts = origins - destinations
+        if len(starts) != 1:
+            raise ValueError(f"Expected exactly one start node, got {starts}")
+        start = next(iter(starts))
+
+        # build a lookup from each node to its next node
+        next_node = {u: v for u, v in arcs}
+
+        # walk from start until no further arc is found
+        path = []
+        cur = start
+        while cur in next_node:
+            nxt = next_node[cur]
+            path.append((cur, nxt))
+            cur = nxt
+
+        return path

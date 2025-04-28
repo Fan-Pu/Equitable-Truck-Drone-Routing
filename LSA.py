@@ -26,7 +26,9 @@ class BiDirectionalLabelSetting:
         # self.backward_label_keys = {node: OrderedDict() for node in self.net.all_nodes}  # save backward label keys
         # self.forward_label_dict = defaultdict()  # save all forward labels
         # self.backward_label_dict = defaultdict()  # save all backward labels
-        self.best_solution = (np.inf, None, -1)  # the third element: 0 from merge, 1 from forward, 2 from backward
+
+        # the third element: 0 from merge, 1 from forward, 2 from backward
+        self.best_solution = (np.inf, None, None, -1)
         self.explored_solutions = SortedSet()  # explored labels
         self.duals = duals
         self.forward_label_queue = queue.PriorityQueue()  # priority queue, ordered by depth
@@ -61,12 +63,6 @@ class BiDirectionalLabelSetting:
 
             label_j = label.extend(node_j, self.duals, farkas)
 
-            if label_j.hash_path == test_dom_path and node_info.id == 3:
-                sdsa = 0
-
-            if label_j.hash_path == test_path and node_info.id == 3:
-                sdsa = 0
-
             # check dominance
             dominated_by_j, other_dominates_j, other_dom_label = (
                 self.dominance_check(label_j, self.forward_labels[node_j].values(), farkas))
@@ -98,7 +94,7 @@ class BiDirectionalLabelSetting:
                         #     if label_j.cost < self.best_solution[0]:
                         #         self.best_solution = (label_j.cost, hashable_path, 1)
                         if label_j.cost < self.best_solution[0]:
-                            self.best_solution = (label_j.cost, hashable_path, 1)
+                            self.best_solution = (label_j.cost, hashable_path, label_j.path, 1)
                         if hashable_path not in self.explored_solutions:
                             self.explored_solutions.add(hashable_path)
                 # only append the labels that have not been added
@@ -127,7 +123,7 @@ class BiDirectionalLabelSetting:
         for node_j in available_extensions:
             label.alternative_extensions.remove(node_j)
 
-            if not label.allow_extend(node_j):
+            if not label.allow_extend(node_j, node_info):
                 continue
 
             label_j = label.extend(node_j, self.duals, farkas)
@@ -136,7 +132,7 @@ class BiDirectionalLabelSetting:
                 # normal mode
                 if not farkas:
                     label_j.cost, arrive_times = cal_label_cost_normal(self.net, 0, 0, 0,
-                                                                       -self.duals["cons_term"], label_j.path,
+                                                                       -self.duals["constant_term"], label_j.path,
                                                                        self.duals)
                 else:  # Farkas pricing
                     label_j.cost = cal_label_cost_farkas(self.net, label_j.path, self.duals)
@@ -170,7 +166,7 @@ class BiDirectionalLabelSetting:
                     # do not consider the existing columns
                     if hashable_path not in node_info.columns:
                         if label_j.cost < self.best_solution[0]:
-                            self.best_solution = (label_j.cost, hashable_path, 2)
+                            self.best_solution = (label_j.cost, hashable_path, label_j.path, 2)
                         if hashable_path not in self.explored_solutions:
                             self.explored_solutions.add(hashable_path)
                 # only append the labels that have not been added
@@ -379,8 +375,6 @@ class BiDirectionalLabelSetting:
         while True:
             # forward only
             if LSA_mode == 1:
-                if node_info.id == 3:
-                    sdsad = 0
                 while self.best_solution[0] + close_tolerance > 0 and self.forward_label_queue.qsize() > 0:
                     self.forward_labeling_one_step(farkas, node_info)
                 else:
@@ -418,7 +412,7 @@ class BiDirectionalLabelSetting:
     def print_runtime_info(self, start_time):
         arrival_times, sync_times, wait_times = [0], [0], [0]
         last_hub = None
-        obj, path, where = self.best_solution
+        obj, path, element_path, where = self.best_solution
 
         # for j in range(1, len(path)):
         #     node_i, node_j = path[j - 1], path[j]

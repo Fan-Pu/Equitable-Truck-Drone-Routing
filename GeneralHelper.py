@@ -8,27 +8,37 @@ from TransformedNetwork import TransformedNetwork
 from sortedcontainers import SortedSet
 
 # test_path = ['Source', 'H1', 'C1_prime', 'C3_prime', 'Sink']
-test_path = (tuple(['Source', 'H1', 'Sink']), frozenset(
+test_path = (tuple(['Source', 'H1']), frozenset(
     {
-        'H1': frozenset({'C3_prime', 'C6_prime'})
+        'H1': frozenset({'C4_prime'})
     }.items()
 ))
 
 # already added to node 3 but find it with negative reduced cost?
-test_dom_path = (tuple(['Source', 'H1', 'Sink']), frozenset(
+test_dom_path = (tuple(['Source', 'H1']), frozenset(
     {
-        'H1': frozenset({'C3_prime'})
+        'H1': frozenset({'C1_prime'})
     }.items()
 ))
 
 # test_path = ['Source', 'H1', 'H1_prime', 'C4_prime', 'Sink']
 # test_path = ['Source', 'C2', 'Sink']
 
-# test_path_list = [
-#     ['Source', 'H1', 'H1_prime', 'C1_prime', 'C3_prime', 'Sink'],
-#     ['Source', 'H1', 'H1_prime', 'C4_prime', 'Sink'],
-#     ['Source', 'C2', 'Sink']
-# ]
+test_path_list = [
+    (tuple(['Source', 'C2', 'Sink']), frozenset(
+        {}.items()
+    )),
+    (tuple(['Source', 'H1', 'Sink']), frozenset(
+        {
+            'H1': frozenset({'C4_prime'})
+        }.items()
+    )),
+    (tuple(['Source', 'H1', 'Sink']), frozenset(
+        {
+            'H1': frozenset({'C1_prime', 'C3_prime'})
+        }.items()
+    ))
+]
 
 columns_list = []
 
@@ -37,31 +47,39 @@ merge_num = 0
 final_model = None
 
 # test_path_list = [
-#     (tuple(['Source', 'H1', 'Sink']), frozenset(
+#     (tuple(['Source', 'C2', 'Sink']), frozenset(
+#         {}.items()
+#     )),
+#     (tuple(['Source', 'C5', 'Sink']), frozenset(
+#         {}.items()
+#     )),
+#     (tuple(['Source', 'C9', 'C6', 'Sink']), frozenset(
+#         {}.items()
+#     )),
+#     (tuple(['Source', 'H2', 'Sink']), frozenset(
 #         {
-#             'H1': frozenset({'C1_prime', 'C3_prime'})
+#             'H2': frozenset({'C1_prime', 'C4_prime', 'C8_prime'})
 #         }.items()
 #     )),
-#     (tuple(['Source', 'H1', 'Sink']), frozenset(
+#     (tuple(['Source', 'H2', 'Sink']), frozenset(
 #         {
-#             'H1': frozenset({'C4_prime'})
+#             'H2': frozenset({'C3_prime', 'C7_prime', 'C10_prime'})
 #         }.items()
 #     ))
 # ]
 
-
-test_path_list = [
-    (tuple(['Source', 'H3', 'Sink']), frozenset(
-        {
-            'H3': frozenset({'C4_prime', 'C8_prime'})
-        }.items()
-    )),
-    (tuple(['Source', 'H3', 'Sink']), frozenset(
-        {
-            'H3': frozenset({'C1_prime', 'C3_prime', 'C6_prime'})
-        }.items()
-    ))
-]
+# test_path_list = [
+#     (tuple(['Source', 'H3', 'Sink']), frozenset(
+#         {
+#             'H3': frozenset({'C4_prime', 'C8_prime'})
+#         }.items()
+#     )),
+#     (tuple(['Source', 'H3', 'Sink']), frozenset(
+#         {
+#             'H3': frozenset({'C1_prime', 'C3_prime', 'C6_prime'})
+#         }.items()
+#     ))
+# ]
 
 test_node_ids = []
 
@@ -76,12 +94,12 @@ label_backward_num = 0
 
 lp = LineProfiler()
 
-LSA_mode = 1  # 0 for combined, 1 for forward, 2 for backward
+LSA_mode = 2  # 0 for combined, 1 for forward, 2 for backward
 
 seed = 2024
 
-net = None  # the network object
-transformed_net = None  # the transformed network object
+net: Network = None  # the network object
+transformed_net: TransformedNetwork = None  # the transformed network object
 
 # drone travel time
 drone_min_t = 2
@@ -102,27 +120,47 @@ drone_endurance = 150
 # for sub-tour elimination
 epsilon = 1
 
-# needs to branch
+# # solved by forward labeling
 # num_customers = 4
 # num_hubs = 3
 # num_trucks = 3
 # num_drones_per_truck = 2
 
-num_customers = 8
-num_hubs = 2
-num_trucks = 5
-num_drones_per_truck = 3
+# solved by forward labeling
+num_customers = 4
+num_hubs = 3
+num_trucks = 4
+num_drones_per_truck = 2
 
-# # directly goes to second branch rule
+# # solved by forward labeling
+# num_customers = 8
+# num_hubs = 2
+# num_trucks = 5
+# num_drones_per_truck = 3
+
+# # solved by forward labeling
 # num_customers = 10
 # num_hubs = 3
 # num_trucks = 5
 # num_drones_per_truck = 3
 
+# # solved by forward labeling
+# num_customers = 8
+# num_hubs = 3
+# num_trucks = 5
+# num_drones_per_truck = 3
+
+# # solved by forward labeling
 # num_customers = 8
 # num_hubs = 1
 # num_trucks = 8
 # num_drones_per_truck = 3
+
+# # solved by forward labeling
+# num_customers = 15
+# num_hubs = 3
+# num_trucks = 8
+# num_drones_per_truck = 4
 
 # route_list = [{'id': 4, 'truck': ['Source', 'C5', 'Sink'], 'drone': [], 'launches': [], 'cost': 550},
 #               {'id': 6, 'truck': ['Source', 'C7', 'Sink'], 'drone': [], 'launches': [], 'cost': 745},
@@ -339,31 +377,29 @@ def get_latest_hub(network, path):
     return result, idx
 
 
-def get_arrive_time(arrival_time, node_i, node_j, last_hub, sync_time, wait_time, network):
+def get_arrive_time(arrival_time, node_i, node_j, last_hub, sync_time, wait_time, network: TransformedNetwork):
     """
     return the arrival time at node_j
     """
-
-    if (node_i, node_j) in network.arcs_1:
-        result = arrival_time + network.travel_times[(node_i, node_j)]
-    elif (node_i, node_j) in network.arcs_5:
+    arc = (node_i, node_j)
+    if arc in network.arcs_ori:
+        result = arrival_time + network.travel_times[arc]
+    elif arc in network.arcs_cpc:
         if last_hub is None:
-            travel_time = min(network.travel_times[(node_i, node_j)].values())
+            travel_time = min(network.travel_times[arc].values())
         else:
-            travel_time = network.travel_times[(node_i, node_j)][last_hub]
+            travel_time = network.travel_times[arc][last_hub]
         result = sync_time + wait_time + travel_time
-    elif (node_i, node_j) in network.arcs_2:
-        result = arrival_time
-    # arcs 3 and 4
+    # arcs arcs_cpcp and arcs_SC'
     else:
-        if (node_i, node_j) in network.arcs_4:
+        if arc in network.arcs_cpcp:
             if last_hub is None:
-                travel_time = min(network.travel_times[(node_i, node_j)].values())
+                travel_time = min(network.travel_times[arc].values())
             else:
-                travel_time = network.travel_times[(node_i, node_j)][last_hub]
+                travel_time = network.travel_times[arc][last_hub]
             result = sync_time + travel_time
-        else:  # arcs 3
-            result = sync_time + network.travel_times[(node_i, node_j)]
+        else:  # arcs_SC'
+            result = sync_time + network.travel_times[arc]
     return result
 
 
@@ -448,10 +484,11 @@ def hashable_path_to_route(path, idx, trans_net):
             sync_time = arrival_time
             drone_travel_times = []
             for drone_visit in drone_route[node_j]:
-                drone_travel_time = trans_net.travel_times[(node_j + "_prime", drone_visit)]
+                drone_travel_time = trans_net.travel_times[(node_j, drone_visit)]
                 drone_travel_times.append(drone_travel_time)
                 cost += (sync_time + drone_travel_time - trans_net.a_lb[drone_visit]) ** 2
-            wait_time = max(drone_travel_times)
+            if len(drone_travel_times) > 0:
+                wait_time = max(drone_travel_times)
         elif node_j in trans_net.customers:
             cost += (arrival_time - trans_net.a_lb[node_j]) ** 2
         elif node_j == trans_net.depot_sink:
@@ -464,6 +501,7 @@ def hashable_path_to_route(path, idx, trans_net):
 
 def find_initial_routes(original_net):
     routes = []
+    element_paths = {}
     truck_travel_times = original_net.truck_travel_times
     a_lb = original_net.a_lb
     depot_source, depot_sink = original_net.depot_source, original_net.depot_sink
@@ -506,8 +544,9 @@ def find_initial_routes(original_net):
         route = {'id': len(routes), 'truck': truck_route, 'drone': {}, 'launches': [], 'cost': cost}
         key = truck_drone_path_to_hashable(truck_route, {})
         routes.append((key, route))
+        element_paths[key] = truck_route
 
-    return routes
+    return routes, element_paths
 
 
 def cal_reduced_cost(route, duals, original_net):
@@ -525,8 +564,8 @@ def cal_reduced_cost(route, duals, original_net):
     return reduced_cost
 
 
-def cal_label_cost_normal(trans_net, arrival_time_i, sync_time_i, wait_time_i, cost_i, partial_path, duals,
-                          last_hub=None):
+def cal_label_cost_normal(trans_net: TransformedNetwork, arrival_time_i, sync_time_i, wait_time_i, cost_i, partial_path,
+                          duals, last_hub=None):
     """
     node_i is the first point on the partial path, calculate the reduced cost of this partial path
     """
@@ -552,7 +591,7 @@ def cal_label_cost_normal(trans_net, arrival_time_i, sync_time_i, wait_time_i, c
         elif node_j == trans_net.depot_sink:
             full_cost += arrival_time
         # update waiting time
-        if (node_pre, node_j) in trans_net.arcs_3 or (node_pre, node_j) in trans_net.arcs_4:
+        if (node_pre, node_j) in trans_net.arcs_scp or (node_pre, node_j) in trans_net.arcs_cpcp:
             wait_time = max(wait_time, arrival_time - sync_time)
         else:
             wait_time = 0
@@ -577,11 +616,11 @@ def cal_label_cost_farkas(trans_net, partial_path, duals):
     return full_cost
 
 
-def find_prefix(path, trans_net):
+def find_prefix(path, trans_net: TransformedNetwork):
     prefix = [path[0]]
     node_m_next = None
     for i, (node, node_next) in enumerate(zip(path, path[1:])):
-        if (node, node_next) in trans_net.arcs_5:
+        if (node, node_next) in trans_net.arcs_cpc:
             node_m_next = node_next
             break
         prefix.append(node_next)

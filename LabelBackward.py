@@ -1,5 +1,6 @@
 import GeneralHelper
 from GeneralHelper import *
+from NodeInfo import NodeInfo
 
 
 class LabelBackward:
@@ -100,55 +101,69 @@ class LabelBackward:
         # here all conditions are satisfied, we need at least one is strict
         return strict
 
-    def allow_extend(self, node_j):
+    def allow_extend(self, node_j, node_info: NodeInfo):
         """
         Check whether we can extend the current label to node_j.
         """
 
         node_i = self.path[0]
         _node_j = node_j.replace("_prime", "")
-        path_set = set(self.path)  # Convert list to set for O(1) lookup
+        _node_i = node_i.replace("_prime", "")
+        arc = (node_j, node_i)
+        prefix = node_p_next = None
 
-        # Condition 1: Check customer node duplication
+        # check branch arcs in transformed network
+        if arc in node_info.disabled_arcs_trans:
+            return False
+
+        # check if all required arcs is visited
+        if node_j == self.net.depot_source:
+            for i, _ in node_info.must_visit_arcs:
+                if i not in self.path and i + "_prime" not in self.path:
+                    return False
+            temp_path = [self.net.depot_source] + self.path
+            for i, j in node_info.must_visit_arcs_trans:
+                if (i, j) not in zip(temp_path, temp_path[1:]):
+                    return False
+
+        # check branch arcs in original network
+        if arc in self.net.arcs_ori:  # a truck path
+            if arc in node_info.disabled_arcs:
+                return False
+        elif arc in self.net.arcs_scp:  # green arc
+            prefix, node_p_next = find_prefix(self.path, self.net)
+            for node in prefix[:-1]:
+                temp_arc = (node_j, node.replace("_prime", ""))
+                if temp_arc in node_info.disabled_arcs or temp_arc in node_info.disabled_arcs_drones_left:
+                    return False
+
+        # Customer Visits Constraints
         if node_j in self.net.customers:  # If node_j is a customer node
             dup_node = _node_j if "_prime" in node_j else node_j + "_prime"
-            if node_j in path_set or dup_node in path_set:
+            if node_j in self.path or dup_node in self.path:
                 return False
         else:  # If node_j is not a customer node
-            if node_j in path_set:
+            if node_j in self.path:
                 return False
 
-        # Condition 2: Check truck load limit
+        # Loading Capacity Constraints
         demand_weight = self.net.demand_weights.get(node_j, 0)
         if self.truck_load + demand_weight > truck_max_weight:
             return False
 
-        # Condition 3: Check drone usage limit
-        if (node_j, node_i) in self.net.arcs_4 or (node_j, node_i) in self.net.arcs_5:  # Set union for efficiency
+        # Drone Fleet Constraints
+        if arc in self.net.arcs_cpcp or arc in self.net.arcs_cpc:
             if self.drones_used >= num_drones_per_truck:
                 return False
 
-        # Condition 4: Check hub duplication validity
-        if node_j in self.net.hubs and "_prime" in node_j:
-            prefix = [self.path[0]]
-
-            # Find prefix efficiently using an iterator
-            for node, node_next in zip(self.path, self.path[1:]):
-                prefix.append(node_next)
-                if (node, node_next) in self.net.arcs_5:
-                    break
-            else:
-                raise Exception("prefix is not found!")
-
-            # Validate prefix path
-            for node in prefix[:-1]:  # Iterate without the last element
-                _node = node.replace("_prime", "")
-                if (_node_j, _node) not in self.net.origin_drone_arcs:
+        # Node Accessibility Check
+        if arc in self.net.arcs_scp:
+            for node in prefix[:-1]:
+                if (node_j, node) not in self.net.arcs_scp:
                     return False
-
             # Validate last node separately
-            last_node = prefix[-1].replace("_prime", "")
-            if (_node_j, last_node) not in self.net.origin_truck_arcs:
+            last_node = prefix[-1]
+            if (node_j, last_node) not in self.net.origin_truck_arcs:
                 return False
 
         return True
@@ -173,28 +188,32 @@ class LabelBackward:
             pending_flights=self.pending_flights)
         label_j.alternative_extensions = {node for node in self.net.in_arcs[node_j]}
 
+        # Update path
         label_j.path = [node_j] + label_j.path
 
+        arc = (node_j, node_i)
+
+        # Update truck load
+        if node_j in self.net.customers:
+            label_j.truck_load = self.truck_load + self.net.demand_weights[node_j]
+
         # Update drones_used
-        label_j.drones_used = self.drones_used + 1 \
-            if (node_j, node_i) in self.net.arcs_4 or (node_j, node_i) in self.net.arcs_5 else 0
+        label_j.drones_used = self.drones_used + 1 if node_j in self.net.customers else 0
 
         # Update arrival_ubs only when necessary
         if not farkas and node_j != self.net.depot_source:
             label_j.arrival_ubs = self.measure_arrival_ubs()
-
-        arc = (node_j, node_i)
 
         # update cost
         if not farkas:
             # update delta_a
             delta_a = []
             prefix = None
-            if arc in self.net.arcs_1 or arc in self.net.arcs_2:
+            if arc in self.net.arcs_ori:
                 delta_a = [self.net.travel_times[arc]] * len(self.path)
-            elif arc in self.net.arcs_4 or arc in self.net.arcs_5:
+            elif arc in self.net.arcs_cpcp or arc in self.net.arcs_cpc:
                 delta_a = [0] * len(self.path)
-            elif arc in self.net.arcs_3:
+            elif arc in self.net.arcs_scp:
                 prefix, node_m_next = find_prefix(self.path, self.net)
                 for i in range(len(self.path)):
                     node_n = self.path[i]
@@ -207,21 +226,20 @@ class LabelBackward:
                         break
 
             # cost update
-            if arc in self.net.arcs_1:
+            if arc in self.net.arcs_ori:
                 sum_term = sum(
                     delta_a[i] ** 2 + 2 * delta_a[i] * (
                             self.arrival_times[i] - self.net.a_lb[node.replace("_prime", "")])
-                    for i, node in enumerate(self.path) if node in self.net.customers
-                )
+                    for i, node in enumerate(self.path) if node in self.net.customers)
                 # condition 1
-                if node_j in self.net.customers:
-                    index = self.net.customers.index(node_j.replace("_prime", ""))
+                if node_j in self.net.customers_origin:
+                    index = self.net.customers_origin.index(node_j)
                     label_j.cost = self.cost + delta_a[-1] + sum_term - duals["mu"][index]
                 # condition 2
                 else:
                     label_j.cost = self.cost + delta_a[-1] + sum_term
             # condition 3
-            elif arc in self.net.arcs_3:
+            elif arc in self.net.arcs_scp:
                 sum_term = sum(
                     delta_a[i] ** 2 + 2 * delta_a[i] * (
                             self.arrival_times[i] - self.net.a_lb[node.replace("_prime", "")])
@@ -230,7 +248,7 @@ class LabelBackward:
 
                 rho = sum(
                     (self.arrival_times[i] + delta_a[i] - self.net.a_lb[node.replace("_prime", "")]) ** 2 - duals["mu"][
-                        self.net.customers.index(node.replace("_prime", ""))]
+                        self.net.customers_origin.index(node.replace("_prime", ""))]
                     for i, node in enumerate(prefix)
                 )
 
@@ -242,26 +260,23 @@ class LabelBackward:
             label_j.arrival_times = [0] + [self.arrival_times[i] + delta_num for i, delta_num in enumerate(delta_a)]
         else:  # farkas
             if node_j in self.net.customers:
-                index = self.net.customers.index(node_j.replace("_prime", ""))
+                index = self.net.customers_origin.index(node_j.replace("_prime", ""))
                 label_j.cost = self.cost - duals["mu"][index]
             else:
                 label_j.cost = self.cost
 
         # update auxiliary infos
-        if arc in self.net.arcs_4 or arc in self.net.arcs_5:
+        if arc in self.net.arcs_cpcp or arc in self.net.arcs_cpc:
             label_j.pending_flights.add(node_j)
 
-        if arc in self.net.arcs_3:
-            label_j.drone_flights[node_j.replace("_prime", "")] = label_j.pending_flights.copy()
+        if arc in self.net.arcs_scp:
+            label_j.drone_flights[node_j] = label_j.pending_flights.copy()
             label_j.pending_flights.clear()
 
-        if arc in self.net.arcs_1 or arc in self.net.arcs_3:
-            label_j.truck_path = [node_j.replace("_prime", "")] + label_j.truck_path
+        if arc in self.net.arcs_ori or arc in self.net.arcs_scp:
+            label_j.truck_path = [node_j] + label_j.truck_path
 
         label_j.hash_path = truck_drone_path_to_hashable(label_j.truck_path, label_j.drone_flights)
-
-        # if is_route_subset(test_path, (label_j.truck_path, label_j.drone_flights)):
-        #     sdas = 0
 
         return label_j
 
@@ -286,7 +301,7 @@ class LabelBackward:
                 last_hub = node_j.replace("_prime", "")
 
             # update waiting time
-            if (node_i, node_j) in self.net.arcs_3 or (node_i, node_j) in self.net.arcs_4:
+            if (node_i, node_j) in self.net.arcs_scp or (node_i, node_j) in self.net.arcs_cpcp:
                 wait_time = max(wait_time, arrive_time - sync_time)
             else:
                 wait_time = 0

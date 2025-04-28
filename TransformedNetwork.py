@@ -14,6 +14,8 @@ class TransformedNetwork:
         self.num_trucks = copy.deepcopy(net.num_trucks)
         self.num_drones = copy.deepcopy(net.num_drones)
         self.customers = copy.deepcopy(net.customers)
+        self.customers_prime = list()
+        self.customers_origin = copy.deepcopy(net.customers)
         self.hubs = copy.deepcopy(net.hubs)
         self.depot_source = copy.deepcopy(net.depot_source)
         self.depot_sink = copy.deepcopy(net.depot_sink)
@@ -31,10 +33,10 @@ class TransformedNetwork:
         self.arcs_scp = SortedSet()  # links sc'
         self.arcs_cpcp = SortedSet()  # links c'c'
         self.arcs_cpc = SortedSet()  # links c'c
+        self.arcs = SortedSet()
         self.max_timespan = -1
 
         # duplicate the nodes
-        new_nodes = []
         for node in net.customers:
             needs_duplicate = any(
                 predecessor in net.hubs
@@ -42,7 +44,7 @@ class TransformedNetwork:
             )
             if needs_duplicate:
                 new_node = node + "_prime"
-                new_nodes.append(new_node)
+                self.customers_prime.append(new_node)
                 self.all_nodes.append(new_node)
                 self.all_nodes_indices[new_node] = len(self.all_nodes) - 1
                 self.customers.append(new_node)
@@ -79,12 +81,17 @@ class TransformedNetwork:
             for node_j in net.drone_out_arcs[node]:
                 omega_D_set[node].append(node_j)
             omega_D_set[node].sort()
-            for node_i, node_j in combinations(omega_D_set[node], 2):
-                node_i_prime = node_i + "_prime"
-                node_j_prime = node_j + "_prime"
-                arc = (node_i_prime, node_j_prime)
-                if arc not in self.arcs_cpcp:
-                    self.arcs_cpcp.add(arc)
+            for j in range(len(omega_D_set[node])):
+                node_j = omega_D_set[node][j]
+                for k in range(j + 1, len(omega_D_set[node])):
+                    node_k = omega_D_set[node][k]
+                    node_j_prime = node_j + "_prime"
+                    node_k_prime = node_k + "_prime"
+                    arc = (node_j_prime, node_k_prime)
+                    if arc not in self.arcs_cpcp:
+                        self.out_arcs[node_j_prime].append(node_k_prime)
+                        self.in_arcs[node_k_prime].append(node_j_prime)
+                        self.arcs_cpcp.add(arc)
 
         # purple arc c'c
         omega_K_set = {}
@@ -143,7 +150,9 @@ class TransformedNetwork:
 
         self.out_arcs = {node: list(dict.fromkeys(arc_list)) for node, arc_list in self.out_arcs.items()}
         self.in_arcs = {node: list(dict.fromkeys(arc_list)) for node, arc_list in self.in_arcs.items()}
-        self.max_timespan = self.astar_longest_path()
+        self.arcs = SortedSet(self.arcs_ori | self.arcs_scp | self.arcs_cpcp | self.arcs_cpc)
+        self.max_timespan = 99999
+        # self.max_timespan = self.astar_longest_path()
 
     def astar_longest_path(self):
         """
