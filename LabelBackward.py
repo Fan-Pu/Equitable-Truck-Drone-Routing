@@ -22,9 +22,10 @@ class LabelBackward:
         # hash path is used since it ignores the sequence of flights at each launch
         self.hash_path = truck_drone_path_to_hashable(self.truck_path, self.drone_flights) if depth == 0 else None
 
-    def dominates(self, other, farkas, duals):
+    def dominates(self, other, farkas: bool, duals):
         """Check if this label dominates another."""
         strict = False  # check whether contains a strict condition
+
         # the path is complete
         if self.path[0] == self.net.depot_source:
             if self.cost < other.cost and other.cost + close_tolerance >= 0:
@@ -59,46 +60,6 @@ class LabelBackward:
         else:  # this is not conclusive
             return False
 
-        # if not farkas:  # normal pricing
-        #     # cost-based dominance
-        #     if self.cost < other.cost:
-        #         strict = True
-        #         GeneralHelper.backward_cost_dominance_num += 1
-        #         return strict
-        #
-        #     # # arrival time-based dominance
-        #     # lhs = rhs = 0
-        #     # customer_on_path1 = [node for node in self.path if node in self.net.customers]
-        #     # customer_on_path2 = [node for node in other.path if node in self.net.customers]
-        #     # for i in range(len(customer_on_path1)):
-        #     #     node = customer_on_path1[i]
-        #     #     if i == len(customer_on_path1) - 1:  # depot sink node
-        #     #         lhs += (self.net.a_lb[node] - self.arrival_ubs[i])
-        #     #     else:
-        #     #         lhs -= (self.arrival_ubs[i] - self.net.a_lb[node]) ** 2
-        #     #
-        #     # for node in customer_on_path2:
-        #     #     if node in customer_on_path1:
-        #     #         continue
-        #     #     index = self.net.customers.index(node.replace("_prime", ""))
-        #     #     rhs += duals["mu"][index]
-        #     #
-        #     # if lhs < rhs:
-        #     #     return False
-        #     # elif lhs > rhs:
-        #     #     strict = True
-        # else:  # Farkas pricing
-        #     c_1 = cal_label_cost_farkas(self.net, self.path, duals)
-        #     c_2 = cal_label_cost_farkas(self.net, other.path, duals)
-        #     if c_1 > c_2:
-        #         return False
-        #     elif c_1 < c_2:
-        #         strict = True
-
-        # if strict:
-        #     GeneralHelper.backward_arrival_dominance_num += 1
-
-        # here all conditions are satisfied, we need at least one is strict
         return strict
 
     def allow_extend(self, node_j, node_info: NodeInfo):
@@ -132,7 +93,7 @@ class LabelBackward:
                 return False
         elif arc in self.net.arcs_scp:  # green arc
             prefix, node_p_next = find_prefix(self.path, self.net)
-            for node in prefix[:-1]:
+            for node in prefix:
                 temp_arc = (node_j, node.replace("_prime", ""))
                 if temp_arc in node_info.disabled_arcs or temp_arc in node_info.disabled_arcs_drones_left:
                     return False
@@ -162,8 +123,7 @@ class LabelBackward:
                 if (node_j, node) not in self.net.arcs_scp:
                     return False
             # Validate last node separately
-            last_node = prefix[-1]
-            if (node_j, last_node) not in self.net.origin_truck_arcs:
+            if (node_j, node_p_next) not in self.net.origin_truck_arcs:
                 return False
 
         return True

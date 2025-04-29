@@ -7,6 +7,7 @@ from GeneralHelper import *
 import GeneralHelper
 from NodeInfo import NodeInfo
 from gurobipy import GRB
+import cProfile, pstats, io
 
 node_id_counter = 0
 node_infos = {}
@@ -329,21 +330,36 @@ class BranchAndPrice:
         :return: is_integer, branch_candidates, var_vals, lp_iters, lp_obj_val
         """
         rmp_node = RMPNode(node_info)
-        if node_info.id == 3:
-            sdas = 0
         rmp_node.solve()
         lp_iters = 1
 
-        # column generation
-        while True:
-            find_new_column = rmp_node.run_pricer(node_info)
-            if not find_new_column:
-                break
-            rmp_node.solve()
-            lp_iters += 1
+        pr = cProfile.Profile()
+        pr.enable()
 
-        if node_info.id == 4:
-            sdsa = 0
+        try:
+            # column generation
+            while True:
+                find_new_column = rmp_node.run_pricer(node_info)
+                if not find_new_column:
+                    break
+                rmp_node.solve()
+                lp_iters += 1
+        finally:
+            pr.disable()
+            s = io.StringIO()
+            stats = pstats.Stats(pr, stream=s).sort_stats('cumtime')
+            stats.print_stats(10)  # top 10 slowest calls
+            print(s.getvalue())
+            dasds = 0
+
+        # # column generation
+        # while True:
+        #     find_new_column = rmp_node.run_pricer(node_info)
+        #     if not find_new_column:
+        #         break
+        #     rmp_node.solve()
+        #     lp_iters += 1
+
         rmp_node.model.update()
         rmp_node.model.write(f"./BP_nodes/RMP_{node_info.id}.lp")
 

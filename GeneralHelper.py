@@ -8,16 +8,16 @@ from TransformedNetwork import TransformedNetwork
 from sortedcontainers import SortedSet
 
 # test_path = ['Source', 'H1', 'C1_prime', 'C3_prime', 'Sink']
-test_path = (tuple(['Source', 'H1']), frozenset(
+test_path = (tuple(['Sink']), frozenset(
     {
-        'H1': frozenset({'C4_prime'})
+
     }.items()
 ))
 
 # already added to node 3 but find it with negative reduced cost?
-test_dom_path = (tuple(['Source', 'H1']), frozenset(
+test_comp_path = (tuple(['Source', 'H1', 'Sink']), frozenset(
     {
-        'H1': frozenset({'C1_prime'})
+        'H1': frozenset({'C8_prime', 'C3_prime', 'C11_prime', 'C1_prime'})
     }.items()
 ))
 
@@ -94,7 +94,7 @@ label_backward_num = 0
 
 lp = LineProfiler()
 
-LSA_mode = 2  # 0 for combined, 1 for forward, 2 for backward
+LSA_mode = 0  # 0 for combined, 1 for forward, 2 for backward
 
 seed = 2024
 
@@ -120,44 +120,50 @@ drone_endurance = 150
 # for sub-tour elimination
 epsilon = 1
 
-# # solved by forward labeling
+# # solved by forward labeling and backward labeling
 # num_customers = 4
 # num_hubs = 3
 # num_trucks = 3
 # num_drones_per_truck = 2
 
-# solved by forward labeling
-num_customers = 4
-num_hubs = 3
-num_trucks = 4
-num_drones_per_truck = 2
+# # solved by forward labeling and backward labeling
+# num_customers = 4
+# num_hubs = 3
+# num_trucks = 4
+# num_drones_per_truck = 2
 
-# # solved by forward labeling
+# # solved by forward labeling and backward labeling 6008
 # num_customers = 8
 # num_hubs = 2
 # num_trucks = 5
 # num_drones_per_truck = 3
 
-# # solved by forward labeling
+# # solved by forward labeling and backward labeling 11549
 # num_customers = 10
 # num_hubs = 3
 # num_trucks = 5
 # num_drones_per_truck = 3
 
-# # solved by forward labeling
+# # solved by forward labeling and backward labeling 6565
 # num_customers = 8
 # num_hubs = 3
 # num_trucks = 5
 # num_drones_per_truck = 3
 
-# # solved by forward labeling
+# # solved by forward labeling and backward labeling 6080
 # num_customers = 8
 # num_hubs = 1
 # num_trucks = 8
 # num_drones_per_truck = 3
 
+# solved by forward labeling
+num_customers = 15
+num_hubs = 3
+num_trucks = 8
+num_drones_per_truck = 4
+
 # # solved by forward labeling
-# num_customers = 15
+# num_customers = 12
 # num_hubs = 3
 # num_trucks = 8
 # num_drones_per_truck = 4
@@ -620,7 +626,8 @@ def find_prefix(path, trans_net: TransformedNetwork):
     prefix = [path[0]]
     node_m_next = None
     for i, (node, node_next) in enumerate(zip(path, path[1:])):
-        if (node, node_next) in trans_net.arcs_cpc:
+        arc = (node, node_next)
+        if arc in trans_net.arcs_cpc:
             node_m_next = node_next
             break
         prefix.append(node_next)
