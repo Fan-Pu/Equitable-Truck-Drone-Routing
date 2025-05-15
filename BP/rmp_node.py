@@ -4,6 +4,7 @@ import GeneralHelper
 from gurobipy import GRB
 from LSA import *
 import BP.branch_and_price as bp
+import cProfile, pstats, io
 
 
 class RMPNode:
@@ -78,12 +79,41 @@ class RMPNode:
             self.duals["constant_term"] = -xi - kappa
 
     def run_pricer(self, node_info: NodeInfo):
+        """
+        run the pricer once
+        :param node_info:
+        :return:
+        """
         find_new_column = False
         node_id = node_info.id
         farkas = True if self.status == GRB.INFEASIBLE else False
         # bi-directional label setting
         label_setting = BiDirectionalLabelSetting(self.duals)
-        reduced_cost, hashable_path, element_path, where = label_setting.solve(farkas, node_info)
+
+        deb = False
+        if len(node_info.columns) == 9999:
+            try:
+                pr = cProfile.Profile()
+                pr.enable()
+                deb = True
+                reduced_cost, hashable_path, element_path, where = label_setting.solve(farkas, node_info)
+            finally:
+                if deb:
+                    pr.disable()
+                    s = io.StringIO()
+                    stats = pstats.Stats(pr, stream=s).sort_stats('cumtime')
+
+                    stats.print_stats(10)
+                    stats.print_callers('acquire')
+                    stats.print_callees('run_pricer')
+                    # now dump everything at once
+                    print(s.getvalue())
+
+                    dsads = 0
+        else:
+            reduced_cost, hashable_path, element_path, where = label_setting.solve(farkas, node_info)
+
+        # reduced_cost, hashable_path, element_path, where = label_setting.solve(farkas, node_info)
         if where == 0:
             GeneralHelper.label_merge_num += 1
         elif where == 1:

@@ -29,8 +29,6 @@ class MyPricer(Pricer):
         if parent_node is not None:
             parent_id = parent_node.getNumber()
         node_id = current_node.getNumber()
-        if node_id == 3:
-            sdsa = 0
         self.model.writeLP(f"RMP_{node_id}.lp")
         node_dep = current_node.getDepth()
         node_ids.add(node_id)

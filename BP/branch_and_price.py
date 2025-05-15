@@ -80,9 +80,6 @@ class BranchAndPrice:
                     f"infeasible node")
 
             print(Fore.RED + log_text + Style.RESET_ALL)
-            if node_id == 1:
-                node_info = node_infos[node_id]
-                sdsa = 0
 
         # terminated
         final_solution, cost = self.construct_final_route()
@@ -261,7 +258,7 @@ class BranchAndPrice:
                 # branch on the binary flow (original network)
                 if len(binary_flows) == 0:
                     raise Exception("wrong branching case")
-                # branch on the least fractional arc
+                # branch on the most fractional arc
                 arc, flow = min(binary_flows, key=lambda x: abs(x[1] - 0.5))
                 node_i, node_j = arc
 
@@ -333,24 +330,17 @@ class BranchAndPrice:
         rmp_node.solve()
         lp_iters = 1
 
-        pr = cProfile.Profile()
-        pr.enable()
+        # pr = cProfile.Profile()
+        # pr.enable()
 
-        try:
-            # column generation
-            while True:
-                find_new_column = rmp_node.run_pricer(node_info)
-                if not find_new_column:
-                    break
-                rmp_node.solve()
-                lp_iters += 1
-        finally:
-            pr.disable()
-            s = io.StringIO()
-            stats = pstats.Stats(pr, stream=s).sort_stats('cumtime')
-            stats.print_stats(10)  # top 10 slowest calls
-            print(s.getvalue())
-            dasds = 0
+        # column generation
+        while True:
+            find_new_column = rmp_node.run_pricer(node_info)
+            if not find_new_column:
+                break
+            rmp_node.solve()
+            # print("LSA returned")
+            lp_iters += 1
 
         # # column generation
         # while True:

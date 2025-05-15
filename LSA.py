@@ -10,6 +10,7 @@ from LabelBackward import LabelBackward
 import itertools
 from collections import OrderedDict, defaultdict
 from NodeInfo import NodeInfo
+import cProfile, pstats, io
 
 
 class BiDirectionalLabelSetting:
@@ -41,11 +42,13 @@ class BiDirectionalLabelSetting:
         # self.best_sol_lock = threading.Lock()
         # self.print_lock = threading.Lock()
         self.termination_event = threading.Event()  # Shared flag for stopping threads
-        self.forward_label_locks = defaultdict(threading.Lock)
-        self.backward_label_locks = defaultdict(threading.Lock)
-        self.backward_pending_label_lock = threading.Lock()
-        self.forward_update_cond = threading.Condition()  # the condition signaling the update of forward labels
-        self.backward_update_cond = threading.Condition()  # the condition signaling the update of backward labels
+        # self.forward_label_lock = threading.Lock
+        # self.backward_label_lock = threading.Lock
+        # self.forward_label_locks = defaultdict(threading.Lock)
+        # self.backward_label_locks = defaultdict(threading.Lock)
+        # self.backward_pending_label_lock = threading.Lock()
+        self.forward_label_update_queue = queue.Queue()
+        self.backward_label_update_queue = queue.Queue()
 
     def forward_labeling_one_step(self, farkas, node_info: NodeInfo):
         """Forward search from the depot."""
@@ -101,12 +104,9 @@ class BiDirectionalLabelSetting:
                 new_labels[node_j].append(label_j)
         # update the forward_labels at once
         for node, labels in awaiting_labels.items():
-            with self.forward_label_locks[node]:
-                self.forward_labels[node].update(labels)
-
-        if len(awaiting_labels) > 0:
-            with self.forward_update_cond:
-                self.forward_update_cond.notify_all()
+            self.forward_labels[node].update(labels)
+            # with self.forward_label_locks[node]:
+            #     self.forward_labels[node].update(labels)
 
         return new_labels
 
@@ -185,22 +185,25 @@ class BiDirectionalLabelSetting:
 
         # update the backward_labels at once
         for node, labels in awaiting_labels.items():
-            with self.backward_label_locks[node]:
-                self.backward_labels[node].update(labels)
-        with self.backward_pending_label_lock:
-            for pending_flights, labels in awaiting_labels_non_empty_pending.items():
-                self.backward_pending_labels[tuple(pending_flights)].update(labels)
-        if len(awaiting_labels) > 0 or len(awaiting_labels_non_empty_pending) > 0:
-            with self.backward_update_cond:
-                self.backward_update_cond.notify_all()
+            self.backward_labels[node].update(labels)
+            # with self.backward_label_locks[node]:
+            #     self.backward_labels[node].update(labels)
+        # with self.backward_pending_label_lock:
+        #     for pending_flights, labels in awaiting_labels_non_empty_pending.items():
+        #         self.backward_pending_labels[tuple(pending_flights)].update(labels)
+        for pending_flights, labels in awaiting_labels_non_empty_pending.items():
+            self.backward_pending_labels[tuple(pending_flights)].update(labels)
 
         return new_labels
 
-    def merge_labels(self, new_labels, farkas, node_info, mode, opposite_labels):
+    def merge_labels(self, new_labels: list, farkas, node_info, mode, opposite_labels: list):
         """
         Merge forward and backward labels at common nodes.
         mode: 0 for merging new forward labels with existing backward labels, 1 otherwise
         """
+
+        if len(new_labels) == 0 or len(opposite_labels) == 0 or self.termination_event.is_set():
+            return
 
         # Determine the label sources based on mode
         if mode == 0:
@@ -221,6 +224,7 @@ class BiDirectionalLabelSetting:
             complete_drone_flights = {
                 k: f_label.drone_flights.get(k, SortedSet()).union(b_label.drone_flights.get(k, SortedSet()))
                 for k in f_label.drone_flights.keys() | b_label.drone_flights.keys()}
+
             if len(b_label.pending_flights) > 0:
                 complete_drone_flights[f_label.latest_hub].update(b_label.pending_flights)
 
@@ -249,8 +253,8 @@ class BiDirectionalLabelSetting:
             # with self.best_sol_lock:
             #     if total_cost < self.best_solution[0]:
             #         self.best_solution = (total_cost, hashable_path, 0)
-            if total_cost < self.best_solution[0]:
-                self.best_solution = (total_cost, hashable_path, complete_path, 0)
+            # if total_cost < self.best_solution[0]:
+            #     self.best_solution = (total_cost, hashable_path, complete_path, 0)
 
             # Store newly explored solution
             self.explored_solutions.add(hashable_path)
@@ -301,8 +305,6 @@ class BiDirectionalLabelSetting:
         Execute forward, backward, and merge steps.
         """
 
-        # print(f"columns: {len(node_info.columns)}")
-
         # forward label initialization
         if not farkas:  # normal pricing
             self.forward_label_queue.put((
@@ -329,19 +331,56 @@ class BiDirectionalLabelSetting:
 
         # parallel mode
         if LSA_mode == 0:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-                future_forward = executor.submit(self.forward_thread, farkas, node_info)
-                future_backward = executor.submit(self.backward_thread, farkas, node_info)
-                future_merge = executor.submit(self.label_merge_thread, farkas, node_info)
-
-                for future in concurrent.futures.as_completed([future_forward, future_backward, future_merge]):
-                    future.result()  # This prevents exceptions from being swallowed
-
+            executor = concurrent.futures.ThreadPoolExecutor(max_workers=3)
+            try:
+                futures = [
+                    executor.submit(self.forward_thread, farkas, node_info),
+                    executor.submit(self.backward_thread, farkas, node_info),
+                    executor.submit(self.label_merge_thread, farkas, node_info),
+                ]
+                done, pending = concurrent.futures.wait(
+                    futures, return_when=concurrent.futures.FIRST_COMPLETED
+                )
                 self.termination_event.set()
+                for fut in pending:
+                    fut.cancel()
+                # shut down without waiting for running threads
+                executor.shutdown(wait=False)
+            finally:
+                # in case of error, make sure it does not block
+                executor.shutdown(wait=False)
 
-                self.print_runtime_info(s_time)
+            # with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+            #     future_forward = executor.submit(self.forward_thread, farkas, node_info)
+            #     future_backward = executor.submit(self.backward_thread, farkas, node_info)
+            #     future_merge = executor.submit(self.label_merge_thread, farkas, node_info)
+            #
+            #     done, pending = concurrent.futures.wait(
+            #         [future_forward, future_backward, future_merge],
+            #         return_when=concurrent.futures.FIRST_COMPLETED
+            #     )
+            #
+            #     if future_forward in done:
+            #         print("forward_thread finished first")
+            #     elif future_backward in done:
+            #         print("backward_thread finished first")
+            #     elif future_merge in done:
+            #         print("label_merge_thread finished first")
+            #
+            #     # for future in concurrent.futures.as_completed([future_forward, future_backward, future_merge]):
+            #     #     future.result()  # This prevents exceptions from being swallowed
+            #
+            #     self.termination_event.set()
+            #
+            #     # try to cancel any that haven’t started yet (won’t stop those already running)
+            #     for fut in pending:
+            #         fut.cancel()
+            #
+            #     # self.print_runtime_info(s_time)
+            #
+            #     print("before LSA return")
 
-                return self.best_solution
+            return self.best_solution
 
         while True:
             # forward only
@@ -404,27 +443,70 @@ class BiDirectionalLabelSetting:
         # print(f"runtime: {time.time() - start_time:.4f}s")
         # print()
 
-    def forward_thread(self, farkas, node_info):
+    def forward_thread(self, farkas, node_info: NodeInfo):
         """
         A separate thread for solving the forward labeling
         """
-        while True:
-            # termination condition 1
-            if self.termination_event.is_set():
-                break
-            # termination condition 2
-            # with self.best_sol_lock:
-            #     if self.best_solution[0] + close_tolerance < 0:
-            #         break
-            if self.best_solution[0] + close_tolerance < 0:
-                break
-            # termination condition 3
-            if self.forward_label_queue.qsize() == 0:
-                break
 
-            new_f_labels = self.forward_labeling_one_step(farkas, node_info)
+        s_time = time.time()
+        # print(f"{len(node_info.columns)}")
+
+        if len(node_info.columns) == 9999:
+            pr = cProfile.Profile()
+            pr.enable()
+            try:
+                while True:
+                    # termination condition 1
+                    if self.termination_event.is_set():
+                        break
+                    # termination condition 2
+                    # with self.best_sol_lock:
+                    #     if self.best_solution[0] + close_tolerance < 0:
+                    #         break
+                    if self.best_solution[0] + close_tolerance < 0:
+                        break
+                    # termination condition 3
+                    if self.forward_label_queue.qsize() == 0:
+                        break
+                    new_f_labels = self.forward_labeling_one_step(farkas, node_info)
+            finally:
+                pr.disable()
+                s = io.StringIO()
+                stats = pstats.Stats(pr, stream=s).sort_stats('cumtime')
+
+                stats.print_stats(10)
+                stats.print_callers('acquire')
+                stats.print_callees('run_pricer')
+                # now dump everything at once
+                print(s.getvalue())
+                dsads = 0
+        else:
+            while True:
+                # with open("forward.txt", "a", encoding="utf-8") as f:
+                #     f.write(f"{time.time()}" + "\n")
+                # termination condition 1
+                if self.termination_event.is_set():
+                    break
+                # termination condition 2
+                # with self.best_sol_lock:
+                #     if self.best_solution[0] + close_tolerance < 0:
+                #         break
+                if self.best_solution[0] + close_tolerance < 0:
+                    break
+                # termination condition 3
+                if self.forward_label_queue.qsize() == 0:
+                    break
+
+                new_f_labels = self.forward_labeling_one_step(farkas, node_info)
+                self.forward_label_update_queue.put(new_f_labels)
 
         # Signal the other thread to stop
+        run_t = time.time() - s_time
+        # print(run_t)
+        # if len(node_info.columns) == 243:
+        #     print(run_t)
+        #     sdasd = 0
+
         self.termination_event.set()
 
         # with self.print_lock:
@@ -440,7 +522,11 @@ class BiDirectionalLabelSetting:
         """
         A separate thread for solving the backward labeling
         """
+
+        s_time = time.time()
         while True:
+            # with open("backward.txt", "a", encoding="utf-8") as f:
+            #     f.write(f"{time.time()}" + "\n")
             # termination condition 1
             if self.termination_event.is_set():
                 break
@@ -455,7 +541,11 @@ class BiDirectionalLabelSetting:
                 break
 
             new_b_labels = self.backward_labeling_one_step(farkas, node_info)
+            self.backward_label_update_queue.put(new_b_labels)
 
+        run_t = time.time() - s_time
+        if len(node_info.columns) == 243:
+            sdasd = 0
         # Signal the other thread to stop
         self.termination_event.set()
 
@@ -468,51 +558,34 @@ class BiDirectionalLabelSetting:
         return None
 
     def label_merge_thread(self, farkas, node_info):
-        forward_seen_labels = defaultdict(OrderedDict)
-        backward_seen_labels = defaultdict(OrderedDict)
+        forward_labels = defaultdict(list)
+        backward_labels = defaultdict(list)
 
         while not self.termination_event.is_set():
-            # wait for forward updates
-            with self.forward_update_cond:
-                if self.forward_update_cond.wait(timeout=1) or self.termination_event.is_set():
-                    break
+            dsads = 0
+            # # forward
+            # new_forward_labels = self.forward_label_update_queue.get()
+            # for node, labels in new_forward_labels.items():
+            #     forward_labels[node].extend(labels)
+            #
+            # for node in new_forward_labels.keys():
+            #     self.merge_labels(new_forward_labels[node], farkas, node_info, 0, backward_labels[node])
+            #     if self.best_solution[0] + close_tolerance < 0:
+            #         self.termination_event.set()
+            #         break
+            #
+            # # backward
+            # new_backward_labels = self.backward_label_update_queue.get()
+            # for node, labels in new_backward_labels.items():
+            #     backward_labels[node].extend(labels)
+            #
+            # for node in new_backward_labels.keys():
+            #     self.merge_labels(new_backward_labels[node], farkas, node_info, 1, forward_labels[node])
+            #     if self.best_solution[0] + close_tolerance < 0:
+            #         self.termination_event.set()
+            #         break
 
-                if self.termination_event.is_set():
-                    print("[DEBUG] Termination event set. Exiting label_merge_thread.")
-                    return
-
-                keys_in_forward_labels = self.forward_labels.keys()
-                for node in keys_in_forward_labels:
-                    # new_forward_labels = self.forward_labels[node] - forward_seen_labels[node]
-                    new_forward_labels = OrderedDict(
-                        (k, v) for k, v in self.forward_labels[node].items()
-                        if k not in forward_seen_labels[node]
-                    )
-                    self.merge_labels(new_forward_labels, farkas, node_info, 0, backward_seen_labels[node])
-                    forward_seen_labels[node].update(new_forward_labels)
-
-            # wait for backward updates
-            with self.backward_update_cond:
-                while not self.termination_event.is_set():
-                    notified = self.backward_update_cond.wait(timeout=1)
-                    if notified or self.termination_event.is_set():
-                        break
-
-                if self.termination_event.is_set():
-                    print("[DEBUG] Termination event set. Exiting label_merge_thread.")
-                    return  # ✅ Exit safely
-
-                keys_in_backward_labels = self.backward_labels.keys()
-                for node in keys_in_backward_labels:
-                    # new_backward_labels = self.backward_labels[node] - backward_seen_labels[node]
-                    new_backward_labels = OrderedDict(
-                        (k, v) for k, v in self.backward_labels[node].items()
-                        if k not in backward_seen_labels[node]
-                    )
-                    self.merge_labels(new_backward_labels, farkas, node_info, 1, forward_seen_labels[node])
-                    backward_seen_labels[node].update(new_backward_labels)
-
-        sdsa = 0
+        return None
 
     def check_back_label_existence(self, label):
         """

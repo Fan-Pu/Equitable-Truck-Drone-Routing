@@ -94,7 +94,7 @@ label_backward_num = 0
 
 lp = LineProfiler()
 
-LSA_mode = 0  # 0 for combined, 1 for forward, 2 for backward
+LSA_mode = 1  # 0 for combined, 1 for forward, 2 for backward
 
 seed = 2024
 
@@ -156,17 +156,17 @@ epsilon = 1
 # num_trucks = 8
 # num_drones_per_truck = 3
 
-# solved by forward labeling
-num_customers = 15
-num_hubs = 3
-num_trucks = 8
-num_drones_per_truck = 4
-
-# # solved by forward labeling
-# num_customers = 12
+# # solved by forward labeling 11785
+# num_customers = 15
 # num_hubs = 3
 # num_trucks = 8
 # num_drones_per_truck = 4
+
+# solved by forward labeling 11683
+num_customers = 15
+num_hubs = 4
+num_trucks = 7
+num_drones_per_truck = 3
 
 # route_list = [{'id': 4, 'truck': ['Source', 'C5', 'Sink'], 'drone': [], 'launches': [], 'cost': 550},
 #               {'id': 6, 'truck': ['Source', 'C7', 'Sink'], 'drone': [], 'launches': [], 'cost': 745},
@@ -361,8 +361,16 @@ def is_integer(num):
 
 def is_subsequence(sub, full):
     """Check if 'sub' is a subsequence of 'full' while preserving order."""
-    it = iter(full)
-    return all(node in it for node in sub)
+    i = 0
+    n = len(sub)
+    if n == 0:
+        return True
+    for x in full:
+        if x == sub[i]:
+            i += 1
+            if i == n:
+                return True
+    return False
 
 
 def is_sublist_ordered(sub, main):
