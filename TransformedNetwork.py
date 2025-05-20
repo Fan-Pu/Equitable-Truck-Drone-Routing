@@ -1,12 +1,13 @@
 import copy
 import heapq
-from itertools import combinations
 from sortedcontainers import SortedSet
+from Network import Network
+import itertools
 
 
 class TransformedNetwork:
 
-    def __init__(self, net):
+    def __init__(self, net: Network):
         """
         the class of the transformed network
         :param net: original network
@@ -34,6 +35,7 @@ class TransformedNetwork:
         self.arcs_cpcp = SortedSet()  # links c'c'
         self.arcs_cpc = SortedSet()  # links c'c
         self.arcs = SortedSet()
+        self.PI = list()  # for SR inequality
         self.max_timespan = -1
 
         # duplicate the nodes
@@ -151,6 +153,10 @@ class TransformedNetwork:
         self.out_arcs = {node: list(dict.fromkeys(arc_list)) for node, arc_list in self.out_arcs.items()}
         self.in_arcs = {node: list(dict.fromkeys(arc_list)) for node, arc_list in self.in_arcs.items()}
         self.arcs = SortedSet(self.arcs_ori | self.arcs_scp | self.arcs_cpcp | self.arcs_cpc)
+
+        # for SR inequality
+        self.PI = list(itertools.combinations(net.customers, 3))
+
         self.max_timespan = 99999
         # self.max_timespan = self.astar_longest_path()
 

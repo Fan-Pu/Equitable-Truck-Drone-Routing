@@ -46,6 +46,13 @@ merge_num = 0
 
 final_model = None
 
+SR_num = 5
+
+max_time = 0
+max_num = 0
+max_id = 0
+
+allow_extend_checks_passed = 0
 # test_path_list = [
 #     (tuple(['Source', 'C2', 'Sink']), frozenset(
 #         {}.items()
@@ -86,20 +93,18 @@ test_node_ids = []
 test_sols = []
 
 forward_dominance_num = 0
-backward_cost_dominance_num = 0
-backward_arrival_dominance_num = 0
-label_merge_num = 0
 label_forward_num = 0
-label_backward_num = 0
 
 lp = LineProfiler()
-
-LSA_mode = 1  # 0 for combined, 1 for forward, 2 for backward
 
 seed = 2024
 
 net: Network = None  # the network object
 transformed_net: TransformedNetwork = None  # the transformed network object
+
+# cost in dollars
+truck_cost = 100
+drone_cost_per_flight = 2
 
 # drone travel time
 drone_min_t = 2
@@ -120,29 +125,29 @@ drone_endurance = 150
 # for sub-tour elimination
 epsilon = 1
 
-# # solved by forward labeling and backward labeling
+# # solved by forward labeling 3213
 # num_customers = 4
 # num_hubs = 3
 # num_trucks = 3
 # num_drones_per_truck = 2
 
-# # solved by forward labeling and backward labeling
+# # solved by forward labeling 3213
 # num_customers = 4
 # num_hubs = 3
 # num_trucks = 4
 # num_drones_per_truck = 2
 
-# # solved by forward labeling and backward labeling 6008
+# # solved by forward labeling and backward labeling 6518
 # num_customers = 8
 # num_hubs = 2
 # num_trucks = 5
 # num_drones_per_truck = 3
 
-# # solved by forward labeling and backward labeling 11549
-# num_customers = 10
-# num_hubs = 3
-# num_trucks = 5
-# num_drones_per_truck = 3
+# solved by forward labeling 12061
+num_customers = 10
+num_hubs = 3
+num_trucks = 5
+num_drones_per_truck = 3
 
 # # solved by forward labeling and backward labeling 6565
 # num_customers = 8
@@ -162,11 +167,11 @@ epsilon = 1
 # num_trucks = 8
 # num_drones_per_truck = 4
 
-# solved by forward labeling 11683
-num_customers = 15
-num_hubs = 4
-num_trucks = 7
-num_drones_per_truck = 3
+# # solved by forward labeling 11683
+# num_customers = 15
+# num_hubs = 4
+# num_trucks = 7
+# num_drones_per_truck = 3
 
 # route_list = [{'id': 4, 'truck': ['Source', 'C5', 'Sink'], 'drone': [], 'launches': [], 'cost': 550},
 #               {'id': 6, 'truck': ['Source', 'C7', 'Sink'], 'drone': [], 'launches': [], 'cost': 745},
@@ -404,14 +409,10 @@ def get_arrive_time(arrival_time, node_i, node_j, last_hub, sync_time, wait_time
         else:
             travel_time = network.travel_times[arc][last_hub]
         result = sync_time + wait_time + travel_time
-    # arcs arcs_cpcp and arcs_SC'
+    # arcs_cpcp and arcs_SC'
     else:
         if arc in network.arcs_cpcp:
-            if last_hub is None:
-                travel_time = min(network.travel_times[arc].values())
-            else:
-                travel_time = network.travel_times[arc][last_hub]
-            result = sync_time + travel_time
+            result = sync_time + network.travel_times[arc][last_hub]
         else:  # arcs_SC'
             result = sync_time + network.travel_times[arc]
     return result
@@ -482,12 +483,12 @@ def hashable_path_to_route(path, idx, trans_net):
     """
     truck_route = path[0]
     drone_route = {key: value for key, value in path[-1]}
-    launches = [key.replace("_prime", "") for key in drone_route.keys()]
+    launches = [key for key in drone_route.keys()]
 
     # calculate the route cost
     arrival_time = 0
     wait_time = 0
-    cost = 0
+    cost = truck_cost
     for j in range(1, len(truck_route)):
         node_pre = truck_route[j - 1]
         node_j = truck_route[j]
@@ -498,6 +499,7 @@ def hashable_path_to_route(path, idx, trans_net):
             sync_time = arrival_time
             drone_travel_times = []
             for drone_visit in drone_route[node_j]:
+                cost += drone_cost_per_flight
                 drone_travel_time = trans_net.travel_times[(node_j, drone_visit)]
                 drone_travel_times.append(drone_travel_time)
                 cost += (sync_time + drone_travel_time - trans_net.a_lb[drone_visit]) ** 2
@@ -522,36 +524,11 @@ def find_initial_routes(original_net):
     customers = original_net.customers
     hubs = original_net.hubs
 
-    # # Route that visits all customers
-    # truck_route = [depot_source, customers[0]]
-    # arrive_time = truck_travel_times[(depot_source, customers[0])]
-    # cost = (arrive_time - a_lb[customers[0]]) ** 2
-    # return_time = arrive_time  # Tracks total time back to depot
-    # route_key = [str(depot_source), str(customers[0])]
-    #
-    # for i in range(len(customers) - 1):
-    #     n, n_next = customers[i], customers[i + 1]
-    #     travel_time = truck_travel_times[(n, n_next)]
-    #     arrive_time += travel_time
-    #     cost += (arrive_time - a_lb[n_next]) ** 2
-    #     return_time += travel_time
-    #     truck_route.append(n_next)
-    #     route_key.append(str(n_next))
-    #
-    # return_time += truck_travel_times[(customers[-1], depot_sink)]
-    # cost += return_time
-    # truck_route.append(depot_sink)
-    # route_key.append(str(depot_sink))
-    # key = "-".join(route_key)
-    #
-    # route = {'id': len(routes), 'truck': truck_route, 'drone': [], 'launches': [], 'cost': cost}
-    # routes.append((key, route))
-
     # Routes that visit only one node
     for n_name in customers:
         truck_route = [depot_source, n_name, depot_sink]
         arrive_time = truck_travel_times[(depot_source, n_name)]
-        cost = (arrive_time - a_lb[n_name]) ** 2
+        cost = (arrive_time - a_lb[n_name]) ** 2 + truck_cost
         return_time = arrive_time + truck_travel_times[(n_name, depot_sink)]
         cost += return_time
 
@@ -646,6 +623,21 @@ def truck_drone_path_to_hashable(truck_path, drone_flights):
     truck_path_tuple = tuple(truck_path)
     drone_flight_frozen = {k: frozenset(v) for k, v in drone_flights.items()}
     return truck_path_tuple, frozenset(drone_flight_frozen.items())
+
+
+def get_route_customer_visits(route):
+    """
+    given an element path, returns the customer nodes visited by the path
+    """
+
+    result = []
+    for node in route['truck']:
+        node = node.replace("_prime", "")
+        if node in transformed_net.customers_origin:
+            result.append(node)
+    for hub, nodes in route['drone'].items():
+        result.extend(node.replace("_prime", "") for node in nodes)
+    return result
 
 
 def is_route_subset(route_1, route_2):

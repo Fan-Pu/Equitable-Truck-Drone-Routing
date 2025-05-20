@@ -9,6 +9,7 @@ import cProfile, pstats, io
 
 class RMPNode:
     def __init__(self, node_info: NodeInfo):
+        self.node_info = node_info
         self.obj_val = None
         self.status = None
         self.model = gp.Model("RMP")
@@ -19,6 +20,7 @@ class RMPNode:
         self.constraints = []
         self.vehicle_fleet_branch_lb_cons = None
         self.vehicle_fleet_branch_ub_cons = None
+        self.SR_inequalities = {}  # key: customer triple
         self.arc_flow_lb_cons_dict = {}  # key (i,j,frac_val), val: cons
         self.arc_flow_ub_cons_dict = {}  # key (i,j,frac_val), val: cons
         # add decision variables
@@ -41,11 +43,20 @@ class RMPNode:
             gp.quicksum(self.z_dict.values()) <= node_info.vehicle_fleet_branch_ub, name=f"truck_fleet_ub")
         self.vehicle_fleet_branch_lb_cons = self.model.addConstr(
             gp.quicksum(self.z_dict.values()) >= node_info.vehicle_fleet_branch_lb, name=f"truck_fleet_lb")
+        # SR inequalities
+        for triple, route_keys in node_info.SR_infos.items():
+            if len(route_keys) == 0:
+                continue
+            if len(self.SR_inequalities) >= SR_num:
+                break
+            lhs = gp.quicksum([self.z_dict[key] for key in route_keys])
+            self.SR_inequalities[triple] = self.model.addConstr(lhs <= 1, name=f"SR_{triple}")
 
     def solve(self):
         self.model.setParam('OutputFlag', 0)
         self.model.setParam('InfUnbdInfo', 1)
         self.model.setParam('DualReductions', 0)
+        # self.model.setParam('Presolve', 0)
         self.model.update()
         self.model.optimize()
         self.status = self.model.status
@@ -63,26 +74,32 @@ class RMPNode:
         if self.status == GRB.OPTIMAL:
             self.duals = {"mu": []}
             for cons in self.constraints:
-                self.duals["mu"].append(cons.Pi)
+                self.duals["mu"].append(round(cons.Pi, 2))
 
-            xi = self.vehicle_fleet_branch_lb_cons.Pi
-            kappa = self.vehicle_fleet_branch_ub_cons.Pi
+            xi = round(self.vehicle_fleet_branch_lb_cons.Pi, 2)
+            kappa = round(self.vehicle_fleet_branch_ub_cons.Pi, 2)
             self.duals["constant_term"] = -xi - kappa
+
+            # for SR inequalities
+            for triple, cons in self.SR_inequalities.items():
+                self.duals[triple] = round(cons.Pi, 2)
         # get farkas dual
         elif self.status == GRB.INFEASIBLE:
             self.duals = {"mu": []}
             for cons in self.constraints:
-                self.duals["mu"].append(-cons.FarkasDual)
+                self.duals["mu"].append(round(-cons.FarkasDual, 2))
 
-            xi = -self.vehicle_fleet_branch_lb_cons.FarkasDual
-            kappa = -self.vehicle_fleet_branch_ub_cons.FarkasDual
+            xi = round(-self.vehicle_fleet_branch_lb_cons.FarkasDual, 2)
+            kappa = round(-self.vehicle_fleet_branch_ub_cons.FarkasDual, 2)
             self.duals["constant_term"] = -xi - kappa
+
+            # for SR inequalities
+            for triple, cons in self.SR_inequalities.items():
+                self.duals[triple] = round(cons.FarkasDual, 2)
 
     def run_pricer(self, node_info: NodeInfo):
         """
         run the pricer once
-        :param node_info:
-        :return:
         """
         find_new_column = False
         node_id = node_info.id
@@ -104,8 +121,6 @@ class RMPNode:
                     stats = pstats.Stats(pr, stream=s).sort_stats('cumtime')
 
                     stats.print_stats(10)
-                    stats.print_callers('acquire')
-                    stats.print_callees('run_pricer')
                     # now dump everything at once
                     print(s.getvalue())
 
@@ -114,12 +129,7 @@ class RMPNode:
             reduced_cost, hashable_path, element_path, where = label_setting.solve(farkas, node_info)
 
         # reduced_cost, hashable_path, element_path, where = label_setting.solve(farkas, node_info)
-        if where == 0:
-            GeneralHelper.label_merge_num += 1
-        elif where == 1:
-            GeneralHelper.label_forward_num += 1
-        else:
-            GeneralHelper.label_backward_num += 1
+        GeneralHelper.label_forward_num += 1
 
         # find a new route
         if reduced_cost + close_tolerance < 0:
@@ -133,7 +143,10 @@ class RMPNode:
             if route_key not in bp.node_infos[node_id].columns:
                 bp.node_infos[node_id].columns.append(route_key)
                 bp.node_infos[node_id].column_elementary_paths[route_key] = element_path
+                bp.node_infos[node_id].column_customer_visits[route_key].update(
+                    get_route_customer_visits(bp.route_dict[route_key]))
                 self._add_column(route_key)
+
                 find_new_column = True
             else:
                 raise Exception("column revisited")
@@ -142,6 +155,9 @@ class RMPNode:
     def _add_column(self, route_key):
         """Add new column (route) to the master problem"""
         route = bp.route_dict[route_key]
+        # for SR inequalities
+        self.node_info.column_customer_visits[route_key].update(get_route_customer_visits(route))
+
         GeneralHelper.columns_list.append(route['cost'])
         # generate a new variable and assign the coefficient to objective function
         c = gp.Column()
@@ -157,8 +173,33 @@ class RMPNode:
             for (i, j, frac_val), cons in cons_dict.items():
                 if if_route_travel_arc(route, i, j, GeneralHelper.net):
                     c.addTerms(1.0, cons)
+
+        # for existing SR inequalities
+        for triple, cons in self.SR_inequalities.items():
+            covered_customers = self.node_info.column_customer_visits[route_key]
+            if len(covered_customers & set(triple)) >= 2:
+                c.addTerms(1.0, cons)
+                self.node_info.SR_infos[triple].append(route_key)
+                self.node_info.column_in_SR_triples[route_key].append(triple)
+
         # add new variable
         newVar = self.model.addVar(name=f"z_{route['id']}", vtype=GRB.CONTINUOUS, obj=route['cost'], lb=0, column=c)
+
+        self.model.update()
+
+        # for new SR inequalities
+        if len(self.SR_inequalities) < SR_num:
+            potential_triples = sorted(set(GeneralHelper.transformed_net.PI) - set(self.SR_inequalities.keys()))
+            for triple in potential_triples:
+                covered_customers = self.node_info.column_customer_visits[route_key]
+                if len(covered_customers & set(triple)) >= 2:
+                    # add a new constraint
+                    self.SR_inequalities[triple] = self.model.addConstr(newVar <= 1, name=f"SR_{triple}")
+                    self.node_info.SR_infos[triple].append(route_key)
+                    self.node_info.column_in_SR_triples[route_key].append(triple)
+                if len(self.SR_inequalities) >= SR_num:
+                    break
+
         # update node_infos
         self.z_dict[route_key] = newVar
 

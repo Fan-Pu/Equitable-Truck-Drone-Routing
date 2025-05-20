@@ -4,14 +4,15 @@ from GeneralHelper import *
 
 
 class LabelForward:
-    def __init__(self, path, truck_load, drones_used, arrival_time, sync_time, wait_time, cost, depth, drone_flights,
-                 truck_path):
+    def __init__(self, path, truck_load, drones_used, arrival_time, sync_time, wait_time, psi_set, cost, depth,
+                 drone_flights, truck_path):
         self.path = path  # Ordered sequence of visited nodes (partial path)
         self.truck_load = truck_load  # Truck loading weight
         self.drones_used = drones_used  # Number of drones used
         self.arrival_time = arrival_time  # Arrival time at last node
         self.sync_time = sync_time  # Arrival time at last synchronization point
         self.wait_time = wait_time  # truck waiting time
+        self.psi_set = psi_set.copy()
         self.cost = cost  # Accumulated cost
         # auxiliary components
         self.net = GeneralHelper.transformed_net
@@ -44,33 +45,49 @@ class LabelForward:
         elif self.drones_used < other.drones_used:
             strict = True
 
-        # condition 2.1 violated
-        if self.cost > other.cost:
-            return False
-        elif self.cost < other.cost:
-            strict = True
-
-        # condition 2.2 violated
+        # condition 2, arrival time violated
         if not farkas:
             if self.arrival_time > other.arrival_time:
                 return False
             elif self.arrival_time < other.arrival_time:
                 strict = True
 
-        # condition 2.3 violated
+        # condition 2, sync time violated
         if not farkas:
             if self.sync_time > other.sync_time:
                 return False
             elif self.sync_time < other.sync_time:
                 strict = True
 
+        # condition 2, waiting time violated
+        if not farkas:
+            if self.wait_time > other.wait_time:
+                return False
+            elif self.wait_time < other.wait_time:
+                strict = True
+
+        # condition 2, cost violated
+        if self.cost > other.cost:
+            return False
+        else:
+            # calculate sum_nu
+            sum_nu = 0
+            for triple in GeneralHelper.transformed_net.PI:
+                if self.psi_set[triple] in {1, 3} and other.psi_set[triple] in {0, 2}:
+                    sum_nu += duals[triple]
+
+            if self.cost - sum_nu > other.cost:
+                return False
+            elif self.cost - sum_nu < other.cost:
+                strict = True
+
         if strict:
             GeneralHelper.forward_dominance_num += 1
 
-        # here all conditions are satisfied, we need at least one is strict
+        # here all conditions are satisfied, we need to ensure that at least one is strict
         return strict
 
-    def allow_extend(self, node_j, node_info: NodeInfo, farkas=False):
+    def allow_extend(self, node_j, node_info: NodeInfo):
         """
         check whether we can extend the current label to node_j
         """
@@ -139,7 +156,7 @@ class LabelForward:
 
         return True
 
-    def extend(self, node_j, duals, farkas):
+    def extend(self, node_j, duals, farkas, node_info: NodeInfo):
         """
         extend the label to j
         """
@@ -153,6 +170,7 @@ class LabelForward:
             arrival_time=self.arrival_time,
             sync_time=self.sync_time,
             wait_time=self.wait_time,
+            psi_set=self.psi_set,
             cost=self.cost,
             depth=self.depth + 1,
             drone_flights=self.drone_flights,
@@ -172,7 +190,7 @@ class LabelForward:
         if node_j in self.net.customers:
             label_j.truck_load = self.truck_load + self.net.demand_weights[node_j]
 
-        # update z
+        # update drone used
         if node_j in self.net.customers_prime:
             label_j.drones_used += 1
         else:
@@ -192,16 +210,34 @@ class LabelForward:
         else:
             label_j.wait_time = 0
 
+        # update psi
+        sum_nu = 0
+        for triple in node_info.SR_infos.keys():
+            # the SR inequality has not been appended to the RMP yet
+            if len(node_info.SR_infos[triple]) == 0:
+                continue
+            if node_j.replace("_prime", "") in set(triple):
+                label_j.psi_set[triple] += 1
+                if self.psi_set[triple] == 1 and label_j.psi_set[triple] == 2:
+                    sum_nu += duals[triple]
+
         # update cost
-        if node_j in self.net.customers:
-            index = self.net.customers.index(node_j.replace("_prime", ""))
-            if not farkas:
-                label_j.cost += (label_j.arrival_time - self.net.a_lb[node_j]) ** 2 - duals["mu"][index]
+        if not farkas:
+            if node_j in self.net.customers:
+                index = self.net.customers.index(node_j.replace("_prime", ""))
+                label_j.cost += (label_j.arrival_time - self.net.a_lb[node_j]) ** 2 - duals["mu"][index] - sum_nu
+                if node_j in self.net.customers_prime:
+                    label_j.cost += drone_cost_per_flight
+            elif node_j == self.net.depot_sink:
+                label_j.cost += label_j.arrival_time - sum_nu
             else:
-                label_j.cost -= duals["mu"][index]
-        elif node_j == self.net.depot_sink:
-            if not farkas:
-                label_j.cost += label_j.arrival_time
+                label_j.cost += -sum_nu
+        else:
+            if node_j in self.net.customers:
+                index = self.net.customers.index(node_j.replace("_prime", ""))
+                label_j.cost += -duals["mu"][index] - sum_nu
+            else:
+                label_j.cost += -sum_nu
 
         # update auxiliary infos
         if arc in self.net.arcs_scp or arc in self.net.arcs_cpcp:

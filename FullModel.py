@@ -132,6 +132,16 @@ class FullModel:
         for k in range(self.net.num_trucks):
             n = self.all_nodes_indices[self.depot_sink]
             obj_expr += ak_dict[(n, k)]
+        for k in range(self.net.num_trucks):
+            for j_name in self.truck_out_arcs[self.depot_source]:
+                n, j = self.all_nodes_indices[self.depot_source], self.all_nodes_indices[j_name]
+                obj_expr += truck_cost * x_dict[(n, j, k)]
+        for d in range(self.total_drone_num):
+            for n_name in self.hubs:
+                n = self.all_nodes_indices[n_name]
+                for j_name in self.drone_out_arcs[n_name]:
+                    j = self.all_nodes_indices[j_name]
+                    obj_expr += drone_cost_per_flight * y_dict[(n, j, d)]
         model.setObjective(obj_expr, GRB.MINIMIZE)
 
         # flow conservation ************************************************************
@@ -356,7 +366,7 @@ class FullModel:
                                         name=f"realized5_{cons_id}"))
                     cons_id += 1
 
-        # model.setParam(GRB.Param.TimeLimit, 1)
+        model.setParam(GRB.Param.TimeLimit, 1)
         model.update()
         model.write("full_model.lp")
         model.optimize()

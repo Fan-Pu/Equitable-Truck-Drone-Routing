@@ -27,7 +27,6 @@ class BranchAndPrice:
         routes, element_paths = find_initial_routes(GeneralHelper.net)
         for i in range(len(routes)):
             route_key, route = routes[i]
-            element_path = element_paths[route_key]
             route_dict[route_key] = route
             route_key_id_pairs[route_key] = route['id']
             self.initial_routes.append(route_key)
@@ -40,10 +39,17 @@ class BranchAndPrice:
         # add root node
         node_id_counter += 1
         node_id = node_id_counter
-        node_infos[node_id] = NodeInfo(-1, node_id)
-        node_infos[node_id].columns = self.initial_routes
-        node_infos[node_id].column_elementary_paths = self.initial_element_paths
+        root_node = NodeInfo(-1, node_id)
+        node_infos[node_id] = root_node
+        root_node.columns = self.initial_routes
+        root_node.column_elementary_paths = self.initial_element_paths
+        # setup the column customer visits
+        for route_key, elem_path in root_node.column_elementary_paths.items():
+            root_node.column_customer_visits[route_key].update(get_route_customer_visits(route_dict[route_key]))
+        # initialize SR infos
+        root_node.init_SR_infos()
 
+        # add the column to the queue
         self.branch_queue.put(node_id)
 
         # branch
@@ -116,6 +122,7 @@ class BranchAndPrice:
                 node_left.vehicle_fleet_branch_ub = fleet_ub
             if node_right.vehicle_fleet_branch_lb < fleet_lb:
                 node_right.vehicle_fleet_branch_lb = fleet_lb
+        # branch on the original network
         else:
             # exam flows on all arcs, two types of arc can be revisited: (Source, hub) and (hub, Sink)
             truck_arc_flows = {(i, j): 0.0 for i, j in ori_net.truck_arcs if
@@ -234,9 +241,19 @@ class BranchAndPrice:
                 for column_key in remove_col_keys_left:
                     node_left.columns.remove(column_key)
                     del node_left.column_elementary_paths[column_key]
+                    del node_left.column_customer_visits[column_key]
+                    # check SR infos
+                    for triple in node_left.column_in_SR_triples[column_key]:
+                        node_left.SR_infos[triple].remove(column_key)
+                    node_left.column_in_SR_triples[column_key].clear()
                 for column_key in remove_col_keys_right:
                     node_right.columns.remove(column_key)
                     del node_right.column_elementary_paths[column_key]
+                    del node_right.column_customer_visits[column_key]
+                    # check SR infos
+                    for triple in node_right.column_in_SR_triples[column_key]:
+                        node_right.SR_infos[triple].remove(column_key)
+                    node_right.column_in_SR_triples[column_key].clear()
             # branch on the transformed network
             else:
                 # exam flows on all arcs, two types of arc can be revisited: (Source, hub) and (hub, Sink)
@@ -308,9 +325,19 @@ class BranchAndPrice:
                 for column_key in remove_col_keys_left:
                     node_left.columns.remove(column_key)
                     del node_left.column_elementary_paths[column_key]
+                    del node_left.column_customer_visits[column_key]
+                    # check SR infos
+                    for triple in node_left.column_in_SR_triples[column_key]:
+                        node_left.SR_infos[triple].remove(column_key)
+                    node_left.column_in_SR_triples[column_key].clear()
                 for column_key in remove_col_keys_right:
                     node_right.columns.remove(column_key)
                     del node_right.column_elementary_paths[column_key]
+                    del node_right.column_customer_visits[column_key]
+                    # check SR infos
+                    for triple in node_right.column_in_SR_triples[column_key]:
+                        node_right.SR_infos[triple].remove(column_key)
+                    node_right.column_in_SR_triples[column_key].clear()
         left_node_include_vector = []
         right_node_include_vector = []
         for path in test_path_list:
@@ -341,14 +368,6 @@ class BranchAndPrice:
             rmp_node.solve()
             # print("LSA returned")
             lp_iters += 1
-
-        # # column generation
-        # while True:
-        #     find_new_column = rmp_node.run_pricer(node_info)
-        #     if not find_new_column:
-        #         break
-        #     rmp_node.solve()
-        #     lp_iters += 1
 
         rmp_node.model.update()
         rmp_node.model.write(f"./BP_nodes/RMP_{node_info.id}.lp")
