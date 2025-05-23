@@ -367,7 +367,7 @@ class BranchAndPrice:
             lp_iters += 1
 
         rmp_node.model.update()
-        rmp_node.model.write(f"./BP_nodes/RMP_{node_info.id}.lp")
+        # rmp_node.model.write(f"./BP_nodes/RMP_{node_info.id}.lp")
 
         # this means the current node is infeasible
         if rmp_node.status == GRB.INFEASIBLE:
