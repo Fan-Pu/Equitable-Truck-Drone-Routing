@@ -2,7 +2,7 @@ epsilon_weight = 0.01
 
 
 class Network:
-    def __init__(self, num_trucks, num_drones, a_lb, **kwargs):
+    def __init__(self, num_trucks, num_drones, **kwargs):
         """Class for storing network data"""
 
         # Assign all provided keyword arguments to instance attributes
@@ -20,7 +20,6 @@ class Network:
         # Additional attributes
         self.num_trucks = num_trucks
         self.num_drones = num_drones
-        self.a_lb = a_lb
         self.truck_arcs = []
         self.drone_arcs = []
         for node_i, arcs in self.truck_out_arcs.items():

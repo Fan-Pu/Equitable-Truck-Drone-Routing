@@ -141,10 +141,6 @@ class LabelForward:
             if (self.latest_hub, node_j) not in self.net.arcs_ori:
                 return False
 
-        # check Arrival Time Constraints
-        if self.arrival_time < self.net.a_lb[node_i]:
-            return False
-
         # check Loading Capacity Constraints
         if self.truck_load + self.net.demand_weights[node_j] > truck_max_weight:
             return False
@@ -152,6 +148,14 @@ class LabelForward:
         # check Drone Fleet Constraints
         if arc in self.net.arcs_scp or arc in self.net.arcs_cpcp:
             if self.drones_used >= num_drones_per_truck:
+                return False
+
+        # check Arrival Time Constraints
+        if node_j in self.net.customers:
+            # get the arrival time at j
+            node_j_arrive_t = get_arrive_time(self.arrival_time, node_i, node_j, self.latest_hub,
+                                              self.sync_time, self.wait_time, self.net)
+            if node_j_arrive_t < self.net.a_lb[node_j.replace("_prime", "")]:
                 return False
 
         return True
@@ -224,8 +228,9 @@ class LabelForward:
         # update cost
         if not farkas:
             if node_j in self.net.customers:
-                index = self.net.customers.index(node_j.replace("_prime", ""))
-                label_j.cost += (label_j.arrival_time - self.net.a_lb[node_j]) ** 2 - duals["mu"][index] - sum_nu
+                _node_j = node_j.replace("_prime", "")
+                index = self.net.customers.index(_node_j)
+                label_j.cost += (label_j.arrival_time - self.net.a_lb[_node_j]) ** 2 - duals["mu"][index] - sum_nu
                 if node_j in self.net.customers_prime:
                     label_j.cost += drone_cost_per_flight
             elif node_j == self.net.depot_sink:

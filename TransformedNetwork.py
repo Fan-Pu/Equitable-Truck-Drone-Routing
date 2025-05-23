@@ -28,7 +28,6 @@ class TransformedNetwork:
         self.in_arcs = None
         self.travel_times = {}
         self.a_lb = {}
-        self.a_ub = {}
         self.demand_weights = {}
         self.arcs_ori = SortedSet()  # original truck links
         self.arcs_scp = SortedSet()  # links sc'
@@ -36,7 +35,6 @@ class TransformedNetwork:
         self.arcs_cpc = SortedSet()  # links c'c
         self.arcs = SortedSet()
         self.PI = list()  # for SR inequality
-        self.max_timespan = -1
 
         # duplicate the nodes
         for node in net.customers:
@@ -138,10 +136,6 @@ class TransformedNetwork:
             for hub in self.node_hubs_set_for_truck[node_j]:
                 self.travel_times[key][hub] = net.truck_travel_times[(hub, node_j)]
 
-        # get the lower bound of the arrival times at the customer nodes
-        for node in self.all_nodes:
-            self.a_lb[node] = 0
-
         # set the delivery demand
         for n, demand in net.demand_weights.items():
             node = net.all_nodes[n]
@@ -157,49 +151,61 @@ class TransformedNetwork:
         # for SR inequality
         self.PI = list(itertools.combinations(net.customers, 3))
 
-        self.max_timespan = 99999
-        # self.max_timespan = self.astar_longest_path()
+        # set the arrival time lower bound
+        self.astar_shortest_path()
 
-    def astar_longest_path(self):
+    def astar_shortest_path(self):
         """
-        A* Search for the Longest Elementary Path.
+        A* Search for the shortest path.
         """
+
         start_node = self.depot_source
-        end_node = self.depot_sink
 
-        # Priority queue (max-heap), elements are (-f(n), cur_node, visited_nodes, g(n))
-        Q = [(-self.heuristic(start_node), start_node, [start_node], 0)]
+        # Priority queue (max-heap), elements are (f(n), cur_node, visited_nodes, g(n))
+        Q = [(self.heuristic(start_node), start_node, [start_node], 0, 0, 0)]
         heapq.heapify(Q)
 
-        # Longest path travel time estimate
-        T = {node: float('-inf') for node in self.all_nodes}
-        T[start_node] = 0
+        # arrive time estimate
+        self.a_lb = {node: float('inf') for node in self.customers_origin}
 
-        while Q:
-            _, node, visited, g_n = heapq.heappop(Q)
+        while Q and max(self.a_lb.values()) == float('inf'):
+            _, node, visited, a_n, w_n, s_n = heapq.heappop(Q)
 
-            if node == end_node:
-                return T[node]  # Return longest travel time
+            for j in self.out_arcs[node]:
+                if j in visited or j.replace("_prime", "") in visited or j + "_prime" in visited:
+                    continue
 
-            for node_prime in self.out_arcs[node]:
-                if node_prime not in visited:
-                    g_n_prime = g_n + self.travel_times[node, node_prime]
-                    h_n_prime = self.heuristic(node_prime)
-                    f_n_prime = g_n_prime + h_n_prime
+                if j in self.hubs:
+                    s_j = a_n + self.travel_times[node, j]
+                else:
+                    s_j = s_n
 
-                    if g_n_prime > T[node_prime]:  # Update T if found a longer path
-                        T[node_prime] = g_n_prime
+                if (node, j) in self.arcs_scp:
+                    w_j = self.travel_times[node, j]
+                    a_j = s_j + w_j
+                elif (node, j) in self.arcs_cpcp:
+                    w_j = max(self.travel_times[node, j], w_n)
+                    a_j = s_j + w_j
+                else:
+                    w_j = 0
+                    a_j = a_n + self.travel_times[node, j]
 
-                    # Insert new state into priority queue
-                    heapq.heappush(Q, (-f_n_prime, node_prime, visited + [node_prime], g_n_prime))
+                f_j = a_j + self.heuristic(j)
 
-        return float('-inf')  # No path found
+                if j in self.customers_origin:
+                    self.a_lb[j] = min(a_j, self.a_lb[j])
+                elif j in self.customers_prime:
+                    customer_j = j.replace("_prime", "")
+                    self.a_lb[customer_j] = min(a_j, self.a_lb[customer_j])
+
+                # Insert new state into priority queue
+                heapq.heappush(Q, (f_j, j, visited + [j], a_j, w_j, s_j))
 
     def heuristic(self, node):
         """
-        Heuristic function: Returns the maximum travel time of an outgoing edge.
+        Heuristic function: Returns the minimum travel time of an outgoing edge.
         """
         if len(self.out_arcs[node]) > 0:
-            return max([self.travel_times[(node, node_j)] for node_j in self.out_arcs[node]])
+            return min([self.travel_times[(node, node_j)] for node_j in self.out_arcs[node]])
         else:
             return 0

@@ -101,14 +101,14 @@ class RMPNode:
         """
         run the pricer once
         """
-        find_new_column = False
+        add_new_column = False
         node_id = node_info.id
         farkas = True if self.status == GRB.INFEASIBLE else False
         # bi-directional label setting
         label_setting = BiDirectionalLabelSetting(self.duals)
 
-        deb = False
-        if len(node_info.columns) == 9999:
+        deb = True
+        if len(node_info.columns) == 999:
             try:
                 pr = cProfile.Profile()
                 pr.enable()
@@ -126,7 +126,7 @@ class RMPNode:
 
                     dsads = 0
         else:
-            reduced_cost, hashable_path, element_path, where = label_setting.solve(farkas, node_info)
+            reduced_cost, hashable_path, element_path = label_setting.solve(farkas, node_info)
 
         # reduced_cost, hashable_path, element_path, where = label_setting.solve(farkas, node_info)
         GeneralHelper.label_forward_num += 1
@@ -140,17 +140,15 @@ class RMPNode:
                 bp.route_dict[route_key] = new_route
                 bp.route_key_id_pairs[route_key] = new_route['id']
             # add the column to RMP
-            if route_key not in bp.node_infos[node_id].columns:
+            if route_key not in node_info.removed_columns_keys and route_key not in bp.node_infos[node_id].columns:
                 bp.node_infos[node_id].columns.append(route_key)
                 bp.node_infos[node_id].column_elementary_paths[route_key] = element_path
                 bp.node_infos[node_id].column_customer_visits[route_key].update(
                     get_route_customer_visits(bp.route_dict[route_key]))
                 self._add_column(route_key)
-
-                find_new_column = True
-            else:
-                raise Exception("column revisited")
-        return find_new_column
+                add_new_column = True
+                
+        return add_new_column
 
     def _add_column(self, route_key):
         """Add new column (route) to the master problem"""

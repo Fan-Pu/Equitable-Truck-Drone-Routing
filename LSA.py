@@ -15,8 +15,8 @@ class BiDirectionalLabelSetting:
         self.net = GeneralHelper.transformed_net
         # the ordered dict is used to ensure the exact visit sequence of the dict (code reproduction)
         self.forward_labels = {node: OrderedDict() for node in self.net.all_nodes}  # save forward label keys
-        # cost, hashable_path, path, where: 0 from merge, 1 from forward, 2 from backward
-        self.best_solution = (np.inf, None, None, -1)
+        # cost, hashable_path, path
+        self.best_solution = (np.inf, None, None)
         self.duals = duals
         self.forward_label_queue = queue.PriorityQueue()  # priority queue, ordered by depth
         self.forward_label_counter = itertools.count()
@@ -63,7 +63,7 @@ class BiDirectionalLabelSetting:
                     # do not consider the existing columns
                     if hashable_path not in node_info.columns:
                         if label_j.cost < self.best_solution[0]:
-                            self.best_solution = (label_j.cost, hashable_path, label_j.path, 1)
+                            self.best_solution = (label_j.cost, hashable_path, label_j.path)
                 # only append the labels that have not been added
                 new_labels[node_j].append(label_j)
         # update the forward_labels at once
@@ -143,7 +143,10 @@ class BiDirectionalLabelSetting:
     def print_runtime_info(self, start_time, node_info: NodeInfo):
         arrival_times, sync_times, wait_times = [0], [0], [0]
         last_hub = None
-        obj, path, element_path, where = self.best_solution
+        obj, path, element_path = self.best_solution
+
+        if element_path is None:
+            return
 
         for j in range(1, len(element_path)):
             node_i, node_j = element_path[j - 1], element_path[j]

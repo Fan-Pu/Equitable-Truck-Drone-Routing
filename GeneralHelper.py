@@ -46,7 +46,7 @@ merge_num = 0
 
 final_model = None
 
-SR_num = 5
+SR_num = 0
 
 max_time = 0
 max_num = 0
@@ -125,19 +125,13 @@ drone_endurance = 150
 # for sub-tour elimination
 epsilon = 1
 
-# # solved by forward labeling 3213
+# # solved by forward labeling 559
 # num_customers = 4
 # num_hubs = 3
 # num_trucks = 3
 # num_drones_per_truck = 2
 
-# # solved by forward labeling 3213
-# num_customers = 4
-# num_hubs = 3
-# num_trucks = 4
-# num_drones_per_truck = 2
-
-# # solved by forward labeling and backward labeling 6518
+# # solved by forward labeling and backward labeling 861
 # num_customers = 8
 # num_hubs = 2
 # num_trucks = 5
@@ -311,8 +305,6 @@ def create_random_truck_drone_network():
     truck_net = truck_net
     drone_net = drone_net
 
-    a_lb = {n: 0 for n in all_nodes}
-
     demand_weights = {}
     for n_name in customers:
         n = all_nodes_indices[n_name]
@@ -344,7 +336,7 @@ def create_random_truck_drone_network():
         "drone_travel_times": drone_travel_times,
         "demand_weights": demand_weights
     }
-    net = Network(num_trucks, num_drones_per_truck, a_lb, **params)
+    net = Network(num_trucks, num_drones_per_truck, **params)
     sa = 0
 
 
@@ -502,11 +494,11 @@ def hashable_path_to_route(path, idx, trans_net):
                 cost += drone_cost_per_flight
                 drone_travel_time = trans_net.travel_times[(node_j, drone_visit)]
                 drone_travel_times.append(drone_travel_time)
-                cost += (sync_time + drone_travel_time - trans_net.a_lb[drone_visit]) ** 2
+                cost += (sync_time + drone_travel_time - trans_net.a_lb[drone_visit.replace("_prime", "")]) ** 2
             if len(drone_travel_times) > 0:
                 wait_time = max(drone_travel_times)
         elif node_j in trans_net.customers:
-            cost += (arrival_time - trans_net.a_lb[node_j]) ** 2
+            cost += (arrival_time - trans_net.a_lb[node_j.replace("_prime", "")]) ** 2
         elif node_j == trans_net.depot_sink:
             cost += arrival_time
 
@@ -515,14 +507,13 @@ def hashable_path_to_route(path, idx, trans_net):
     return path, route
 
 
-def find_initial_routes(original_net):
+def find_initial_routes(original_net, trans_net):
     routes = []
     element_paths = {}
     truck_travel_times = original_net.truck_travel_times
-    a_lb = original_net.a_lb
+    a_lb = trans_net.a_lb
     depot_source, depot_sink = original_net.depot_source, original_net.depot_sink
     customers = original_net.customers
-    hubs = original_net.hubs
 
     # Routes that visit only one node
     for n_name in customers:

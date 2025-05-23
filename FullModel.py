@@ -128,7 +128,7 @@ class FullModel:
         obj_expr = 0
         for n_name in self.customers:
             n = self.all_nodes_indices[n_name]
-            obj_expr += (a_dict[n] - self.net.a_lb[n_name]) ** 2
+            obj_expr += (a_dict[n] - GeneralHelper.transformed_net.a_lb[n_name]) ** 2
         for k in range(self.net.num_trucks):
             n = self.all_nodes_indices[self.depot_sink]
             obj_expr += ak_dict[(n, k)]
@@ -309,32 +309,30 @@ class FullModel:
                 cons_id += 1
 
         # realized service times ************************************************************
-        lhs = 0  # cons 1
+        lhs = 0  # cons sum
         src = self.all_nodes_indices[self.depot_source]
         for k in range(self.net.num_trucks):
             lhs += ak_dict[(src, k)]
         for d in range(self.total_drone_num):
             lhs += ad_dict[(src, d)]
         self.constraints.append(
-            model.addConstr(lhs <= 0, name="realized1"))
-        # cons 2
+            model.addConstr(lhs <= 0, name="realized_sum"))
+        # cons a_n
         cons_id = 0
         for n_name in self.customers:
             n = self.all_nodes_indices[n_name]
             for k in range(self.net.num_trucks):
                 self.constraints.append(
-                    model.addConstr(a_dict[n] >= ak_dict[(n, k)],
-                                    name=f"realized2_{cons_id}"))
+                    model.addConstr(a_dict[n] >= ak_dict[(n, k)], name=f"realized_an1_{cons_id}"))
                 cons_id += 1
-        # cons 3
+        # cons a_n
         for n_name in self.customers:
             n = self.all_nodes_indices[n_name]
             for d in range(self.total_drone_num):
                 self.constraints.append(
-                    model.addConstr(a_dict[n] >= ad_dict[(n, d)],
-                                    name=f"realized3_{cons_id}"))
+                    model.addConstr(a_dict[n] >= ad_dict[(n, d)], name=f"realized_an2_{cons_id}"))
                 cons_id += 1
-        # cons 4
+        # cons a_n,k
         for n_name in self.all_nodes:
             if n_name == self.depot_source:
                 continue
@@ -348,22 +346,52 @@ class FullModel:
                            + travel_time * x_dict[(i, n, k)]
                            + M * (x_dict[(i, n, k)] - 1))
                     self.constraints.append(
-                        model.addConstr(ak_dict[(n, k)] >= rhs,
-                                        name=f"realized4_{cons_id}"))
+                        model.addConstr(ak_dict[(n, k)] >= rhs, name=f"realized_ank1_{cons_id}"))
                     cons_id += 1
-        # cons 5
+
+                    rhs = (ak_dict[(i, k)]
+                           + t_dict[(i, k)]
+                           + travel_time * x_dict[(i, n, k)]
+                           + M * (1 - x_dict[(i, n, k)]))
+                    self.constraints.append(
+                        model.addConstr(ak_dict[(n, k)] <= rhs, name=f"realized_ank2_{cons_id}"))
+                    cons_id += 1
+        for n_name in self.customers:
+            n = self.all_nodes_indices[n_name]
+            for i_name in self.truck_in_arcs[n_name]:
+                i = self.all_nodes_indices[i_name]
+                for k in range(self.net.num_trucks):
+                    rhs = (GeneralHelper.transformed_net.a_lb[n_name] + M * (x_dict[(i, n, k)] - 1))
+                    self.constraints.append(
+                        model.addConstr(ak_dict[(n, k)] >= rhs, name=f"realized_ank3_{cons_id}"))
+                    cons_id += 1
+        # cons a_n,d
         for n_name in self.hubs:
             n = self.all_nodes_indices[n_name]
             for j_name in self.drone_out_arcs[n_name]:
                 j = self.all_nodes_indices[j_name]
                 travel_time = self.drone_travel_times[(n_name, j_name)]
                 for d in range(self.total_drone_num):
+                    # cons 1
                     rhs = (ak_dict[(n, self.kd_dict[d])]
                            + travel_time * y_dict[(n, j, d)]
                            + M * (y_dict[(n, j, d)] - 1))
                     self.constraints.append(
                         model.addConstr(ad_dict[(j, d)] >= rhs,
-                                        name=f"realized5_{cons_id}"))
+                                        name=f"realized_and1_{cons_id}"))
+                    cons_id += 1
+                    # cons 2
+                    rhs = (ak_dict[(n, self.kd_dict[d])]
+                           + travel_time * y_dict[(n, j, d)]
+                           + M * (1 - y_dict[(n, j, d)]))
+                    self.constraints.append(
+                        model.addConstr(ad_dict[(j, d)] <= rhs,
+                                        name=f"realized_and2_{cons_id}"))
+                    cons_id += 1
+                    # cons 3
+                    rhs = (GeneralHelper.transformed_net.a_lb[j_name] + M * (y_dict[(n, j, d)] - 1))
+                    self.constraints.append(
+                        model.addConstr(ad_dict[(j, d)] >= rhs, name=f"realized_and3_{cons_id}"))
                     cons_id += 1
 
         model.setParam(GRB.Param.TimeLimit, 1)

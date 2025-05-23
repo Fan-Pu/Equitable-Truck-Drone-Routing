@@ -24,7 +24,7 @@ class BranchAndPrice:
         self.best_solution_node: RMPNode = None
         # add initial routes
         self.initial_routes = []
-        routes, element_paths = find_initial_routes(GeneralHelper.net)
+        routes, element_paths = find_initial_routes(GeneralHelper.net, GeneralHelper.transformed_net)
         for i in range(len(routes)):
             route_key, route = routes[i]
             route_dict[route_key] = route
@@ -61,7 +61,7 @@ class BranchAndPrice:
             node_id = self.branch_queue.get()
             # solve the current node
             is_integer_sol, branch_candidates, var_vals, lp_iters, lp_obj_val = self.solve_node(node_infos[node_id])
-            # if LP_obj is higher that global upper bound
+            # if LP_obj is higher the global upper bound
             if is_integer_sol is not None:
                 if not is_integer_sol:
                     pruned_by_ub = True if lp_obj_val >= self.global_upper_bound else False
@@ -235,8 +235,8 @@ class BranchAndPrice:
                                     right_break = True
                             break
 
-                node_left.removed_columns_keys = remove_col_keys_left
-                node_right.removed_columns_keys = remove_col_keys_right
+                node_left.removed_columns_keys.update(remove_col_keys_left)
+                node_right.removed_columns_keys.update(remove_col_keys_right)
                 # remove the columns
                 for column_key in remove_col_keys_left:
                     node_left.columns.remove(column_key)
@@ -319,8 +319,8 @@ class BranchAndPrice:
                             remove_col_keys_right.add(column_key)
                             right_break = True
 
-                node_left.removed_columns_keys = remove_col_keys_left
-                node_right.removed_columns_keys = remove_col_keys_right
+                node_left.removed_columns_keys.update(remove_col_keys_left)
+                node_right.removed_columns_keys.update(remove_col_keys_right)
                 # remove the columns (fix their ub to 0), this does not introduce new constraints into the node
                 for column_key in remove_col_keys_left:
                     node_left.columns.remove(column_key)
@@ -357,13 +357,10 @@ class BranchAndPrice:
         rmp_node.solve()
         lp_iters = 1
 
-        # pr = cProfile.Profile()
-        # pr.enable()
-
         # column generation
         while True:
-            find_new_column = rmp_node.run_pricer(node_info)
-            if not find_new_column:
+            add_new_column = rmp_node.run_pricer(node_info)
+            if not add_new_column:
                 break
             rmp_node.solve()
             # print("LSA returned")
