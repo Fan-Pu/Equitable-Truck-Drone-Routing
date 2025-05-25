@@ -394,7 +394,7 @@ class FullModel:
                         model.addConstr(ad_dict[(j, d)] >= rhs, name=f"realized_and3_{cons_id}"))
                     cons_id += 1
 
-        model.setParam(GRB.Param.TimeLimit, 1)
+        # model.setParam(GRB.Param.TimeLimit, 1)
         model.update()
         model.write("full_model.lp")
         model.optimize()

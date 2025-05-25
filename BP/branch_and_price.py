@@ -166,41 +166,50 @@ class BranchAndPrice:
             elif len(truck_binary_flows) > 0:
                 arc, flow = min(truck_binary_flows, key=lambda x: abs(x[1] - 0.5))
                 where = 'truck'
+
             if arc is not None and flow is not None:
                 node_i, node_j = arc
 
+                # the arcs disabled in the original network
                 new_disabled_arcs_left = set()
                 new_disabled_arcs_right = set()
 
                 # down branch (left)
-                if where == 'drone':
-                    node_left.disabled_arcs_drones_left.add(arc)
-                else:
-                    node_left.disabled_arcs.add(arc)
                 new_disabled_arcs_left.add(arc)
+                if where == 'drone':
+                    node_left.disabled_arcs_drones.add(arc)
+                else:
+                    node_left.disabled_arcs_trucks.add(arc)
 
                 # up branch (right) must travel arc
-                node_right.must_visit_arcs.add(arc)
                 if where == 'truck':
+                    node_right.must_visit_arcs_trucks.add(arc)
                     for node_next in ori_net.truck_out_arcs[node_i]:
                         if node_next != node_j:
-                            node_right.disabled_arcs.add((node_i, node_next))
+                            node_right.disabled_arcs_trucks.add((node_i, node_next))
                             new_disabled_arcs_right.add((node_i, node_next))
-                else:
-                    for node_pre in ori_net.truck_in_arcs[node_j]:
+                else:  # drone arc
+                    node_right.must_visit_arcs_drones.add(arc)
+                    for node_pre in trans_net.in_arcs[node_j]:
                         # disable the entrance from any other hub except node_i
-                        if node_pre != node_i and node_pre in ori_net.hubs:
-                            node_right.disabled_arcs.add((node_pre, node_j))
-                            new_disabled_arcs_right.add((node_pre, node_j))
-                    for node_next in ori_net.truck_out_arcs[node_i]:
-                        # must immediately visit node_j if node_i is visited
-                        if node_next != node_j:
-                            node_right.disabled_arcs.add((node_i, node_next))
-                            new_disabled_arcs_right.add((node_i, node_next))
+                        if node_pre != node_i and node_pre in trans_net.hubs:
+                            node_right.disabled_arcs_trans.add((node_pre, node_j + "_prime"))
+
+                    # for node_pre in ori_net.truck_in_arcs[node_j]:
+                    #     # disable the entrance from any other hub except node_i
+                    #     if node_pre != node_i and node_pre in ori_net.hubs:
+                    #         node_right.disabled_arcs_trucks.add((node_pre, node_j))
+                    #         new_disabled_arcs_right.add((node_pre, node_j))
+                    # for node_next in ori_net.truck_out_arcs[node_i]:
+                    #     # must immediately visit node_j if node_i is visited
+                    #     if node_next != node_j:
+                    #         node_right.disabled_arcs.add((node_i, node_next))
+                    #         new_disabled_arcs_right.add((node_i, node_next))
 
                 # remove columns
                 remove_col_keys_left = set()
                 remove_col_keys_right = set()
+
                 for column_key in current_node.columns:
                     truck_path = list(column_key[0])
                     drone_path = column_key[-1]
@@ -208,20 +217,24 @@ class BranchAndPrice:
                     for i in range(len(truck_path) - 1):
                         if left_break and right_break:
                             break
-                        node_i = truck_path[i]
-                        node_j = truck_path[i + 1]
-                        temp_arc = (node_i, node_j)  # truck arc
+                        node = truck_path[i]
+                        node_next = truck_path[i + 1]
+                        temp_arc = (node, node_next)  # truck arc
                         if temp_arc in new_disabled_arcs_left and not left_break:
                             remove_col_keys_left.add(column_key)
                             left_break = True
                         if temp_arc in new_disabled_arcs_right and not right_break:
+                            if column_key == (('Source', 'H2', 'Sink'),
+                                              frozenset({('H2', frozenset({'C5_prime', 'C7_prime', 'C9_prime'}))})):
+                                sds = 0
                             remove_col_keys_right.add(column_key)
                             right_break = True
                         # also checks the drone paths
-                        if node_i not in ori_net.hubs:
+                        if node not in ori_net.hubs:
                             continue
+                        # now node is a hub
                         for launch_hub, visits in drone_path:
-                            if launch_hub != node_i:
+                            if launch_hub != node:
                                 continue
                             for visit in visits:
                                 if left_break and right_break:
@@ -231,9 +244,24 @@ class BranchAndPrice:
                                     remove_col_keys_left.add(column_key)
                                     left_break = True
                                 if drone_arc in new_disabled_arcs_right and not right_break:
+                                    if column_key == (('Source', 'H2', 'Sink'),
+                                                      frozenset(
+                                                          {('H2', frozenset({'C5_prime', 'C7_prime', 'C9_prime'}))})):
+                                        sds = 0
                                     remove_col_keys_right.add(column_key)
                                     right_break = True
                             break
+
+                    # for the right node, check whether column travels the must-visit drone arc
+                    if where == "drone":
+                        temp_drone_path = dict(drone_path)
+                        if node_i not in temp_drone_path.keys():
+                            continue
+                        if node_j + "_prime" not in temp_drone_path[node_i]:
+                            if column_key == (('Source', 'H2', 'Sink'),
+                                              frozenset({('H2', frozenset({'C5_prime', 'C7_prime', 'C9_prime'}))})):
+                                sds = 0
+                            remove_col_keys_right.add(column_key)
 
                 node_left.removed_columns_keys.update(remove_col_keys_left)
                 node_right.removed_columns_keys.update(remove_col_keys_right)

@@ -96,30 +96,12 @@ class LabelForward:
         _node_j = node_j.replace("_prime", "")
         arc = (node_i, node_j)
 
+        if self.path == ['Source', 'H1', 'C1_prime'] and node_j == 'C5_prime' and node_info.id == 3:
+            sdas = 0
+
         # check branch arcs in transformed network
         if arc in node_info.disabled_arcs_trans:
             return False
-
-        # check branch arcs in original network
-        if arc in self.net.arcs_ori:  # a truck path
-            if arc in node_info.disabled_arcs:
-                return False
-        elif arc in self.net.arcs_scp:  # green arc
-            temp_arc = (node_i, _node_j)
-            if temp_arc in node_info.disabled_arcs or temp_arc in node_info.disabled_arcs_drones_left:
-                return False
-        elif arc in self.net.arcs_cpcp:  # orange arc
-            if (self.latest_hub, _node_j) in node_info.disabled_arcs_drones_left:
-                return False
-
-        # check if all required arcs is visited
-        if node_j == self.net.depot_sink:
-            for i, _ in node_info.must_visit_arcs:
-                if i not in self.path and i + "_prime" not in self.path:
-                    return False
-            for i, j in node_info.must_visit_arcs_trans:
-                if (i, j) not in zip(self.path, self.path[1:]):
-                    return False
 
         # check Customer Visits Constraints
         if node_j in self.net.customers:  # a customer node
@@ -157,6 +139,37 @@ class LabelForward:
                                               self.sync_time, self.wait_time, self.net)
             if node_j_arrive_t < self.net.a_lb[node_j.replace("_prime", "")]:
                 return False
+
+        # check disabled truck arcs in the original network
+        if arc in self.net.arcs_ori and arc in node_info.disabled_arcs_trucks:
+            return False
+
+        # check AK+
+        if node_j == self.net.depot_sink:
+            for i, _ in node_info.must_visit_arcs_trucks:
+                if i not in self.path:
+                    return False
+
+        # check AD+
+        if arc in self.net.arcs_cpc:
+            hub_idx = self.path.index(self.latest_hub)
+            for s, n in node_info.must_visit_arcs_drones:
+                if s != self.latest_hub:
+                    continue
+                if n + "_prime" not in self.path[hub_idx + 1:]:
+                    return False
+        elif arc in self.net.arcs_cpcp:
+            for s, n in node_info.must_visit_arcs_drones:
+                if s == self.latest_hub:
+                    continue
+                if n == _node_j:
+                    return False
+
+        # check AD-
+        if arc in self.net.arcs_scp and (node_i, _node_j) in node_info.disabled_arcs_drones:
+            return False
+        if arc in self.net.arcs_cpcp and (self.latest_hub, _node_j) in node_info.disabled_arcs_drones:
+            return False
 
         return True
 

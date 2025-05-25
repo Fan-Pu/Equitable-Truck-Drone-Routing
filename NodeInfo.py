@@ -20,9 +20,10 @@ class NodeInfo:
         # branching constraints
         self.child_ids = []
         # for label setting algorithm
-        self.disabled_arcs = set()  # the arcs must not be visited, original network, individually disabled
-        self.disabled_arcs_drones_left = set()  # the drone arcs must not be visited, original network, by down-branch
-        self.must_visit_arcs = set()  # (i,j) in the original network
+        self.disabled_arcs_trucks = set()  # the arcs must not be visited, original network
+        self.disabled_arcs_drones = set()  # the drone arcs must not be visited, original network, by down-branch
+        self.must_visit_arcs_trucks = set()  # (i,j) in the original network
+        self.must_visit_arcs_drones = set()
         # in the transformed network
         self.disabled_arcs_trans = set()  # same as self.disabled_arcs, defined for transformed network
         self.must_visit_arcs_trans = set()
@@ -36,9 +37,10 @@ class NodeInfo:
         self.vehicle_fleet_branch_ub = parent.vehicle_fleet_branch_ub
         self.SR_infos = copy.deepcopy(parent.SR_infos)
         self.column_in_SR_triples = copy.deepcopy(parent.column_in_SR_triples)
-        self.disabled_arcs = parent.disabled_arcs.copy()
-        self.disabled_arcs_drones_left = parent.disabled_arcs_drones_left.copy()
-        self.must_visit_arcs = parent.must_visit_arcs.copy()
+        self.disabled_arcs_trucks = parent.disabled_arcs_trucks.copy()
+        self.disabled_arcs_drones = parent.disabled_arcs_drones.copy()
+        self.must_visit_arcs_trucks = parent.must_visit_arcs_trucks.copy()
+        self.must_visit_arcs_drones = parent.must_visit_arcs_drones.copy()
         self.disabled_arcs_trans = parent.disabled_arcs_trans.copy()
         self.must_visit_arcs_trans = parent.must_visit_arcs_trans.copy()
         self.removed_columns_keys = parent.removed_columns_keys.copy()

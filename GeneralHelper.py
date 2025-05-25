@@ -143,6 +143,12 @@ num_hubs = 3
 num_trucks = 5
 num_drones_per_truck = 3
 
+# # solved by forward labeling 12061
+# num_customers = 10
+# num_hubs = 3
+# num_trucks = 5
+# num_drones_per_truck = 3
+
 # # solved by forward labeling and backward labeling 6565
 # num_customers = 8
 # num_hubs = 3
@@ -678,3 +684,8 @@ def if_route_visit_node(route, i):
             if i + "_prime" in node_set:
                 return True
     return False
+
+
+def is_arc_included_in_path(path: list, arc):
+    i, j = arc
+    return any(x == i and y == j for x, y in zip(path, path[1:]))
