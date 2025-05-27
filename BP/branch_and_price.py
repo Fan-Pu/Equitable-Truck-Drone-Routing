@@ -13,14 +13,19 @@ node_id_counter = 0
 node_infos = {}
 route_dict = {}  # key (truck_route, drone_route)
 route_key_id_pairs = {}  # key: route key. value: route id
+RMP_nodes = {}
 
 
 class BranchAndPrice:
     def __init__(self, tolerance=1e-6, max_runtime=float('inf')):
         self.tolerance = tolerance
         self.max_runtime = max_runtime
-        self.branch_queue = PriorityQueue()
+        self.branch_queue = PriorityQueue()  # (lp_obj_val, node_id)
+        self.node_solutions = {}
+        self.node_lp_objs = {}
         self.global_upper_bound = float('inf')  # the cost of incumbent solution
+        self.global_lower_bound = -float('inf')
+        self.gap = 1  # optimality gap
         self.best_solution_node: RMPNode = None
         # add initial routes
         self.initial_routes = []
@@ -39,7 +44,7 @@ class BranchAndPrice:
         # add root node
         node_id_counter += 1
         node_id = node_id_counter
-        root_node = NodeInfo(-1, node_id)
+        root_node = NodeInfo(-1, node_id, 1)
         node_infos[node_id] = root_node
         root_node.columns = self.initial_routes
         root_node.column_elementary_paths = self.initial_element_paths
@@ -48,39 +53,83 @@ class BranchAndPrice:
             root_node.column_customer_visits[route_key].update(get_route_customer_visits(route_dict[route_key]))
         # initialize SR infos
         root_node.init_SR_infos()
-
+        # solve the root node
+        RMP_node = RMPNode(root_node)
+        RMP_nodes[root_node.id] = RMP_node
+        is_integer_sol, branch_candidates, var_vals, lp_iters, lp_obj_val = self.solve_node(root_node, RMP_node)
+        self.node_solutions[node_id] = [is_integer_sol, branch_candidates, var_vals, lp_iters, lp_obj_val]
+        self.node_lp_objs[node_id] = lp_obj_val
         # add the column to the queue
-        self.branch_queue.put(node_id)
+        self.branch_queue.put(((1, node_id), node_id))
 
-        # branch
+        # main loop
         while not self.branch_queue.empty():
             if time.time() - start_time > self.max_runtime:
                 logging.info("Terminated due to reaching maximum runtime.")
                 break
 
-            node_id = self.branch_queue.get()
+            priority, node_id = self.branch_queue.get()
             # solve the current node
-            is_integer_sol, branch_candidates, var_vals, lp_iters, lp_obj_val = self.solve_node(node_infos[node_id])
-            # if LP_obj is higher the global upper bound
+            is_integer_sol, branch_candidates, var_vals, lp_iters, lp_obj_val = self.node_solutions[node_id]
+            if lp_obj_val is not None:
+                solution = set([key for key, val in var_vals.items() if val > 0])
+            if is_integer_sol:
+                sdas = 0
+
+            # feasible node
             if is_integer_sol is not None:
                 if not is_integer_sol:
                     pruned_by_ub = True if lp_obj_val >= self.global_upper_bound else False
                 else:
                     pruned_by_ub = True if lp_obj_val > self.global_upper_bound else False
-                if not is_integer_sol and not pruned_by_ub:
-                    self.branch(node_id, branch_candidates, var_vals)
+
+                if not is_integer_sol:
+                    # branch
+                    if lp_obj_val < self.global_upper_bound:
+                        left_node_id, right_node_id = self.branch(node_id, branch_candidates, var_vals)
+                        # solve the child nodes at once
+                        rmp_left_node = RMPNode(node_infos[left_node_id])
+                        RMP_nodes[left_node_id] = rmp_left_node
+                        self.node_solutions[left_node_id] = self.solve_node(node_infos[left_node_id], rmp_left_node)
+                        rmp_right_node = RMPNode(node_infos[right_node_id])
+                        RMP_nodes[right_node_id] = rmp_right_node
+                        self.node_solutions[right_node_id] = self.solve_node(node_infos[right_node_id], rmp_right_node)
+                        # if the child node is feasible
+                        if self.node_solutions[left_node_id][-1] is not None:
+                            self.node_lp_objs[left_node_id] = self.node_solutions[left_node_id][-1]
+                        if self.node_solutions[right_node_id][-1] is not None:
+                            self.node_lp_objs[right_node_id] = self.node_solutions[right_node_id][-1]
+                        # put child nodes into the queue
+                        self.branch_queue.put(((node_infos[left_node_id].depth, left_node_id), left_node_id))
+                        self.branch_queue.put(((node_infos[right_node_id].depth, right_node_id), right_node_id))
+                        # update global lower bound
+                        self.global_lower_bound = round(min(self.node_lp_objs.values()), 2)
+                else:  # integer solution
+                    if lp_obj_val < self.global_upper_bound:
+                        self.global_upper_bound = lp_obj_val
+                        self.best_solution_node = RMP_nodes[node_id]
+                    if lp_obj_val == 1498:
+                        sdas = 0
+
+                # remove the current node lp info
+                del self.node_lp_objs[node_id]
+
+                if self.global_upper_bound < float('inf'):
+                    self.gap = (self.global_upper_bound - self.global_lower_bound) / abs(self.global_upper_bound)
+                gap_text = round(self.gap * 100, 2) if self.gap < 1 else "-"
 
                 ub_print = "-" if self.global_upper_bound == float('inf') else self.global_upper_bound
+                g_lb_print = "-" if self.global_lower_bound == -float('inf') else self.global_lower_bound
                 local_lb_print = round(lp_obj_val, 2) if not is_integer_sol else "-"
                 log_text = (
-                    f"LP iters: {lp_iters}, solved node id: {node_id}, queue size: {self.branch_queue.qsize()}, "
-                    f"columns: {len(node_infos[node_id].columns)}, ub: {ub_print}, "
-                    f"local lb: {local_lb_print}")
+                    f"LP iters: {lp_iters}, node id: {node_id}, queue: {self.branch_queue.qsize()}, gap: {gap_text}%, "
+                    f"cols: {len(node_infos[node_id].columns)}, g_ub: {ub_print}, g_lb: {g_lb_print}, "
+                    f"l_lb: {local_lb_print}")
                 if is_integer_sol:  # find integer solution
                     log_text += f", integer obj: {round(lp_obj_val, 2)}"
                 if pruned_by_ub:
                     log_text += f", pruned by UB"
-            else:
+            else:  # infeasible node
                 log_text = (
                     f"LP iters: {lp_iters}, solved node id: {node_id}, queue size: {self.branch_queue.qsize()}, "
                     f"infeasible node")
@@ -98,13 +147,13 @@ class BranchAndPrice:
         # left node
         node_id_counter += 1
         node_left_id = node_id_counter
-        node_left = NodeInfo(current_node_id, node_left_id)
+        node_left = NodeInfo(current_node_id, node_left_id, current_node.depth + 1)
         node_infos[node_left_id] = node_left
         node_left.as_child(current_node)
         # right node
         node_id_counter += 1
         node_right_id = node_id_counter
-        node_right = NodeInfo(current_node_id, node_right_id)
+        node_right = NodeInfo(current_node_id, node_right_id, current_node.depth + 1)
         node_infos[node_right_id] = node_right
         node_right.as_child(current_node)
 
@@ -112,17 +161,17 @@ class BranchAndPrice:
 
         ori_net = GeneralHelper.net
         trans_net = GeneralHelper.transformed_net
-        # this requires to branch on vehicle fleet
+        # branch on vehicle fleet
         sum_vals = sum(var_vals.values())
         if not is_integer(sum_vals):
-            # if False:
+            print("branch on fleet")
             fleet_ub, fleet_lb = int(sum_vals), int(sum_vals) + 1
             # update node info
             if node_left.vehicle_fleet_branch_ub > fleet_ub:
                 node_left.vehicle_fleet_branch_ub = fleet_ub
             if node_right.vehicle_fleet_branch_lb < fleet_lb:
                 node_right.vehicle_fleet_branch_lb = fleet_lb
-        # branch on the original network
+        # branch on the arc-flow
         else:
             # exam flows on all arcs, two types of arc can be revisited: (Source, hub) and (hub, Sink)
             truck_arc_flows = {(i, j): 0.0 for i, j in ori_net.truck_arcs if
@@ -137,9 +186,6 @@ class BranchAndPrice:
                 for i in range(len(truck_path) - 1):
                     node_i = truck_path[i]
                     node_j = truck_path[i + 1]
-                    # if (node_i == ori_net.depot_source and node_j in ori_net.hubs) or (
-                    #         node_i in ori_net.hubs and node_j == ori_net.depot_sink):
-                    #     continue
                     arc = (node_i, node_j)  # truck arc
                     if arc in truck_arc_flows.keys():
                         truck_arc_flows[arc] += flow_num
@@ -167,8 +213,20 @@ class BranchAndPrice:
                 arc, flow = min(truck_binary_flows, key=lambda x: abs(x[1] - 0.5))
                 where = 'truck'
 
+            # if len(truck_binary_flows) > 0:
+            #     arc, flow = min(truck_binary_flows, key=lambda x: abs(x[1] - 0.5))
+            #     where = 'truck'
+            # elif len(drone_binary_flows) > 0:
+            #     arc, flow = min(drone_binary_flows, key=lambda x: abs(x[1] - 0.5))
+            #     where = 'drone'
+
+            # branch on original network
             if arc is not None and flow is not None:
+                print(f"branch on {where}")
                 node_i, node_j = arc
+
+                if current_node.id == 2:
+                    sdas = 0
 
                 # the arcs disabled in the original network
                 new_disabled_arcs_left = set()
@@ -186,8 +244,14 @@ class BranchAndPrice:
                     node_right.must_visit_arcs_trucks.add(arc)
                     for node_next in ori_net.truck_out_arcs[node_i]:
                         if node_next != node_j:
-                            node_right.disabled_arcs_trucks.add((node_i, node_next))
-                            new_disabled_arcs_right.add((node_i, node_next))
+                            temp_arc = (node_i, node_next)
+                            node_right.disabled_arcs_trucks.add(temp_arc)
+                            new_disabled_arcs_right.add(temp_arc)
+                    for node_pre in ori_net.truck_in_arcs[node_j]:
+                        if node_pre != node_i:
+                            temp_arc = (node_pre, node_j)
+                            node_right.disabled_arcs_trucks.add(temp_arc)
+                            new_disabled_arcs_right.add(temp_arc)
                 else:  # drone arc
                     node_right.must_visit_arcs_drones.add(arc)
                     for node_pre in trans_net.in_arcs[node_j]:
@@ -211,57 +275,19 @@ class BranchAndPrice:
                 remove_col_keys_right = set()
 
                 for column_key in current_node.columns:
-                    truck_path = list(column_key[0])
-                    drone_path = column_key[-1]
-                    left_break = right_break = False
-                    for i in range(len(truck_path) - 1):
-                        if left_break and right_break:
-                            break
-                        node = truck_path[i]
-                        node_next = truck_path[i + 1]
-                        temp_arc = (node, node_next)  # truck arc
-                        if temp_arc in new_disabled_arcs_left and not left_break:
+                    route = route_dict[column_key]
+                    # check left
+                    for temp_node_i, temp_node_j in new_disabled_arcs_left:
+                        # the column travels a removed arc
+                        if if_route_travel_arc(route, temp_node_i, temp_node_j, GeneralHelper.net):
                             remove_col_keys_left.add(column_key)
-                            left_break = True
-                        if temp_arc in new_disabled_arcs_right and not right_break:
-                            if column_key == (('Source', 'H2', 'Sink'),
-                                              frozenset({('H2', frozenset({'C5_prime', 'C7_prime', 'C9_prime'}))})):
-                                sds = 0
-                            remove_col_keys_right.add(column_key)
-                            right_break = True
-                        # also checks the drone paths
-                        if node not in ori_net.hubs:
-                            continue
-                        # now node is a hub
-                        for launch_hub, visits in drone_path:
-                            if launch_hub != node:
-                                continue
-                            for visit in visits:
-                                if left_break and right_break:
-                                    break
-                                drone_arc = (launch_hub, visit.replace("_prime", ""))
-                                if drone_arc in new_disabled_arcs_left and not left_break:
-                                    remove_col_keys_left.add(column_key)
-                                    left_break = True
-                                if drone_arc in new_disabled_arcs_right and not right_break:
-                                    if column_key == (('Source', 'H2', 'Sink'),
-                                                      frozenset(
-                                                          {('H2', frozenset({'C5_prime', 'C7_prime', 'C9_prime'}))})):
-                                        sds = 0
-                                    remove_col_keys_right.add(column_key)
-                                    right_break = True
                             break
-
-                    # for the right node, check whether column travels the must-visit drone arc
-                    if where == "drone":
-                        temp_drone_path = dict(drone_path)
-                        if node_i not in temp_drone_path.keys():
-                            continue
-                        if node_j + "_prime" not in temp_drone_path[node_i]:
-                            if column_key == (('Source', 'H2', 'Sink'),
-                                              frozenset({('H2', frozenset({'C5_prime', 'C7_prime', 'C9_prime'}))})):
-                                sds = 0
+                    # check right
+                    for temp_node_i, temp_node_j in new_disabled_arcs_right:
+                        # the column travels a removed arc
+                        if if_route_travel_arc(route, temp_node_i, temp_node_j, GeneralHelper.net):
                             remove_col_keys_right.add(column_key)
+                            break
 
                 node_left.removed_columns_keys.update(remove_col_keys_left)
                 node_right.removed_columns_keys.update(remove_col_keys_right)
@@ -284,6 +310,7 @@ class BranchAndPrice:
                     node_right.column_in_SR_triples[column_key].clear()
             # branch on the transformed network
             else:
+                print("branch on transformed")
                 # exam flows on all arcs, two types of arc can be revisited: (Source, hub) and (hub, Sink)
                 arc_flows = {(i, j): 0.0 for i, j in trans_net.arcs if
                              i != trans_net.depot_source and j != trans_net.depot_sink}
@@ -372,16 +399,15 @@ class BranchAndPrice:
             left_node_include_vector.append(path in node_left.columns)
             right_node_include_vector.append(path in node_right.columns)
 
-        self.branch_queue.put(node_left_id)
-        self.branch_queue.put(node_right_id)
+        return node_left_id, node_right_id
 
-    def solve_node(self, node_info: NodeInfo):
+    def solve_node(self, node_info: NodeInfo, rmp_node: RMPNode):
         """
         iteratively solve the RMP, then solve pricing problem using Benders decomposition (BMP, BSP), until no new
         columns found
         :return: is_integer, branch_candidates, var_vals, lp_iters, lp_obj_val
         """
-        rmp_node = RMPNode(node_info)
+
         rmp_node.solve()
         lp_iters = 1
 
@@ -401,16 +427,14 @@ class BranchAndPrice:
         if rmp_node.status == GRB.INFEASIBLE:
             return None, None, None, lp_iters, None
 
-        # check integrality of RMP
-        has_integer_solution, branch_candidates = rmp_node.is_integer()
         rmp_obj_val = rmp_node.obj_val
-        if has_integer_solution:  # update incumbent
-            if rmp_obj_val < self.global_upper_bound:
-                self.global_upper_bound = rmp_obj_val
-                self.best_solution_node = rmp_node
-            return has_integer_solution, None, rmp_node.z_vals, lp_iters, rmp_obj_val  # no need to branch
+
+        # check integrality of RMP
+        is_integer_solution, branch_candidates = rmp_node.is_integer()
+        if is_integer_solution:  # update incumbent
+            return is_integer_solution, None, rmp_node.z_vals, lp_iters, rmp_obj_val  # no need to branch
         else:
-            return has_integer_solution, branch_candidates, rmp_node.z_vals, lp_iters, rmp_obj_val  # needs branch
+            return is_integer_solution, branch_candidates, rmp_node.z_vals, lp_iters, rmp_obj_val  # needs branch
 
     def construct_final_route(self):
         solution = []

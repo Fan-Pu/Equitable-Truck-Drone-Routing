@@ -96,9 +96,6 @@ class LabelForward:
         _node_j = node_j.replace("_prime", "")
         arc = (node_i, node_j)
 
-        if self.path == ['Source', 'H1', 'C1_prime'] and node_j == 'C5_prime' and node_info.id == 3:
-            sdas = 0
-
         # check branch arcs in transformed network
         if arc in node_info.disabled_arcs_trans:
             return False
@@ -144,10 +141,16 @@ class LabelForward:
         if arc in self.net.arcs_ori and arc in node_info.disabled_arcs_trucks:
             return False
 
-        # check AK+
+        if self.path == ['Source', 'H1', 'C1_prime', 'C6_prime'] and node_j == 'Sink' and node_info.id == 3:
+            sdas = 0
+
+        # check completion
         if node_j == self.net.depot_sink:
             for i, _ in node_info.must_visit_arcs_trucks:
                 if i not in self.path:
+                    return False
+            for i, n in node_info.must_visit_arcs_drones:
+                if i not in self.path or n + "_prime" not in self.path:
                     return False
 
         # check AD+

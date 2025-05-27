@@ -131,6 +131,18 @@ class RMPNode:
         # reduced_cost, hashable_path, element_path, where = label_setting.solve(farkas, node_info)
         GeneralHelper.label_forward_num += 1
 
+        if element_path is not None:
+            route_key, new_route = hashable_path_to_route(hashable_path, len(bp.route_key_id_pairs),
+                                                          GeneralHelper.transformed_net)
+            # check feasibility
+            for i, j in node_info.disabled_arcs_trucks | node_info.disabled_arcs_drones | node_info.disabled_arcs_trans:
+                if if_route_travel_arc(new_route, i, j, GeneralHelper.net):
+                    sdas = 0
+            for i, j in (node_info.must_visit_arcs_trucks | node_info.must_visit_arcs_drones
+                         | node_info.must_visit_arcs_trans):
+                if not if_route_travel_arc(new_route, i, j, GeneralHelper.net):
+                    sda = 0
+
         # find a new route
         if reduced_cost + close_tolerance < 0:
             route_key, new_route = hashable_path_to_route(hashable_path, len(bp.route_key_id_pairs),

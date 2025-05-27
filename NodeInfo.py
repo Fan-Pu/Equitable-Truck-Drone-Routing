@@ -5,9 +5,10 @@ from collections import defaultdict
 
 
 class NodeInfo:
-    def __init__(self, parent_id, self_id):
+    def __init__(self, parent_id, self_id, depth):
         self.parent_id = parent_id
         self.id = self_id
+        self.depth = depth
         self.columns = list()  # value: the keys of routes
         self.column_elementary_paths = {}  # key: route_key; value: the elementary paths for each column
         self.column_customer_visits = defaultdict(set)  # key: route_key; value: the customers visited by the route
