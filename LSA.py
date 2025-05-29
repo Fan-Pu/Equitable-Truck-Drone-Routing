@@ -7,9 +7,10 @@ from LabelForward import LabelForward
 import itertools
 from collections import OrderedDict, defaultdict
 from NodeInfo import NodeInfo
+import cProfile, pstats, io
 
 
-class BiDirectionalLabelSetting:
+class LabelSetting:
     def __init__(self, duals):
         random.seed(seed)
         self.net = GeneralHelper.transformed_net
@@ -29,6 +30,9 @@ class BiDirectionalLabelSetting:
         _, _, label = self.forward_label_queue.get()
         # check extending
         available_extensions = SortedSet(label.alternative_extensions)
+        # print(
+        #     f"current path: {label.path}, feasible extension: {list(available_extensions)}, "
+        #     f"queue size: {self.forward_label_queue.qsize()}")
         for node_j in available_extensions:
             label.alternative_extensions.remove(node_j)
 
@@ -117,9 +121,9 @@ class BiDirectionalLabelSetting:
             # forward only
             while self.best_solution[0] + close_tolerance > 0 and self.forward_label_queue.qsize() > 0:
                 self.forward_labeling_one_step(farkas, node_info)
-            else:
-                self.print_runtime_info(s_time, node_info)
-                return self.best_solution
+                
+            self.print_runtime_info(s_time, node_info)
+            return self.best_solution
 
     def dominance_check(self, label_j, other_labels, farkas):
         """Check if label_j dominates any other label in a parallelized manner."""
@@ -164,6 +168,11 @@ class BiDirectionalLabelSetting:
             sync_times.append(sync_time)
             wait_times.append(wait_time)
             runtime = time.time() - start_time
+
+            if runtime > GeneralHelper.max_runtime:
+                GeneralHelper.max_runtime = runtime
+                GeneralHelper.which_node_col_num = len(node_info.columns)
+
             if runtime > GeneralHelper.max_time:
                 GeneralHelper.max_time = runtime
                 GeneralHelper.max_id = node_info.id

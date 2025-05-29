@@ -35,18 +35,26 @@ class RMPNode:
             n_name = GeneralHelper.net.customers[i]
             z_vars = [self.z_dict[route_key] for route_key in self.z_dict.keys() if
                       if_route_visit_node(bp.route_dict[route_key], n_name)]
-            self.constraints.append(
-                self.model.addConstr(gp.quicksum(z_vars) == 1, name=f"visit_customer_{i}")
-            )
+            # set covering
+            if node_info.id == 1:
+                self.constraints.append(
+                    self.model.addConstr(gp.quicksum(z_vars) >= 1, name=f"visit_customer_{i}")
+                )
+            else:
+                self.constraints.append(
+                    self.model.addConstr(gp.quicksum(z_vars) == 1, name=f"visit_customer_{i}")
+                )
+            # self.constraints.append(
+            #     self.model.addConstr(gp.quicksum(z_vars) == 1, name=f"visit_customer_{i}")
+            # )
         # vehicle fleet branching
         self.vehicle_fleet_branch_ub_cons = self.model.addConstr(
             gp.quicksum(self.z_dict.values()) <= node_info.vehicle_fleet_branch_ub, name=f"truck_fleet_ub")
         self.vehicle_fleet_branch_lb_cons = self.model.addConstr(
             gp.quicksum(self.z_dict.values()) >= node_info.vehicle_fleet_branch_lb, name=f"truck_fleet_lb")
         # SR inequalities
-        for triple, route_keys in node_info.SR_infos.items():
-            if len(route_keys) == 0:
-                continue
+        for triple in node_info.added_SR_keys:
+            route_keys = node_info.SR_infos[triple]
             if len(self.SR_inequalities) >= SR_num:
                 break
             lhs = gp.quicksum([self.z_dict[key] for key in route_keys])
@@ -56,8 +64,9 @@ class RMPNode:
         self.model.setParam('OutputFlag', 0)
         self.model.setParam('InfUnbdInfo', 1)
         self.model.setParam('DualReductions', 0)
-        # self.model.setParam('Presolve', 0)
+        self.model.setParam('Presolve', 0)
         self.model.update()
+        self.model.write("node.lp")
         self.model.optimize()
         self.status = self.model.status
         if self.status == GRB.OPTIMAL:
@@ -70,32 +79,33 @@ class RMPNode:
             raise Exception("invalid RMP status")
 
     def _get_duals(self):
+        digit_num = 4
         # get dual
         if self.status == GRB.OPTIMAL:
             self.duals = {"mu": []}
             for cons in self.constraints:
-                self.duals["mu"].append(round(cons.Pi, 2))
+                self.duals["mu"].append(round(cons.Pi, digit_num))
 
-            xi = round(self.vehicle_fleet_branch_lb_cons.Pi, 2)
-            kappa = round(self.vehicle_fleet_branch_ub_cons.Pi, 2)
+            xi = round(self.vehicle_fleet_branch_lb_cons.Pi, digit_num)
+            kappa = round(self.vehicle_fleet_branch_ub_cons.Pi, digit_num)
             self.duals["constant_term"] = -xi - kappa
 
             # for SR inequalities
             for triple, cons in self.SR_inequalities.items():
-                self.duals[triple] = round(cons.Pi, 2)
+                self.duals[triple] = round(cons.Pi, digit_num)
         # get farkas dual
         elif self.status == GRB.INFEASIBLE:
             self.duals = {"mu": []}
             for cons in self.constraints:
-                self.duals["mu"].append(round(-cons.FarkasDual, 2))
+                self.duals["mu"].append(round(-cons.FarkasDual, digit_num))
 
-            xi = round(-self.vehicle_fleet_branch_lb_cons.FarkasDual, 2)
-            kappa = round(-self.vehicle_fleet_branch_ub_cons.FarkasDual, 2)
+            xi = round(-self.vehicle_fleet_branch_lb_cons.FarkasDual, digit_num)
+            kappa = round(-self.vehicle_fleet_branch_ub_cons.FarkasDual, digit_num)
             self.duals["constant_term"] = -xi - kappa
 
             # for SR inequalities
             for triple, cons in self.SR_inequalities.items():
-                self.duals[triple] = round(cons.FarkasDual, 2)
+                self.duals[triple] = round(-cons.FarkasDual, digit_num)
 
     def run_pricer(self, node_info: NodeInfo):
         """
@@ -105,38 +115,23 @@ class RMPNode:
         node_id = node_info.id
         farkas = True if self.status == GRB.INFEASIBLE else False
         # bi-directional label setting
-        label_setting = BiDirectionalLabelSetting(self.duals)
+        label_setting = LabelSetting(self.duals)
 
-        deb = True
-        if len(node_info.columns) == 999:
-            try:
-                pr = cProfile.Profile()
-                pr.enable()
-                deb = True
-                reduced_cost, hashable_path, element_path, where = label_setting.solve(farkas, node_info)
-            finally:
-                if deb:
-                    pr.disable()
-                    s = io.StringIO()
-                    stats = pstats.Stats(pr, stream=s).sort_stats('cumtime')
-
-                    stats.print_stats(10)
-                    # now dump everything at once
-                    print(s.getvalue())
-
-                    dsads = 0
-        else:
-            reduced_cost, hashable_path, element_path = label_setting.solve(farkas, node_info)
+        reduced_cost, hashable_path, element_path = label_setting.solve(farkas, node_info)
+        if node_info.id == 1:
+            test_route_list.append(element_path)
 
         # reduced_cost, hashable_path, element_path, where = label_setting.solve(farkas, node_info)
-        GeneralHelper.label_forward_num += 1
 
         if element_path is not None:
             route_key, new_route = hashable_path_to_route(hashable_path, len(bp.route_key_id_pairs),
                                                           GeneralHelper.transformed_net)
             # check feasibility
-            for i, j in node_info.disabled_arcs_trucks | node_info.disabled_arcs_drones | node_info.disabled_arcs_trans:
+            for i, j in node_info.disabled_arcs_trucks:
                 if if_route_travel_arc(new_route, i, j, GeneralHelper.net):
+                    sdas = 0
+            for i, j in node_info.disabled_arcs_drones:
+                if if_route_travel_arc(new_route, i, j + "_prime", GeneralHelper.net):
                     sdas = 0
             for i, j in (node_info.must_visit_arcs_trucks | node_info.must_visit_arcs_drones
                          | node_info.must_visit_arcs_trans):
@@ -202,17 +197,34 @@ class RMPNode:
         self.model.update()
 
         # for new SR inequalities
-        if len(self.SR_inequalities) < SR_num:
-            potential_triples = sorted(set(GeneralHelper.transformed_net.PI) - set(self.SR_inequalities.keys()))
-            for triple in potential_triples:
-                covered_customers = self.node_info.column_customer_visits[route_key]
-                if len(covered_customers & set(triple)) >= 2:
-                    # add a new constraint
-                    self.SR_inequalities[triple] = self.model.addConstr(newVar <= 1, name=f"SR_{triple}")
-                    self.node_info.SR_infos[triple].append(route_key)
-                    self.node_info.column_in_SR_triples[route_key].append(triple)
-                if len(self.SR_inequalities) >= SR_num:
-                    break
+        # new_add_cons = 0
+        # if len(self.SR_inequalities) < SR_num:
+        #     potential_triples = sorted(set(GeneralHelper.transformed_net.PI) - set(self.SR_inequalities.keys()))
+        #     for triple in potential_triples:
+        #         covered_customers = self.node_info.column_customer_visits[route_key]
+        #         if len(covered_customers & set(triple)) >= 2:
+        #             # add a new constraint
+        #             new_add_cons += 1
+        #             self.SR_inequalities[triple] = self.model.addConstr(newVar <= 1, name=f"SR_{triple}")
+        #             self.node_info.SR_infos[triple].append(route_key)
+        #             self.node_info.added_SR_keys.add(triple)
+        #             self.node_info.column_in_SR_triples[route_key].append(triple)
+        #         if len(self.SR_inequalities) >= SR_num:
+        #             break
+
+        new_add_cons = 0
+        potential_triples = sorted(set(GeneralHelper.transformed_net.PI) - set(self.SR_inequalities.keys()))
+        for triple in potential_triples:
+            if new_add_cons >= SR_num_each_run or len(self.node_info.added_SR_keys) >= GeneralHelper.SR_num:
+                break
+            covered_customers = self.node_info.column_customer_visits[route_key]
+            if len(covered_customers & set(triple)) >= 2:
+                # add a new constraint
+                new_add_cons += 1
+                self.SR_inequalities[triple] = self.model.addConstr(newVar <= 1, name=f"SR_{triple}")
+                self.node_info.SR_infos[triple].append(route_key)
+                self.node_info.added_SR_keys.add(triple)
+                self.node_info.column_in_SR_triples[route_key].append(triple)
 
         # update node_infos
         self.z_dict[route_key] = newVar

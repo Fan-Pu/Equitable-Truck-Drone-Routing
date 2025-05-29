@@ -7,6 +7,11 @@ from Network import Network
 from TransformedNetwork import TransformedNetwork
 from sortedcontainers import SortedSet
 
+M = 10000
+close_tolerance = 0.001
+# cost_scale = 0.01
+cost_scale = 1
+
 # test_path = ['Source', 'H1', 'C1_prime', 'C3_prime', 'Sink']
 test_path = (tuple(['Sink']), frozenset(
     {
@@ -40,19 +45,25 @@ test_path_list = [
     ))
 ]
 
+test_route_list = []
+
 columns_list = []
 
-merge_num = 0
+SR_num = 20  # the maximum number of SR inequalities
 
-final_model = None
+SR_num_each_run = 2
 
-SR_num = 0
+node_lp_trace = []
+
+max_runtime = 0
+which_node_col_num = 0
 
 max_time = 0
 max_num = 0
 max_id = 0
 
 allow_extend_checks_passed = 0
+
 # test_path_list = [
 #     (tuple(['Source', 'C2', 'Sink']), frozenset(
 #         {}.items()
@@ -88,12 +99,7 @@ allow_extend_checks_passed = 0
 #     ))
 # ]
 
-test_node_ids = []
-
-test_sols = []
-
 forward_dominance_num = 0
-label_forward_num = 0
 
 lp = LineProfiler()
 
@@ -123,7 +129,7 @@ truck_max_weight = 100
 drone_endurance = 150
 
 # for sub-tour elimination
-epsilon = 1
+epsilon = 0.1
 
 # # solved by forward labeling 559
 # num_customers = 4
@@ -131,69 +137,60 @@ epsilon = 1
 # num_trucks = 3
 # num_drones_per_truck = 2
 
-# # solved by forward labeling and backward labeling 861
+# # solved by forward labeling 559
+# num_customers = 7
+# num_hubs = 2
+# num_trucks = 7
+# num_drones_per_truck = 2
+
+
+# # solved by LSA 861
 # num_customers = 8
 # num_hubs = 2
 # num_trucks = 5
 # num_drones_per_truck = 3
 
-# solved by forward labeling 12061
+
+# # solved by forward labeling 1087
+# num_customers = 10
+# num_hubs = 3
+# num_trucks = 10
+# num_drones_per_truck = 3
+
+
+# solved by forward labeling 1498
 num_customers = 10
 num_hubs = 3
 num_trucks = 5
 num_drones_per_truck = 3
 
-# # solved by forward labeling 12061
-# num_customers = 10
-# num_hubs = 3
-# num_trucks = 5
-# num_drones_per_truck = 3
 
-# # solved by forward labeling and backward labeling 6565
+# # solved by LSA 784
 # num_customers = 8
 # num_hubs = 3
 # num_trucks = 5
 # num_drones_per_truck = 3
 
-# # solved by forward labeling and backward labeling 6080
+
+# # solved by LSA 798
 # num_customers = 8
 # num_hubs = 1
 # num_trucks = 8
 # num_drones_per_truck = 3
 
-# # solved by forward labeling 11785
+
+# # solved by forward labeling 1489
 # num_customers = 15
 # num_hubs = 3
 # num_trucks = 8
 # num_drones_per_truck = 4
 
-# # solved by forward labeling 11683
+
+# # solved by forward labeling 1396
 # num_customers = 15
 # num_hubs = 4
 # num_trucks = 7
 # num_drones_per_truck = 3
-
-# route_list = [{'id': 4, 'truck': ['Source', 'C5', 'Sink'], 'drone': [], 'launches': [], 'cost': 550},
-#               {'id': 6, 'truck': ['Source', 'C7', 'Sink'], 'drone': [], 'launches': [], 'cost': 745},
-#               {'id': 47, 'truck': ['Source', 'C2', 'C9', 'Sink'], 'drone': [], 'launches': [], 'cost': 1586}]
-
-node_ids = set()
-node_depth = set()
-local_estimates = {}
-node_dict = {}
-node_visit_list = []
-
-last_node_vars = None
-last_node_vals = None
-
-M = 10000
-
-# cost_scale = 0.01
-cost_scale = 1
-
-BSP_LB = 0  # lower bound of BSP
-
-close_tolerance = 0.001
 
 
 def update_arc_infos(location, term, travel_time, is_truck, truck_travel_times, truck_out_arcs, truck_in_arcs,
@@ -376,24 +373,6 @@ def is_subsequence(sub, full):
     return False
 
 
-def is_sublist_ordered(sub, main):
-    return bool(re.search(r'\b' + r', '.join(map(str, sub)) + r'\b', ', '.join(map(str, main))))
-
-
-def get_latest_hub(network, path):
-    """
-    given a path, return the latest arrived hub
-    """
-    result = None
-    idx = -1
-    for node in reversed(path):
-        if node in network.hubs:
-            result = node.replace("_prime", "")
-            idx = path.index(node)
-            break
-    return result, idx
-
-
 def get_arrive_time(arrival_time, node_i, node_j, last_hub, sync_time, wait_time, network: TransformedNetwork):
     """
     return the arrival time at node_j
@@ -414,65 +393,6 @@ def get_arrive_time(arrival_time, node_i, node_j, last_hub, sync_time, wait_time
         else:  # arcs_SC'
             result = sync_time + network.travel_times[arc]
     return result
-
-
-def elementary_path_to_route(path, idx, original_net, trans_net):
-    """
-    convert the elementary path derived from LSA to path stored in solution pool
-    """
-    truck_route = []
-    launches = []
-    drone_route = []
-    for i in range(len(path) - 1):
-        j = i + 1
-        node_i = path[i]
-        node_j = path[j]
-        arc = (node_i, node_j)
-        if node_i == original_net.depot_source:
-            truck_route.append(node_i)
-        # black arc
-        if arc in trans_net.arcs_1:
-            truck_route.append(node_j)
-        # blue arc
-        elif arc in trans_net.arcs_2:
-            launches.append(node_i)
-            drone_route.append(set())
-        # purple arc
-        elif arc in trans_net.arcs_5:
-            truck_route.append(node_j)
-        # orange and green arc
-        else:
-            drone_route[-1].add(node_j.replace("_prime", ""))
-    route_key = "-".join(path)
-
-    # calculate the route cost
-    sync_time = 0
-    arrival_time = 0
-    wait_time = 0
-    cost = 0
-    last_hub = None
-    for j in range(1, len(path)):
-        node_pre = path[j - 1]
-        node_j = path[j]
-        # update arrival time
-        arrival_time = get_arrive_time(arrival_time, node_pre, node_j, last_hub, sync_time, wait_time, trans_net)
-        # update sync time
-        if node_j in trans_net.hubs:
-            sync_time = arrival_time
-            last_hub = node_j.replace("_prime", "")
-        # update wait time
-        if (node_pre, node_j) in trans_net.arcs_3 or (node_pre, node_j) in trans_net.arcs_4:
-            wait_time = max(wait_time, arrival_time - sync_time)
-        else:
-            wait_time = 0
-        # update cost
-        if node_j in trans_net.customers:
-            cost += (arrival_time - trans_net.a_lb[node_j]) ** 2
-        elif node_j == trans_net.depot_sink:
-            cost += arrival_time
-
-    route = {'id': idx, 'truck': truck_route, 'drone': drone_route, 'launches': launches, 'cost': cost}
-    return route_key, route
 
 
 def hashable_path_to_route(path, idx, trans_net):
@@ -637,22 +557,6 @@ def get_route_customer_visits(route):
     return result
 
 
-def is_route_subset(route_1, route_2):
-    """
-    check whether route_2 is subset of route_1
-    """
-    route_truck_1, route_drone_1 = route_1
-    route_truck_2, route_drone_2 = route_2
-    route_drone_1 = {k: set(v) for k, v in route_drone_1}
-    route_drone_2 = {k: set(v) for k, v in route_drone_2}
-    if not set(route_truck_2).issubset(set(route_truck_1)):
-        return False
-    for key, visit_set in route_drone_2.items():
-        if key not in route_drone_1.keys() or route_drone_1[key] != visit_set:
-            return False
-    return True
-
-
 def if_route_travel_arc(route, i, j, original_net):
     """
     check whether the given route travels the arc (i,j)
@@ -664,17 +568,14 @@ def if_route_travel_arc(route, i, j, original_net):
     """
     if (i, j) in zip(route['truck'], route['truck'][1:]):
         return True
-    elif i in original_net.hubs and i in route['drone'].keys() and j + "_prime" in route['drone'][i]:
+    elif i in original_net.hubs and i in route['drone'].keys() and j in route['drone'][i]:
         return True
     return False
 
 
 def if_route_visit_node(route, i):
     """
-    check whether a route visit the given arc
-    :param route:
-    :param i: the node name from the original network
-    :return:
+    check whether a route visit the given node, customer and customer' are considered the same
     """
 
     if i in route['truck']:
@@ -686,6 +587,10 @@ def if_route_visit_node(route, i):
     return False
 
 
-def is_arc_included_in_path(path: list, arc):
+def if_path_travel_arc(path: list, arc):
+    """
+    given an elementary path, check whether it travels the arc
+    """
+
     i, j = arc
     return any(x == i and y == j for x, y in zip(path, path[1:]))

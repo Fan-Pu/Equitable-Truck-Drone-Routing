@@ -17,6 +17,7 @@ class NodeInfo:
         # SR inequalities
         self.SR_infos = {customer_triple: [] for customer_triple in
                          GeneralHelper.transformed_net.PI}  # value: column keys
+        self.added_SR_keys = set()  # the keys of SR inequalities that has been added to current RMP
         self.column_in_SR_triples = defaultdict(list)  # key: column_key; value: involved SR inequality keys
         # branching constraints
         self.child_ids = []
@@ -37,6 +38,7 @@ class NodeInfo:
         self.vehicle_fleet_branch_lb = parent.vehicle_fleet_branch_lb
         self.vehicle_fleet_branch_ub = parent.vehicle_fleet_branch_ub
         self.SR_infos = copy.deepcopy(parent.SR_infos)
+        self.added_SR_keys = parent.added_SR_keys.copy()
         self.column_in_SR_triples = copy.deepcopy(parent.column_in_SR_triples)
         self.disabled_arcs_trucks = parent.disabled_arcs_trucks.copy()
         self.disabled_arcs_drones = parent.disabled_arcs_drones.copy()
@@ -48,7 +50,10 @@ class NodeInfo:
 
     def init_SR_infos(self):
         for triple in GeneralHelper.transformed_net.PI:
+            if len(self.added_SR_keys) >= GeneralHelper.SR_num:
+                break
             for route_key, covered_customer in self.column_customer_visits.items():
                 if len(covered_customer & set(triple)) >= 2:
                     self.SR_infos[triple].append(route_key)
+                    self.added_SR_keys.add(triple)
                     self.column_in_SR_triples[route_key].append(triple)

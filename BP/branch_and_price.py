@@ -100,16 +100,30 @@ class BranchAndPrice:
                         if self.node_solutions[right_node_id][-1] is not None:
                             self.node_lp_objs[right_node_id] = self.node_solutions[right_node_id][-1]
                         # put child nodes into the queue
-                        self.branch_queue.put(((node_infos[left_node_id].depth, left_node_id), left_node_id))
-                        self.branch_queue.put(((node_infos[right_node_id].depth, right_node_id), right_node_id))
+
+                        # widest
+                        # self.branch_queue.put(((node_infos[left_node_id].depth, left_node_id), left_node_id))
+                        # self.branch_queue.put(((node_infos[right_node_id].depth, right_node_id), right_node_id))
+
+                        # best-first
+                        self.branch_queue.put(((self.node_solutions[left_node_id][-1], left_node_id), left_node_id))
+                        self.branch_queue.put(((self.node_solutions[right_node_id][-1], right_node_id), right_node_id))
+
+                        # deepest
+                        # self.branch_queue.put(((-node_infos[left_node_id].depth, left_node_id), left_node_id))
+                        # self.branch_queue.put(((-node_infos[right_node_id].depth, right_node_id), right_node_id))
+
                         # update global lower bound
-                        self.global_lower_bound = round(min(self.node_lp_objs.values()), 2)
+                        best_id, best_lb = min(self.node_lp_objs.items(), key=lambda item: item[1])
+                        # best_lb = round(min(self.node_lp_objs.values()), 2)
+                        if best_lb > self.global_lower_bound:
+                            self.global_lower_bound = best_lb
+                            GeneralHelper.node_lp_trace.append((best_id, best_lb))
+                        # self.global_lower_bound = round(min(self.node_lp_objs.values()), 2)
                 else:  # integer solution
                     if lp_obj_val < self.global_upper_bound:
                         self.global_upper_bound = lp_obj_val
                         self.best_solution_node = RMP_nodes[node_id]
-                    if lp_obj_val == 1498:
-                        sdas = 0
 
                 # remove the current node lp info
                 del self.node_lp_objs[node_id]
@@ -138,6 +152,7 @@ class BranchAndPrice:
 
         # terminated
         final_solution, cost = self.construct_final_route()
+        print(f"total nodes: {len(node_infos)}")
 
         return time.time() - start_time, final_solution, cost
 
@@ -195,38 +210,31 @@ class BranchAndPrice:
                         for launch_hub, visits in drone_path:
                             if launch_hub == node_i:
                                 for visit in visits:
-                                    drone_arc = (launch_hub, visit.replace("_prime", ""))
+                                    drone_arc = (launch_hub, visit)
                                     if drone_arc in drone_arc_flows.keys():
                                         drone_arc_flows[drone_arc] += flow_num
                                         arc_travel_column_keys[drone_arc].add(column_key)
                                 break
             # sorted in descending order of the distance between the fractional flow to 0.5
-            truck_binary_flows = [(k, v) for k, v in truck_arc_flows.items() if 0 < v < 1 and not is_integer(v)]
-            drone_binary_flows = [(k, v) for k, v in drone_arc_flows.items() if 0 < v < 1 and not is_integer(v)]
+            truck_binary_flows = [(k, v) for k, v in truck_arc_flows.items() if
+                                  0 < v < 1 and not is_integer(v) and k not in current_node.must_visit_arcs_trucks]
+            drone_binary_flows = [(k, v) for k, v in drone_arc_flows.items() if
+                                  0 < v < 1 and not is_integer(v) and k not in current_node.must_visit_arcs_drones]
             # branch on the binary flow (original network)
             arc = flow = where = None
-            # we prioritize branching on drone flows
-            if len(drone_binary_flows) > 0:
-                arc, flow = min(drone_binary_flows, key=lambda x: abs(x[1] - 0.5))
-                where = 'drone'
-            elif len(truck_binary_flows) > 0:
+            # we prioritize branching on truck flows
+            if len(truck_binary_flows) > 0:
                 arc, flow = min(truck_binary_flows, key=lambda x: abs(x[1] - 0.5))
                 where = 'truck'
-
-            # if len(truck_binary_flows) > 0:
-            #     arc, flow = min(truck_binary_flows, key=lambda x: abs(x[1] - 0.5))
-            #     where = 'truck'
-            # elif len(drone_binary_flows) > 0:
-            #     arc, flow = min(drone_binary_flows, key=lambda x: abs(x[1] - 0.5))
-            #     where = 'drone'
+            elif len(drone_binary_flows) > 0:
+                arc, flow = min(drone_binary_flows, key=lambda x: abs(x[1] - 0.5))
+                where = 'drone'
 
             # branch on original network
             if arc is not None and flow is not None:
+                # if False:
                 print(f"branch on {where}")
                 node_i, node_j = arc
-
-                if current_node.id == 2:
-                    sdas = 0
 
                 # the arcs disabled in the original network
                 new_disabled_arcs_left = set()
@@ -257,7 +265,7 @@ class BranchAndPrice:
                     for node_pre in trans_net.in_arcs[node_j]:
                         # disable the entrance from any other hub except node_i
                         if node_pre != node_i and node_pre in trans_net.hubs:
-                            node_right.disabled_arcs_trans.add((node_pre, node_j + "_prime"))
+                            node_right.disabled_arcs_trans.add((node_pre, node_j))
 
                     # for node_pre in ori_net.truck_in_arcs[node_j]:
                     #     # disable the entrance from any other hub except node_i
@@ -299,6 +307,8 @@ class BranchAndPrice:
                     # check SR infos
                     for triple in node_left.column_in_SR_triples[column_key]:
                         node_left.SR_infos[triple].remove(column_key)
+                        if node_left.SR_infos[triple] == 0:
+                            node_left.added_SR_keys.remove(triple)
                     node_left.column_in_SR_triples[column_key].clear()
                 for column_key in remove_col_keys_right:
                     node_right.columns.remove(column_key)
@@ -307,6 +317,8 @@ class BranchAndPrice:
                     # check SR infos
                     for triple in node_right.column_in_SR_triples[column_key]:
                         node_right.SR_infos[triple].remove(column_key)
+                        if node_right.SR_infos[triple] == 0:
+                            node_right.added_SR_keys.remove(triple)
                     node_right.column_in_SR_triples[column_key].clear()
             # branch on the transformed network
             else:
@@ -326,7 +338,8 @@ class BranchAndPrice:
                         if arc in arc_flows.keys():
                             arc_flows[arc] += flow_num
                             arc_travel_column_keys[arc].add(column_key)
-                binary_flows = [(k, v) for k, v in arc_flows.items() if 0 < v < 1 and not is_integer(v)]
+                binary_flows = [(k, v) for k, v in arc_flows.items() if
+                                0 < v < 1 and not is_integer(v) and k not in current_node.must_visit_arcs_trans]
                 # branch on the binary flow (original network)
                 if len(binary_flows) == 0:
                     raise Exception("wrong branching case")
@@ -343,15 +356,15 @@ class BranchAndPrice:
 
                 # up branch (right) must travel arc
                 node_right.must_visit_arcs_trans.add(arc)
-                for node_pre in trans_net.in_arcs[node_j]:
-                    if node_pre != node_i:
-                        disabled_arc = (node_pre, node_j)
-                        node_right.disabled_arcs_trans.add(disabled_arc)
-                        new_disabled_arcs_right.add(disabled_arc)
                 for node_next in trans_net.out_arcs[node_i]:
                     # must immediately visit node_j if node_i is visited
                     if node_next != node_j:
                         disabled_arc = (node_i, node_next)
+                        node_right.disabled_arcs_trans.add(disabled_arc)
+                        new_disabled_arcs_right.add(disabled_arc)
+                for node_pre in trans_net.in_arcs[node_j]:
+                    if node_pre != node_i:
+                        disabled_arc = (node_pre, node_j)
                         node_right.disabled_arcs_trans.add(disabled_arc)
                         new_disabled_arcs_right.add(disabled_arc)
 
@@ -360,23 +373,19 @@ class BranchAndPrice:
                 remove_col_keys_right = set()
                 for column_key in current_node.columns:
                     element_path = current_node.column_elementary_paths[column_key]
-                    left_break = right_break = False
-                    for i in range(len(element_path) - 1):
-                        if left_break and right_break:
-                            break
-                        node_i = element_path[i]
-                        node_j = element_path[i + 1]
-                        temp_arc = (node_i, node_j)  # truck arc
-                        if temp_arc in new_disabled_arcs_left and not left_break:
+
+                    for temp_arc in new_disabled_arcs_left:
+                        if if_path_travel_arc(element_path, temp_arc):
                             remove_col_keys_left.add(column_key)
-                            left_break = True
-                        if temp_arc in new_disabled_arcs_right and not right_break:
+                            break
+                    for temp_arc in new_disabled_arcs_right:
+                        if if_path_travel_arc(element_path, temp_arc):
                             remove_col_keys_right.add(column_key)
-                            right_break = True
+                            break
 
                 node_left.removed_columns_keys.update(remove_col_keys_left)
                 node_right.removed_columns_keys.update(remove_col_keys_right)
-                # remove the columns (fix their ub to 0), this does not introduce new constraints into the node
+                # remove the columns
                 for column_key in remove_col_keys_left:
                     node_left.columns.remove(column_key)
                     del node_left.column_elementary_paths[column_key]
@@ -384,6 +393,8 @@ class BranchAndPrice:
                     # check SR infos
                     for triple in node_left.column_in_SR_triples[column_key]:
                         node_left.SR_infos[triple].remove(column_key)
+                        if node_left.SR_infos[triple] == 0:
+                            node_left.added_SR_keys.remove(triple)
                     node_left.column_in_SR_triples[column_key].clear()
                 for column_key in remove_col_keys_right:
                     node_right.columns.remove(column_key)
@@ -392,12 +403,9 @@ class BranchAndPrice:
                     # check SR infos
                     for triple in node_right.column_in_SR_triples[column_key]:
                         node_right.SR_infos[triple].remove(column_key)
+                        if node_right.SR_infos[triple] == 0:
+                            node_right.added_SR_keys.remove(triple)
                     node_right.column_in_SR_triples[column_key].clear()
-        left_node_include_vector = []
-        right_node_include_vector = []
-        for path in test_path_list:
-            left_node_include_vector.append(path in node_left.columns)
-            right_node_include_vector.append(path in node_right.columns)
 
         return node_left_id, node_right_id
 

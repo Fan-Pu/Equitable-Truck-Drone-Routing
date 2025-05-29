@@ -141,17 +141,14 @@ class LabelForward:
         if arc in self.net.arcs_ori and arc in node_info.disabled_arcs_trucks:
             return False
 
-        if self.path == ['Source', 'H1', 'C1_prime', 'C6_prime'] and node_j == 'Sink' and node_info.id == 3:
-            sdas = 0
-
-        # check completion
-        if node_j == self.net.depot_sink:
-            for i, _ in node_info.must_visit_arcs_trucks:
-                if i not in self.path:
-                    return False
-            for i, n in node_info.must_visit_arcs_drones:
-                if i not in self.path or n + "_prime" not in self.path:
-                    return False
+        # # check completion
+        # if node_j == self.net.depot_sink:
+        #     for i, _ in node_info.must_visit_arcs_trucks:
+        #         if i not in self.path:
+        #             return False
+        #     for i, n in node_info.must_visit_arcs_drones:
+        #         if i not in self.path or n not in self.path:
+        #             return False
 
         # check AD+
         if arc in self.net.arcs_cpc:
@@ -159,19 +156,25 @@ class LabelForward:
             for s, n in node_info.must_visit_arcs_drones:
                 if s != self.latest_hub:
                     continue
-                if n + "_prime" not in self.path[hub_idx + 1:]:
+                if n not in self.path[hub_idx + 1:]:
                     return False
         elif arc in self.net.arcs_cpcp:
             for s, n in node_info.must_visit_arcs_drones:
                 if s == self.latest_hub:
                     continue
-                if n == _node_j:
+                if n == node_j:
                     return False
 
         # check AD-
-        if arc in self.net.arcs_scp and (node_i, _node_j) in node_info.disabled_arcs_drones:
+        if arc in self.net.arcs_scp and (node_i, node_j) in node_info.disabled_arcs_drones:
             return False
-        if arc in self.net.arcs_cpcp and (self.latest_hub, _node_j) in node_info.disabled_arcs_drones:
+        if arc in self.net.arcs_cpcp and (self.latest_hub, node_j) in node_info.disabled_arcs_drones:
+            return False
+
+        # check AK-
+        if arc in self.net.arcs_ori and arc in node_info.disabled_arcs_trucks:
+            return False
+        if arc in self.net.arcs_cpc and (self.latest_hub, node_j) in node_info.disabled_arcs_trucks:
             return False
 
         return True
@@ -195,7 +198,7 @@ class LabelForward:
             depth=self.depth + 1,
             drone_flights=self.drone_flights,
             truck_path=self.truck_path[:])
-        label_j.alternative_extensions = {node for node in self.net.out_arcs[node_j]}
+        label_j.alternative_extensions = {node for node in self.net.out_arcs[node_j] if node not in self.path}
         label_j.latest_hub = self.latest_hub
 
         # update path
@@ -232,10 +235,7 @@ class LabelForward:
 
         # update psi
         sum_nu = 0
-        for triple in node_info.SR_infos.keys():
-            # the SR inequality has not been appended to the RMP yet
-            if len(node_info.SR_infos[triple]) == 0:
-                continue
+        for triple in node_info.added_SR_keys:
             if node_j.replace("_prime", "") in set(triple):
                 label_j.psi_set[triple] += 1
                 if self.psi_set[triple] == 1 and label_j.psi_set[triple] == 2:
