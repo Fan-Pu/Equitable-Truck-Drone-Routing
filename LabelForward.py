@@ -246,11 +246,11 @@ class LabelForward:
             if node_j in self.net.customers:
                 _node_j = node_j.replace("_prime", "")
                 index = self.net.customers.index(_node_j)
-                label_j.cost += (label_j.arrival_time - self.net.a_lb[_node_j]) ** 2 - duals["mu"][index] - sum_nu
+                label_j.cost += cw * (label_j.arrival_time - self.net.a_lb[_node_j]) ** 2 - duals["mu"][index] - sum_nu
                 if node_j in self.net.customers_prime:
                     label_j.cost += drone_cost_per_flight
             elif node_j == self.net.depot_sink:
-                label_j.cost += label_j.arrival_time - sum_nu
+                label_j.cost += cw * label_j.arrival_time - sum_nu
             else:
                 label_j.cost += -sum_nu
         else:

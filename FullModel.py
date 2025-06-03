@@ -1,13 +1,9 @@
 import gurobipy as gp
 import matplotlib.cm as cm
-import matplotlib.pyplot as plt
 from gurobipy import GRB
 
 import GeneralHelper
 from GeneralHelper import *
-
-# for plot only
-node_size = 500
 
 
 class FullModel:
@@ -40,51 +36,6 @@ class FullModel:
         self.truck_travel_times = self.net.truck_travel_times
         self.demand_weights = self.net.demand_weights
         self.final_route = []
-
-    def visualize(self):
-        # pos = nx.spring_layout(self.truck_net, seed=self.seed)
-        pos = nx.circular_layout(self.net.truck_net)
-        fig, ax = plt.subplots()
-        plt.sca(ax)
-
-        # Color mapping: Different colors for depot, customers, and hubs
-        node_colors = []
-        for node in self.net.truck_net.nodes():
-            if node == self.depot_source or node == self.depot_sink:
-                node_colors.append('orange')  # Red for depot
-            elif node in self.customers:
-                node_colors.append('lightblue')  # Yellow for customers
-            elif node in self.hubs:
-                node_colors.append('lightgreen')  # Green for hubs
-            else:
-                node_colors.append('gray')  # Default color for others (if any)
-
-        # Draw the nodes
-        nx.draw_networkx_nodes(self.net.truck_net, pos, node_color=node_colors, node_size=node_size)
-        nx.draw_networkx_labels(self.net.truck_net, pos, font_size=10, font_weight='bold')
-
-        # Draw curved edges with varying curvature to avoid overlaps
-        edge_curvatures = [0.2, 0.4, -0.2, -0.4]  # Example curvatures
-        for i, (u, v) in enumerate(self.net.truck_net.edges()):
-            curvature = edge_curvatures[i % len(edge_curvatures)]  # Cycle through curvatures
-            nx.draw_networkx_edges(
-                self.net.truck_net, pos, edgelist=[(u, v)], edge_color='gray', arrowsize=15, width=1,
-                connectionstyle=f"arc3,rad={curvature}"
-            )
-
-        # Create custom labels for nodes
-        node_labels = {}
-        for node in self.net.truck_net.nodes():
-            if node in self.customers:
-                n = self.all_nodes_indices[node]
-                node_labels[node] = f"w:{self.demand_weights[n]:.2f}"
-
-        label_pos = {node: (x, y + 0.05) for node, (x, y) in pos.items()}  # Adjust 0.05 to control the offset
-        # Draw the node labels
-        nx.draw_networkx_labels(self.net.truck_net, label_pos, labels=node_labels, font_size=10)
-
-        plt.axis('off')  # Turn off the axis
-        plt.tight_layout()
 
     def solve(self):
         model = gp.Model("model")
@@ -128,10 +79,10 @@ class FullModel:
         obj_expr = 0
         for n_name in self.customers:
             n = self.all_nodes_indices[n_name]
-            obj_expr += (a_dict[n] - GeneralHelper.transformed_net.a_lb[n_name]) ** 2
+            obj_expr += cw * (a_dict[n] - GeneralHelper.transformed_net.a_lb[n_name]) ** 2
         for k in range(self.net.num_trucks):
             n = self.all_nodes_indices[self.depot_sink]
-            obj_expr += ak_dict[(n, k)]
+            obj_expr += cw * ak_dict[(n, k)]
         for k in range(self.net.num_trucks):
             for j_name in self.truck_out_arcs[self.depot_source]:
                 n, j = self.all_nodes_indices[self.depot_source], self.all_nodes_indices[j_name]
@@ -394,7 +345,7 @@ class FullModel:
                         model.addConstr(ad_dict[(j, d)] >= rhs, name=f"realized_and3_{cons_id}"))
                     cons_id += 1
 
-        # model.setParam(GRB.Param.TimeLimit, 1)
+        model.setParam(GRB.Param.TimeLimit, 1)
         model.update()
         model.write("full_model.lp")
         model.optimize()
@@ -411,7 +362,7 @@ class FullModel:
             print("No feasible solution found")
 
         # Retrieve the values
-        if model.Status == GRB.OPTIMAL or GRB.SUBOPTIMAL:
+        if model.Status == GRB.OPTIMAL or model.Status == GRB.SUBOPTIMAL:
             print(f"Objective value: {model.ObjVal}")
             self.x_values = {(i, j, k): var.X for (i, j, k), var in x_dict.items()}
             self.y_values = {(i, j, d): var.X for (i, j, d), var in y_dict.items()}
@@ -470,7 +421,7 @@ class FullModel:
         fig, ax = plt.subplots()
         plt.sca(ax)
         plt.title("truck routes")
-        nx.draw_networkx_nodes(self.net.truck_net, pos, node_color=node_colors, node_size=node_size)
+        nx.draw_networkx_nodes(self.net.truck_net, pos, node_color=node_colors, node_size=500)
         nx.draw_networkx_labels(self.net.truck_net, pos, font_size=10, font_weight='bold')
 
         truck_edges = {k: [] for k in range(self.net.num_trucks)}

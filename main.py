@@ -8,21 +8,13 @@ from BP.branch_and_price import BranchAndPrice
 
 if __name__ == '__main__':
     # data preparation
-    create_random_truck_drone_network()
+    create_original_network()
     transform_network()
+    visualize_network()
 
     test_case = FullModel()
-    test_case.visualize()
 
-    # plt.show()
     full_obj_val, full_solve_time, gap = test_case.solve()
-
-    # test_case.visualize_routes()
-    # plt.show()
-
-    # rmp = RMP()
-    # BP_solve_time = rmp.BP()
-    # solution, cost = rmp.construct_final_route()
 
     BP = BranchAndPrice()
     BP_solve_time, BP_solution, BP_cost = BP.solve()

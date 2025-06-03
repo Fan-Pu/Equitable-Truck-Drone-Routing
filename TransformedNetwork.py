@@ -161,7 +161,7 @@ class TransformedNetwork:
 
         start_node = self.depot_source
 
-        # Priority queue (max-heap), elements are (f(n), cur_node, visited_nodes, g(n))
+        # Priority queue (max-heap), elements are (f(n), cur_node, visited_nodes, g(n), last_hub)
         Q = [(self.heuristic(start_node), start_node, [start_node], 0, 0, 0)]
         heapq.heapify(Q)
 
@@ -184,11 +184,17 @@ class TransformedNetwork:
                     w_j = self.travel_times[node, j]
                     a_j = s_j + w_j
                 elif (node, j) in self.arcs_cpcp:
-                    w_j = max(self.travel_times[node, j], w_n)
+                    if isinstance(self.travel_times[node, j], dict):
+                        w_j = max(max(self.travel_times[node, j].values()), w_n)
+                    else:
+                        w_j = max(self.travel_times[node, j], w_n)
                     a_j = s_j + w_j
                 else:
                     w_j = 0
-                    a_j = a_n + self.travel_times[node, j]
+                    if isinstance(self.travel_times[node, j], dict):
+                        a_j = a_n + min(self.travel_times[node, j].values())
+                    else:
+                        a_j = a_n + self.travel_times[node, j]
 
                 f_j = a_j + self.heuristic(j)
 
@@ -206,6 +212,12 @@ class TransformedNetwork:
         Heuristic function: Returns the minimum travel time of an outgoing edge.
         """
         if len(self.out_arcs[node]) > 0:
-            return min([self.travel_times[(node, node_j)] for node_j in self.out_arcs[node]])
+            travel_times = []
+            for node_j in self.out_arcs[node]:
+                if isinstance(self.travel_times[(node, node_j)], dict):
+                    travel_times.append(min(self.travel_times[(node, node_j)].values()))
+                else:
+                    travel_times.append(self.travel_times[(node, node_j)])
+            return min(travel_times)
         else:
             return 0

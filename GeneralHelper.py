@@ -1,3 +1,4 @@
+import math
 import random
 import re
 from line_profiler import LineProfiler
@@ -6,52 +7,26 @@ from collections import defaultdict
 from Network import Network
 from TransformedNetwork import TransformedNetwork
 from sortedcontainers import SortedSet
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.cluster import KMeans
 
 M = 10000
 close_tolerance = 0.001
 # cost_scale = 0.01
-cost_scale = 1
 
-# test_path = ['Source', 'H1', 'C1_prime', 'C3_prime', 'Sink']
-test_path = (tuple(['Sink']), frozenset(
-    {
+max_columns_num = 9900
 
-    }.items()
-))
+cw = 0.25
 
-# already added to node 3 but find it with negative reduced cost?
-test_comp_path = (tuple(['Source', 'H1', 'Sink']), frozenset(
-    {
-        'H1': frozenset({'C8_prime', 'C3_prime', 'C11_prime', 'C1_prime'})
-    }.items()
-))
-
-# test_path = ['Source', 'H1', 'H1_prime', 'C4_prime', 'Sink']
-# test_path = ['Source', 'C2', 'Sink']
-
-test_path_list = [
-    (tuple(['Source', 'C2', 'Sink']), frozenset(
-        {}.items()
-    )),
-    (tuple(['Source', 'H1', 'Sink']), frozenset(
-        {
-            'H1': frozenset({'C4_prime'})
-        }.items()
-    )),
-    (tuple(['Source', 'H1', 'Sink']), frozenset(
-        {
-            'H1': frozenset({'C1_prime', 'C3_prime'})
-        }.items()
-    ))
-]
+arc_gen_prob = 0.1  # the probability of generating an arc
 
 test_route_list = []
 
 columns_list = []
 
-SR_num = 20  # the maximum number of SR inequalities
-
-SR_num_each_run = 2
+SR_num = 0  # the maximum number of SR inequalities
+SR_num_each_run = 0
 
 node_lp_trace = []
 
@@ -64,41 +39,6 @@ max_id = 0
 
 allow_extend_checks_passed = 0
 
-# test_path_list = [
-#     (tuple(['Source', 'C2', 'Sink']), frozenset(
-#         {}.items()
-#     )),
-#     (tuple(['Source', 'C5', 'Sink']), frozenset(
-#         {}.items()
-#     )),
-#     (tuple(['Source', 'C9', 'C6', 'Sink']), frozenset(
-#         {}.items()
-#     )),
-#     (tuple(['Source', 'H2', 'Sink']), frozenset(
-#         {
-#             'H2': frozenset({'C1_prime', 'C4_prime', 'C8_prime'})
-#         }.items()
-#     )),
-#     (tuple(['Source', 'H2', 'Sink']), frozenset(
-#         {
-#             'H2': frozenset({'C3_prime', 'C7_prime', 'C10_prime'})
-#         }.items()
-#     ))
-# ]
-
-# test_path_list = [
-#     (tuple(['Source', 'H3', 'Sink']), frozenset(
-#         {
-#             'H3': frozenset({'C4_prime', 'C8_prime'})
-#         }.items()
-#     )),
-#     (tuple(['Source', 'H3', 'Sink']), frozenset(
-#         {
-#             'H3': frozenset({'C1_prime', 'C3_prime', 'C6_prime'})
-#         }.items()
-#     ))
-# ]
-
 forward_dominance_num = 0
 
 lp = LineProfiler()
@@ -108,89 +48,40 @@ seed = 2024
 net: Network = None  # the network object
 transformed_net: TransformedNetwork = None  # the transformed network object
 
+num_trucks = 2  # 2, 4, 6
+num_customers = 25  # 5, 25, 50
+
+custom_dist = "PS"  # customer distribution "PS", "PC", "mixed"
+
+area_side = 14  # coordinates in [0,14]×[0,14] ⇒ 200 km²
+
 # cost in dollars
-truck_cost = 100
-drone_cost_per_flight = 2
+truck_cost = 20
+drone_cost_per_flight = 6
 
-# drone travel time
-drone_min_t = 2
-drone_max_t = 8
-
-# truck travel time
-truck_min_t = 10
-truck_max_t = 50
+# travel time
+truck_speed = 40
+drone_speed = 40
 
 # parcel weights
-demand_weight_max = 10
-demand_weight_min = 1
+demand_weight_mean = 1
+demand_weight_std = 5
+demand_weight_min = 0.5
 
-# endurance
-truck_max_weight = 100
-drone_endurance = 150
+truck_max_weight = 450
+drone_max_weight = 2.3
+
+# flight endurance
+drone_endurance = 30
 
 # for sub-tour elimination
 epsilon = 0.1
 
-# # solved by forward labeling 559
-# num_customers = 4
-# num_hubs = 3
-# num_trucks = 3
-# num_drones_per_truck = 2
+num_drones_per_truck = 4
 
-# # solved by forward labeling 559
-# num_customers = 7
-# num_hubs = 2
-# num_trucks = 7
-# num_drones_per_truck = 2
+num_hubs = int(math.floor(num_customers / 5))
 
-
-# # solved by LSA 861
-# num_customers = 8
-# num_hubs = 2
-# num_trucks = 5
-# num_drones_per_truck = 3
-
-
-# # solved by forward labeling 1087
-# num_customers = 10
-# num_hubs = 3
-# num_trucks = 10
-# num_drones_per_truck = 3
-
-
-# solved by forward labeling 1498
-num_customers = 10
-num_hubs = 3
-num_trucks = 5
-num_drones_per_truck = 3
-
-
-# # solved by LSA 784
-# num_customers = 8
-# num_hubs = 3
-# num_trucks = 5
-# num_drones_per_truck = 3
-
-
-# # solved by LSA 798
-# num_customers = 8
-# num_hubs = 1
-# num_trucks = 8
-# num_drones_per_truck = 3
-
-
-# # solved by forward labeling 1489
-# num_customers = 15
-# num_hubs = 3
-# num_trucks = 8
-# num_drones_per_truck = 4
-
-
-# # solved by forward labeling 1396
-# num_customers = 15
-# num_hubs = 4
-# num_trucks = 7
-# num_drones_per_truck = 3
+locations = {}
 
 
 def update_arc_infos(location, term, travel_time, is_truck, truck_travel_times, truck_out_arcs, truck_in_arcs,
@@ -267,12 +158,11 @@ def create_random_truck_drone_network():
     for location in hubs:
         # to customers
         for term in customers:
-            if random.random() < 0.5:
-                continue
-            travel_time = random.randint(truck_min_t, truck_max_t)
-            update_arc_infos(location, term, travel_time, True, truck_travel_times, truck_out_arcs, truck_in_arcs,
-                             drone_travel_times, drone_out_arcs, drone_in_arcs)
-            truck_net.add_edge(location, term)
+            if random.random() <= arc_gen_prob:
+                travel_time = random.randint(truck_min_t, truck_max_t)
+                update_arc_infos(location, term, travel_time, True, truck_travel_times, truck_out_arcs, truck_in_arcs,
+                                 drone_travel_times, drone_out_arcs, drone_in_arcs)
+                truck_net.add_edge(location, term)
 
     # randomly generate additional arcs for truck routes (between hubs customers)
     all_locations = customers + hubs
@@ -341,6 +231,169 @@ def create_random_truck_drone_network():
     }
     net = Network(num_trucks, num_drones_per_truck, **params)
     sa = 0
+
+
+def create_original_network():
+    random.seed(seed)
+    np.random.seed(seed)
+    truck_net = nx.DiGraph()
+    # Generate node names
+    depot_source = "Source"
+    depot_sink = "Sink"
+    customers = [f"C{i + 1}" for i in range(num_customers)]
+    hubs = [f"H{i + 1}" for i in range(num_hubs)]
+
+    # 1) sample customer & hub locations
+    customer_locations = _sample_customers(num_customers, custom_dist)
+    for i in range(len(customers)):
+        locations[customers[i]] = tuple(customer_locations[i])
+    # locations[depot_source] = tuple(customer_locations.mean(axis=0))
+    locations[depot_source] = tuple(np.array([0, 0]))
+    locations[depot_sink] = locations[depot_source]
+    hubs_locations = choose_hubs_by_kmeans(np.array(list(locations.values())), num_hubs)
+    for i in range(len(hubs)):
+        locations[hubs[i]] = tuple(hubs_locations[i])
+
+    # Add depot, customers, and hubs as nodes
+    truck_net.add_node(depot_source)
+    truck_net.add_node(depot_sink)
+    for customer in customers:
+        truck_net.add_node(customer)
+    for hub in hubs:
+        truck_net.add_node(hub)
+
+    drone_net = truck_net.copy()
+
+    all_nodes = [depot_source] + customers + hubs + [depot_sink]
+    customer_indices = {}
+    hub_indices = {}
+    all_nodes_indices = {}
+    for i in range(len(all_nodes)):
+        node_name = all_nodes[i]
+        all_nodes_indices[node_name] = i
+        if node_name in customers:
+            customer_indices[node_name] = i
+        elif node_name in hubs:
+            hub_indices[node_name] = i
+
+    truck_out_arcs = {n: [] for n in all_nodes}
+    truck_in_arcs = {n: [] for n in all_nodes}
+    drone_out_arcs = {n: [] for n in all_nodes}
+    drone_in_arcs = {n: [] for n in all_nodes}
+
+    truck_travel_times = {}
+    drone_travel_times = {}  # for round trip
+
+    # generate truck arcs *************************************************************
+    for node in customers + hubs:  # ensure that each hub/customer has a path from depot_source and a path to depot_sink
+        travel_time = _gen_truck_travel_time(*locations[depot_source], *locations[node])
+        # from source
+        update_arc_infos(depot_source, node, travel_time, True, truck_travel_times, truck_out_arcs,
+                         truck_in_arcs, drone_travel_times, drone_out_arcs, drone_in_arcs)
+        truck_net.add_edge(depot_source, node)
+        # to sink
+        update_arc_infos(node, depot_sink, travel_time, True, truck_travel_times, truck_out_arcs,
+                         truck_in_arcs, drone_travel_times, drone_out_arcs, drone_in_arcs)
+        truck_net.add_edge(node, depot_sink)
+
+    # randomly generate additional arcs for truck routes (between hubs and customers)
+    all_locations = customers + hubs
+    for i in all_locations:
+        for j in all_locations:
+            if j == i:
+                continue
+            if random.random() <= arc_gen_prob and (i in customers or j in customers):
+                travel_time = _gen_truck_travel_time(*locations[i], *locations[j])
+                update_arc_infos(i, j, travel_time, True, truck_travel_times, truck_out_arcs, truck_in_arcs,
+                                 drone_travel_times, drone_out_arcs, drone_in_arcs)
+                truck_net.add_edge(i, j)
+
+    # generate arcs for drones ********************************
+    for i in hubs:
+        for j in customers:
+            if random.random() <= arc_gen_prob:
+                travel_time = _gen_drone_travel_time(*locations[i], *locations[j])
+                update_arc_infos(i, j, travel_time, False, truck_travel_times, truck_out_arcs, truck_in_arcs,
+                                 drone_travel_times, drone_out_arcs, drone_in_arcs)
+                drone_net.add_edge(i, j)
+
+    demand_weights = {}
+    temp_demands = np.clip(np.random.normal(loc=demand_weight_mean, scale=demand_weight_std, size=num_customers),
+                           demand_weight_min, None)
+    for n_name in customers:
+        n = all_nodes_indices[n_name]
+        demand_weights[n] = round(temp_demands[customers.index(n_name)], 2)
+    for s_name in hubs:
+        s = all_nodes_indices[s_name]
+        demand_weights[s] = epsilon
+    for n_name in [depot_source, depot_sink]:
+        n = all_nodes_indices[n_name]
+        demand_weights[n] = 0
+
+    global net
+    params = {
+        "depot_source": depot_source,
+        "depot_sink": depot_sink,
+        "customers": customers,
+        "hubs": hubs,
+        "all_nodes": all_nodes,
+        "all_nodes_indices": all_nodes_indices,
+        "customer_indices": customer_indices,
+        "hub_indices": hub_indices,
+        "truck_net": truck_net,
+        "drone_net": drone_net,
+        "truck_out_arcs": truck_out_arcs,
+        "truck_in_arcs": truck_in_arcs,
+        "drone_out_arcs": drone_out_arcs,
+        "drone_in_arcs": drone_in_arcs,
+        "truck_travel_times": truck_travel_times,
+        "drone_travel_times": drone_travel_times,
+        "demand_weights": demand_weights
+    }
+    net = Network(num_trucks, num_drones_per_truck, **params)
+
+
+def _sample_customers(n, dist):
+    if dist == 'PS':
+        # purely sparse: uniform over the square
+        return np.random.uniform(0, area_side, size=(n, 2))
+
+    elif dist == 'PC':
+        # purely clustered: generate cluster centers, then normal around them
+        k = max(1, n // 5)
+        centers = np.random.uniform(0, area_side, size=(k, 2))
+        pts = []
+        for i in range(n):
+            center = centers[i % k]
+            pt = np.random.normal(loc=center, scale=area_side * 0.05, size=2)
+            pts.append(np.clip(pt, 0, area_side))
+        return np.vstack(pts)
+
+    elif dist == 'mixed':
+        # half uniform, half clustered
+        n_clust = n // 2
+        n_unif = n - n_clust
+        unif_pts = _sample_customers(n_unif, 'PS')
+        cluster_pts = _sample_customers(n_clust, 'PC')
+        return np.vstack((unif_pts, cluster_pts))
+
+    else:
+        raise ValueError(f'Unknown distribution type: {dist}')
+
+
+def choose_hubs_by_kmeans(cust, k):
+    """
+    Given an array of customer coordinates cust (shape: n x 2),
+    compute k hub coordinates using k-means clustering.
+    """
+
+    # initialize and fit k-means
+    kmeans = KMeans(n_clusters=k, random_state=seed)
+    kmeans.fit(cust)
+
+    # centroids is an array of shape (k, 2)
+    hubs = kmeans.cluster_centers_
+    return hubs
 
 
 def transform_network():
@@ -538,7 +591,7 @@ def find_prefix(path, trans_net: TransformedNetwork):
 
 def truck_drone_path_to_hashable(truck_path, drone_flights):
     truck_path_tuple = tuple(truck_path)
-    drone_flight_frozen = {k: frozenset(v) for k, v in drone_flights.items()}
+    drone_flight_frozen = {k: frozenset(v) for k, v in drone_flights.items() if len(v) > 0}
     return truck_path_tuple, frozenset(drone_flight_frozen.items())
 
 
@@ -594,3 +647,71 @@ def if_path_travel_arc(path: list, arc):
 
     i, j = arc
     return any(x == i and y == j for x, y in zip(path, path[1:]))
+
+
+def _gen_truck_travel_time(xi, yi, xj, yj):
+    man_dist = abs(xi - xj) + abs(yi - yj)  # km
+    t_truck = man_dist / truck_speed * 60  # to minutes
+    return t_truck
+
+
+def _gen_drone_travel_time(xi, yi, xj, yj):
+    euc_dist = math.hypot(xi - xj, yi - yj)  # km
+    t_drone = euc_dist / drone_speed * 60  # to minutes
+    return t_drone
+
+
+def visualize_network():
+    # pos = nx.spring_layout(self.truck_net, seed=self.seed)
+    pos = {
+        node: locations[node]
+        for node in net.all_nodes
+    }
+    fig, ax = plt.subplots()
+    plt.sca(ax)
+
+    # Color mapping: Different colors for depot, customers, and hubs
+    node_colors = []
+    for node in net.truck_net.nodes():
+        if node == net.depot_source or node == net.depot_sink:
+            node_colors.append('orange')  # Red for depot
+        elif node in net.customers:
+            node_colors.append('lightblue')  # Yellow for customers
+        elif node in net.hubs:
+            node_colors.append('lightgreen')  # Green for hubs
+        else:
+            node_colors.append('gray')  # Default color for others (if any)
+
+    # Draw nodes
+    nx.draw_networkx_nodes(net.truck_net, pos, node_color=node_colors, node_size=500)
+    nx.draw_networkx_labels(net.truck_net, pos, font_size=10, font_weight='bold')
+
+    # Draw curved edges with varying curvature to avoid overlaps
+    edge_curvatures = [0.2, 0.4, -0.2, -0.4]  # Example curvatures
+    for i, (u, v) in enumerate(net.truck_net.edges()):
+        curvature = edge_curvatures[i % len(edge_curvatures)]  # Cycle through curvatures
+        nx.draw_networkx_edges(
+            net.truck_net, pos, edgelist=[(u, v)], edge_color='gray', arrowsize=15, width=1,
+            connectionstyle=f"arc3,rad={curvature}"
+        )
+    for i, (u, v) in enumerate(net.drone_net.edges()):
+        curvature = edge_curvatures[i % len(edge_curvatures)]  # Cycle through curvatures
+        nx.draw_networkx_edges(
+            net.drone_net, pos, edgelist=[(u, v)], edge_color='pink', arrowsize=15, width=1,
+            connectionstyle=f"arc3,rad={curvature}"
+        )
+
+    # # Create custom labels for nodes
+    # node_labels = {}
+    # for node in net.truck_net.nodes():
+    #     if node in net.customers:
+    #         n = net.all_nodes_indices[node]
+    #         node_labels[node] = f"w:{net.demand_weights[n]:.2f}"
+    #
+    # label_pos = {node: (x, y + 0.05) for node, (x, y) in pos.items()}  # Adjust 0.05 to control the offset
+    # # Draw the node labels
+    # nx.draw_networkx_labels(net.truck_net, label_pos, labels=node_labels, font_size=10)
+
+    plt.axis('off')  # Turn off the axis
+    plt.tight_layout()
+    plt.show()

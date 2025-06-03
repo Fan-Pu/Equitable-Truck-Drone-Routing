@@ -121,7 +121,7 @@ class LabelSetting:
             # forward only
             while self.best_solution[0] + close_tolerance > 0 and self.forward_label_queue.qsize() > 0:
                 self.forward_labeling_one_step(farkas, node_info)
-                
+
             self.print_runtime_info(s_time, node_info)
             return self.best_solution
 
@@ -177,6 +177,6 @@ class LabelSetting:
                 GeneralHelper.max_time = runtime
                 GeneralHelper.max_id = node_info.id
                 GeneralHelper.max_num = len(node_info.columns)
-            # print(
-            #     f"node info: {node_info.id}, num cols: {len(node_info.columns)}, runtime: {runtime:.4f}s")
-            # print()
+        print(
+            f"node info: {node_info.id}, num cols: {len(node_info.columns)}, runtime: {runtime:.4f}s")
+        print()

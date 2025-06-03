@@ -71,10 +71,6 @@ class BranchAndPrice:
             priority, node_id = self.branch_queue.get()
             # solve the current node
             is_integer_sol, branch_candidates, var_vals, lp_iters, lp_obj_val = self.node_solutions[node_id]
-            if lp_obj_val is not None:
-                solution = set([key for key, val in var_vals.items() if val > 0])
-            if is_integer_sol:
-                sdas = 0
 
             # feasible node
             if is_integer_sol is not None:
@@ -106,8 +102,11 @@ class BranchAndPrice:
                         # self.branch_queue.put(((node_infos[right_node_id].depth, right_node_id), right_node_id))
 
                         # best-first
-                        self.branch_queue.put(((self.node_solutions[left_node_id][-1], left_node_id), left_node_id))
-                        self.branch_queue.put(((self.node_solutions[right_node_id][-1], right_node_id), right_node_id))
+                        if self.node_solutions[left_node_id][-1] is not None:
+                            self.branch_queue.put(((self.node_solutions[left_node_id][-1], left_node_id), left_node_id))
+                        if self.node_solutions[right_node_id][-1] is not None:
+                            self.branch_queue.put(
+                                ((self.node_solutions[right_node_id][-1], right_node_id), right_node_id))
 
                         # deepest
                         # self.branch_queue.put(((-node_infos[left_node_id].depth, left_node_id), left_node_id))
@@ -420,11 +419,15 @@ class BranchAndPrice:
         lp_iters = 1
 
         # column generation
+        new_col_num = 0
         while True:
             add_new_column = rmp_node.run_pricer(node_info)
             if not add_new_column:
                 break
+            new_col_num += 1
             rmp_node.solve()
+            if new_col_num >= max_columns_num:
+                break
             # print("LSA returned")
             lp_iters += 1
 
