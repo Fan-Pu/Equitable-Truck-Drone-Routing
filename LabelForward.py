@@ -23,7 +23,7 @@ class LabelForward:
         self.latest_hub = None
         self.hash_path = truck_drone_path_to_hashable(self.truck_path, self.drone_flights) if depth == 0 else None
 
-    def dominates(self, other, farkas: bool, duals=None):
+    def dominates(self, other, node_info: NodeInfo, farkas: bool, duals=None):
         """Check if this label dominates another."""
         strict = False  # check whether contains a strict condition
 
@@ -72,7 +72,7 @@ class LabelForward:
         else:
             # calculate sum_nu
             sum_nu = 0
-            for triple in GeneralHelper.transformed_net.PI:
+            for triple in node_info.added_SR_keys:
                 if self.psi_set[triple] in {1, 3} and other.psi_set[triple] in {0, 2}:
                     sum_nu += duals[triple]
 

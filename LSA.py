@@ -45,7 +45,7 @@ class LabelSetting:
 
             # check dominance
             dominated_by_j, other_dominates_j, other_dom_label = (
-                self.dominance_check(label_j, self.forward_labels[node_j].values(), farkas))
+                self.dominance_check(label_j, self.forward_labels[node_j].values(), farkas, node_info))
 
             for key in dominated_by_j.keys():
                 self.forward_labels[node_j].pop(key, None)
@@ -91,7 +91,7 @@ class LabelSetting:
                              arrival_time=0,
                              sync_time=0,
                              wait_time=0,
-                             psi_set={pi: 0 for pi in GeneralHelper.transformed_net.PI},
+                             psi_set={pi: 0 for pi in node_info.added_SR_keys},
                              cost=truck_cost + self.duals["constant_term"],
                              depth=0,
                              drone_flights={},
@@ -106,7 +106,7 @@ class LabelSetting:
                              arrival_time=0,
                              sync_time=0,
                              wait_time=0,
-                             psi_set={pi: 0 for pi in GeneralHelper.transformed_net.PI},
+                             psi_set={pi: 0 for pi in node_info.added_SR_keys},
                              cost=self.duals["constant_term"],
                              depth=0,
                              drone_flights={},
@@ -125,22 +125,23 @@ class LabelSetting:
             self.print_runtime_info(s_time, node_info)
             return self.best_solution
 
-    def dominance_check(self, label_j, other_labels, farkas):
+    def dominance_check(self, label_j, other_labels, farkas, node_info: NodeInfo):
         """Check if label_j dominates any other label in a parallelized manner."""
         dominated_by_j = {}
         other_dominates_j = False
         other_dom_label = None
 
         for other in other_labels:
-            j_dominates = label_j.dominates(other, farkas, self.duals)
-            other_dominates = other.dominates(label_j, farkas, self.duals)
+            j_dominates = label_j.dominates(other, node_info, farkas, self.duals)
 
             if j_dominates:
                 dominated_by_j[tuple(other.path)] = other
-            if other_dominates:
-                other_dominates_j = True
-                other_dom_label = other
-                break  # Stop checking if label_j is already dominated
+            else:
+                other_dominates = other.dominates(label_j, node_info, farkas, self.duals)
+                if other_dominates:
+                    other_dominates_j = True
+                    other_dom_label = other
+                    break  # Stop checking if label_j is already dominated
 
         return dominated_by_j, other_dominates_j, other_dom_label
 

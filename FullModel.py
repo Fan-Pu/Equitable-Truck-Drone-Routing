@@ -345,7 +345,7 @@ class FullModel:
                         model.addConstr(ad_dict[(j, d)] >= rhs, name=f"realized_and3_{cons_id}"))
                     cons_id += 1
 
-        model.setParam(GRB.Param.TimeLimit, 1)
+        # model.setParam(GRB.Param.TimeLimit, 1)
         model.update()
         model.write("full_model.lp")
         model.optimize()
@@ -361,9 +361,14 @@ class FullModel:
         elif model.Status == GRB.INF_OR_UNBD:
             print("No feasible solution found")
 
+        mip_gap_percent = None
+        obj_val = -1
+
         # Retrieve the values
         if model.Status == GRB.OPTIMAL or model.Status == GRB.SUBOPTIMAL:
             print(f"Objective value: {model.ObjVal}")
+            obj_val = model.ObjVal
+            mip_gap_percent = model.MIPGap * 100
             self.x_values = {(i, j, k): var.X for (i, j, k), var in x_dict.items()}
             self.y_values = {(i, j, d): var.X for (i, j, d), var in y_dict.items()}
             self.t_values = {(n, k): var.X for (n, k), var in t_dict.items()}
@@ -398,9 +403,8 @@ class FullModel:
             dsadsa = 0
 
         solving_time = model.Runtime
-        mip_gap_percent = model.MIPGap * 100
 
-        return model.ObjVal, solving_time, mip_gap_percent
+        return obj_val, solving_time, mip_gap_percent
 
     def visualize_routes(self):
         pos = nx.circular_layout(self.net.truck_net)

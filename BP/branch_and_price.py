@@ -426,7 +426,7 @@ class BranchAndPrice:
                 break
             new_col_num += 1
             rmp_node.solve()
-            if new_col_num >= max_columns_num:
+            if node_info.id == 1 and new_col_num >= root_node_max_col_num:
                 break
             # print("LSA returned")
             lp_iters += 1
