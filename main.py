@@ -19,6 +19,12 @@ if __name__ == '__main__':
     BP = BranchAndPrice()
     BP_solve_time, BP_solution, BP_cost = BP.solve()
 
+    BP_costs = []
+    for solution in BP_solution:
+        cost = route_get_cost(solution, GeneralHelper.net, GeneralHelper.transformed_net)
+        BP_costs.append(cost)
+    sum_BP_cost = sum(BP_costs)
+
     if gap is not None:
         print(f"full model solved in {full_solve_time:.4f} s with obj val: {full_obj_val} and Gap: {gap:.2f}%")
     print(f"LSA solved in {BP_solve_time:.4f} s with cost: {BP_cost}")

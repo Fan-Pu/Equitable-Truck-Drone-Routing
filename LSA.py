@@ -21,6 +21,7 @@ class LabelSetting:
         self.duals = duals
         self.forward_label_queue = queue.PriorityQueue()  # priority queue, ordered by depth
         self.forward_label_counter = itertools.count()
+        self.N_hat = set()  # the set for DSS
 
     def forward_labeling_one_step(self, farkas, node_info: NodeInfo):
         """Forward search from the depot."""
@@ -36,7 +37,7 @@ class LabelSetting:
         for node_j in available_extensions:
             label.alternative_extensions.remove(node_j)
 
-            if not label.allow_extend(node_j, node_info):
+            if not label.allow_extend(node_j, node_info, self.N_hat):
                 continue
 
             GeneralHelper.allow_extend_checks_passed += 1
@@ -67,7 +68,16 @@ class LabelSetting:
                     # do not consider the existing columns
                     if hashable_path not in node_info.columns:
                         if label_j.cost < self.best_solution[0]:
-                            self.best_solution = (label_j.cost, hashable_path, label_j.path)
+                            if enable_DSS:
+                                # check revisit
+                                repeated_cus = get_revisit(label_j.path, GeneralHelper.transformed_net)
+                                if len(repeated_cus) > 0:
+                                    for cus in repeated_cus:
+                                        self.N_hat.update((cus, cus + "_T"))
+                                else:  # no revisit, update the best solution
+                                    self.best_solution = (label_j.cost, hashable_path, label_j.path)
+                            else:
+                                self.best_solution = (label_j.cost, hashable_path, label_j.path)
                 # only append the labels that have not been added
                 new_labels[node_j].append(label_j)
         # update the forward_labels at once
@@ -163,7 +173,7 @@ class LabelSetting:
                                                                          or (
                                                                              node_i,
                                                                              node_j) in self.net.arcs_cpcp) else 0
-            last_hub = node_j.replace("_prime", "") if node_j in self.net.hubs else last_hub
+            last_hub = node_j.replace("_T", "") if node_j in self.net.hubs else last_hub
 
             arrival_times.append(arrive_time)
             sync_times.append(sync_time)

@@ -377,6 +377,7 @@ class FullModel:
             self.ad_value = {(n, d): var.X for (n, d), var in ad_dict.items()}
             self.a_value = {n: var.X for n, var in a_dict.items()}
 
+            costs = []
             # construct the route
             truck_routes = {k: [] for k in range(self.net.num_trucks)}
             for (i, j, k), var in x_dict.items():
@@ -396,10 +397,18 @@ class FullModel:
                 for pre_node, next_node in path:
                     solutions[k]['truck'].append(pre_node)
                 solutions[k]['truck'].append(path[-1][-1])
+                solutions[k]['drone'] = defaultdict()
             for d, path in drone_routes.items():
                 k = int(d / num_drones_per_truck)
-                for _, node in path:
-                    solutions[k]['drone'].append(node)
+                for hub, node in path:
+                    if hub not in solutions[k]['drone']:
+                        solutions[k]['drone'][hub] = [node]
+                    else:
+                        solutions[k]['drone'][hub].append(node)
+            for k in solutions.keys():
+                cost = route_get_cost(solutions[k], GeneralHelper.net, GeneralHelper.transformed_net)
+                costs.append(cost)
+            total = sum(costs)
             dsadsa = 0
 
         solving_time = model.Runtime

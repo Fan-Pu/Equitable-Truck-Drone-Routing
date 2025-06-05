@@ -87,13 +87,13 @@ class LabelForward:
         # here all conditions are satisfied, we need to ensure that at least one is strict
         return strict
 
-    def allow_extend(self, node_j, node_info: NodeInfo):
+    def allow_extend(self, node_j, node_info: NodeInfo, N_hat: set):
         """
         check whether we can extend the current label to node_j
         """
         node_i = self.path[-1]
-        _node_i = node_i.replace("_prime", "")
-        _node_j = node_j.replace("_prime", "")
+        _node_i = node_i.replace("_T", "")
+        _node_j = node_j.replace("_T", "")
         arc = (node_i, node_j)
 
         # check branch arcs in transformed network
@@ -101,15 +101,20 @@ class LabelForward:
             return False
 
         # check Customer Visits Constraints
-        if node_j in self.net.customers:  # a customer node
-            if "_prime" in node_j:  # node_j is a duplication
+        if not enable_DSS:
+            if node_j in self.net.customers_origin:
+                dup_node = node_j + "_T"
+                if node_j in self.path or dup_node in self.path:
+                    return False
+            elif node_j in self.net.customers_prime:
                 dup_node = _node_j
-            else:
-                dup_node = node_j + "_prime"
-            if node_j in self.path or dup_node in self.path:
-                return False
-        else:  # not a customer node
-            if node_j in self.path:
+                if node_j in self.path or dup_node in self.path:
+                    return False
+            else:  # not a customer node
+                if node_j in self.path:
+                    return False
+        else:  # no DSS
+            if node_j in N_hat:
                 return False
 
         # check Node Accessibility Check
@@ -134,7 +139,7 @@ class LabelForward:
             # get the arrival time at j
             node_j_arrive_t = get_arrive_time(self.arrival_time, node_i, node_j, self.latest_hub,
                                               self.sync_time, self.wait_time, self.net)
-            if node_j_arrive_t < self.net.a_lb[node_j.replace("_prime", "")]:
+            if node_j_arrive_t < self.net.a_lb[node_j.replace("_T", "")]:
                 return False
 
         # check disabled truck arcs in the original network
@@ -236,7 +241,7 @@ class LabelForward:
         # update psi
         sum_nu = 0
         for triple in node_info.added_SR_keys:
-            if node_j.replace("_prime", "") in set(triple):
+            if node_j.replace("_T", "") in set(triple):
                 label_j.psi_set[triple] += 1
                 if self.psi_set[triple] == 1 and label_j.psi_set[triple] == 2:
                     sum_nu += duals[triple]
@@ -244,7 +249,7 @@ class LabelForward:
         # update cost
         if not farkas:
             if node_j in self.net.customers:
-                _node_j = node_j.replace("_prime", "")
+                _node_j = node_j.replace("_T", "")
                 index = self.net.customers.index(_node_j)
                 label_j.cost += cw * (label_j.arrival_time - self.net.a_lb[_node_j]) ** 2 - duals["mu"][index] - sum_nu
                 if node_j in self.net.customers_prime:
@@ -255,7 +260,7 @@ class LabelForward:
                 label_j.cost += -sum_nu
         else:
             if node_j in self.net.customers:
-                index = self.net.customers.index(node_j.replace("_prime", ""))
+                index = self.net.customers.index(node_j.replace("_T", ""))
                 label_j.cost += -duals["mu"][index] - sum_nu
             else:
                 label_j.cost += -sum_nu

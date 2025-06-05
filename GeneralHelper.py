@@ -10,21 +10,22 @@ from sortedcontainers import SortedSet
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.cluster import KMeans
+from collections import Counter
 
 M = 10000
 close_tolerance = 0.001
 # cost_scale = 0.01
 
-root_node_max_col_num = 270
+enable_DSS = False
+
+root_node_max_col_num = 999
 
 cw = 0.25
 # cw = 1
 
-arc_gen_prob = 0.1  # the probability of generating a truck arc
-hub_arc_gen_prob = 0.5  # the probability of generating an arc that connects a hub
+arc_gen_prob = 0.01  # the probability of generating a truck arc
+hub_arc_gen_prob = 0.5  # the probability of generating an truck arc that connects a hub
 drone_arc_gen_prob = 0.5  # the probability of generating a drone arc
-
-test_route_list = []
 
 columns_list = []
 
@@ -71,8 +72,8 @@ demand_weight_mean = 1
 demand_weight_std = 5
 demand_weight_min = 0.5
 
-truck_max_weight = 450
-drone_max_weight = 2.3
+truck_max_weight = 50
+drone_max_weight = 3
 
 # flight endurance
 drone_endurance = 30
@@ -82,7 +83,8 @@ epsilon = 0.1
 
 num_drones_per_truck = 4
 
-num_hubs = int(math.floor(num_customers / 5))
+# num_hubs = int(math.floor(num_customers / 5))
+num_hubs = 2
 
 locations = {}
 
@@ -346,11 +348,11 @@ def hashable_path_to_route(path, idx, trans_net):
                 cost += drone_cost_per_flight
                 drone_travel_time = trans_net.travel_times[(node_j, drone_visit)]
                 drone_travel_times.append(drone_travel_time)
-                cost += cw * (sync_time + drone_travel_time - trans_net.a_lb[drone_visit.replace("_prime", "")]) ** 2
+                cost += cw * (sync_time + drone_travel_time - trans_net.a_lb[drone_visit.replace("_T", "")]) ** 2
             if len(drone_travel_times) > 0:
                 wait_time = max(drone_travel_times)
         elif node_j in trans_net.customers:
-            cost += cw * (arrival_time - trans_net.a_lb[node_j.replace("_prime", "")]) ** 2
+            cost += cw * (arrival_time - trans_net.a_lb[node_j.replace("_T", "")]) ** 2
         elif node_j == trans_net.depot_sink:
             cost += cw * arrival_time
 
@@ -371,9 +373,9 @@ def find_initial_routes(original_net, trans_net):
     for n_name in customers:
         truck_route = [depot_source, n_name, depot_sink]
         arrive_time = truck_travel_times[(depot_source, n_name)]
-        cost = (arrive_time - a_lb[n_name]) ** 2 + truck_cost
+        cost = cw * (arrive_time - a_lb[n_name]) ** 2 + truck_cost
         return_time = arrive_time + truck_travel_times[(n_name, depot_sink)]
-        cost += return_time
+        cost += cw * return_time
 
         route = {'id': len(routes), 'truck': truck_route, 'drone': {}, 'launches': [], 'cost': cost}
         key = truck_drone_path_to_hashable(truck_route, {})
@@ -396,11 +398,11 @@ def get_route_customer_visits(route):
 
     result = []
     for node in route['truck']:
-        node = node.replace("_prime", "")
+        node = node.replace("_T", "")
         if node in transformed_net.customers_origin:
             result.append(node)
     for hub, nodes in route['drone'].items():
-        result.extend(node.replace("_prime", "") for node in nodes)
+        result.extend(node.replace("_T", "") for node in nodes)
     return result
 
 
@@ -429,7 +431,7 @@ def if_route_visit_node(route, i):
         return True
     else:
         for key, node_set in route['drone'].items():
-            if i + "_prime" in node_set:
+            if i + "_T" in node_set:
                 return True
     return False
 
@@ -509,3 +511,44 @@ def visualize_network():
     plt.axis('off')  # Turn off the axis
     plt.tight_layout()
     plt.show()
+
+
+def get_revisit(element_path, trans_net: TransformedNetwork):
+    counts = Counter()
+    for node in element_path:
+        if node in trans_net.customers_origin:
+            counts[node] += 1
+        elif node in trans_net.customers_prime:
+            counts[node.replace("_T", "")] += 1
+    repeated = {cust for cust, freq in counts.items() if freq > 1}
+    return repeated
+
+
+def route_get_cost(route, ori: Network, trans: TransformedNetwork):
+    truck_route = route['truck']
+    if len(truck_route) == 0:
+        return 0
+    drone_route = route['drone']
+    cost = truck_cost
+    truck_arr_time = 0
+    pre_node = 'Source'
+    wait_time = 0
+    for node in truck_route[1:]:
+        truck_arr_time += ori.truck_travel_times[(pre_node, node)] + wait_time
+        wait_time = 0
+        if node in ori.customers:
+            cost += cw * (truck_arr_time - trans.a_lb[node]) ** 2
+        elif node == trans.depot_sink:
+            cost += cw * truck_arr_time
+        elif node in ori.hubs:
+            hub = node
+            if hub in drone_route.keys():
+                drone_visits = drone_route[hub]
+                for visit in drone_visits:
+                    temp_visit = visit.replace("_T", "")
+                    drone_arr_time = truck_arr_time + ori.drone_travel_times[(hub, temp_visit)]
+                    cost += cw * (drone_arr_time - trans.a_lb[temp_visit]) ** 2
+                    wait_time = max(wait_time, ori.drone_travel_times[hub, temp_visit])
+                cost += drone_cost_per_flight * len(drone_visits)
+        pre_node = node
+    return cost

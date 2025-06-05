@@ -38,7 +38,7 @@ class RMPNode:
             # set covering
             if node_info.id == 1:
                 self.constraints.append(
-                    self.model.addConstr(gp.quicksum(z_vars) >= 1, name=f"visit_customer_{i}")
+                    self.model.addConstr(gp.quicksum(z_vars) == 1, name=f"visit_customer_{i}")
                 )
             else:
                 self.constraints.append(
@@ -116,8 +116,6 @@ class RMPNode:
         farkas = True if self.status == GRB.INFEASIBLE else False
         label_setting = LabelSetting(self.duals)
         reduced_cost, hashable_path, element_path = label_setting.solve(farkas, node_info)
-        if node_info.id == 1:
-            test_route_list.append(element_path)
 
         # reduced_cost, hashable_path, element_path, where = label_setting.solve(farkas, node_info)
 
@@ -129,7 +127,7 @@ class RMPNode:
         #         if if_route_travel_arc(new_route, i, j, GeneralHelper.net):
         #             sdas = 0
         #     for i, j in node_info.disabled_arcs_drones:
-        #         if if_route_travel_arc(new_route, i, j + "_prime", GeneralHelper.net):
+        #         if if_route_travel_arc(new_route, i, j + "_T", GeneralHelper.net):
         #             sdas = 0
         #     for i, j in (node_info.must_visit_arcs_trucks | node_info.must_visit_arcs_drones
         #                  | node_info.must_visit_arcs_trans):
@@ -150,9 +148,6 @@ class RMPNode:
                 bp.node_infos[node_id].column_elementary_paths[route_key] = element_path
                 bp.node_infos[node_id].column_customer_visits[route_key].update(
                     get_route_customer_visits(bp.route_dict[route_key]))
-
-                if route_key in node_info.removed_columns_keys:
-                    sdsa = 0
 
                 self._add_column(route_key)
                 add_new_column = True

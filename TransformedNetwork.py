@@ -43,7 +43,7 @@ class TransformedNetwork:
                 for predecessor in net.drone_in_arcs[node]
             )
             if needs_duplicate:
-                new_node = node + "_prime"
+                new_node = node + "_T"
                 self.customers_prime.append(new_node)
                 self.all_nodes.append(new_node)
                 self.all_nodes_indices[new_node] = len(self.all_nodes) - 1
@@ -68,7 +68,7 @@ class TransformedNetwork:
         # green arc sc'
         for node in net.hubs:
             for node_j in net.drone_out_arcs[node]:
-                node_j_prime = node_j + "_prime"
+                node_j_prime = node_j + "_T"
                 self.out_arcs[node].append(node_j_prime)
                 self.in_arcs[node_j_prime].append(node)
                 self.travel_times[(node, node_j_prime)] = net.drone_travel_times[(node, node_j)]
@@ -85,8 +85,8 @@ class TransformedNetwork:
                 node_j = omega_D_set[node][j]
                 for k in range(j + 1, len(omega_D_set[node])):
                     node_k = omega_D_set[node][k]
-                    node_j_prime = node_j + "_prime"
-                    node_k_prime = node_k + "_prime"
+                    node_j_prime = node_j + "_T"
+                    node_k_prime = node_k + "_T"
                     arc = (node_j_prime, node_k_prime)
                     if arc not in self.arcs_cpcp:
                         self.out_arcs[node_j_prime].append(node_k_prime)
@@ -104,7 +104,7 @@ class TransformedNetwork:
                 for node_j in omega_K_set[node]:
                     if node_i == node_j:
                         continue
-                    node_i_prime = node_i + "_prime"
+                    node_i_prime = node_i + "_T"
                     # i to j
                     self.out_arcs[node_i_prime].append(node_j)
                     self.in_arcs[node_j].append(node_i_prime)
@@ -112,13 +112,13 @@ class TransformedNetwork:
 
         # update self.node_hubs_set
         for node in self.node_hubs_set_for_drone.keys():
-            _node = node.replace("_prime", "")
+            _node = node.replace("_T", "")
             for hub, node_list in omega_D_set.items():
                 # the node is accessible from the hub
                 self.node_hubs_set_for_drone[node].append(hub) if (
                         _node in node_list and hub not in self.node_hubs_set_for_drone[node]) else None
         for node in self.node_hubs_set_for_truck.keys():
-            _node = node.replace("_prime", "")
+            _node = node.replace("_T", "")
             for hub, node_list in omega_K_set.items():
                 # the node is accessible from the hub
                 self.node_hubs_set_for_truck[node].append(hub) if (
@@ -129,7 +129,7 @@ class TransformedNetwork:
             key = (node_i_prime, node_j_prime)
             self.travel_times[key] = {}
             for hub in self.node_hubs_set_for_drone[node_j_prime]:
-                self.travel_times[key][hub] = net.drone_travel_times[(hub, node_j_prime.replace("_prime", ""))]
+                self.travel_times[key][hub] = net.drone_travel_times[(hub, node_j_prime.replace("_T", ""))]
         for node_i_prime, node_j in self.arcs_cpc:
             key = (node_i_prime, node_j)
             self.travel_times[key] = {}
@@ -140,7 +140,7 @@ class TransformedNetwork:
         for n, demand in net.demand_weights.items():
             node = net.all_nodes[n]
             self.demand_weights[node] = demand
-            node_prime = node + "_prime"
+            node_prime = node + "_T"
             if node_prime in self.all_nodes:
                 self.demand_weights[node_prime] = demand
 
@@ -172,7 +172,7 @@ class TransformedNetwork:
             _, node, visited, a_n, w_n, s_n = heapq.heappop(Q)
 
             for j in self.out_arcs[node]:
-                if j in visited or j.replace("_prime", "") in visited or j + "_prime" in visited:
+                if j in visited or j.replace("_T", "") in visited or j + "_T" in visited:
                     continue
 
                 if j in self.hubs:
@@ -201,7 +201,7 @@ class TransformedNetwork:
                 if j in self.customers_origin:
                     self.a_lb[j] = min(a_j, self.a_lb[j])
                 elif j in self.customers_prime:
-                    customer_j = j.replace("_prime", "")
+                    customer_j = j.replace("_T", "")
                     self.a_lb[customer_j] = min(a_j, self.a_lb[customer_j])
 
                 # Insert new state into priority queue

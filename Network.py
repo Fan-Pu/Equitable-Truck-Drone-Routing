@@ -27,7 +27,7 @@ class Network:
                 self.truck_arcs.append((node_i, node_j))
         for node_i, arcs in self.drone_out_arcs.items():
             for node_j in arcs:
-                self.drone_arcs.append((node_i, node_j + "_prime"))
+                self.drone_arcs.append((node_i, node_j + "_T"))
 
         for node in self.hubs:
             self.demand_weights[self.all_nodes_indices[node]] = epsilon_weight

@@ -56,11 +56,19 @@ class BranchAndPrice:
         # solve the root node
         RMP_node = RMPNode(root_node)
         RMP_nodes[root_node.id] = RMP_node
+        s_t = time.time()
         is_integer_sol, branch_candidates, var_vals, lp_iters, lp_obj_val = self.solve_node(root_node, RMP_node)
+        use_time = time.time() - s_t
         self.node_solutions[node_id] = [is_integer_sol, branch_candidates, var_vals, lp_iters, lp_obj_val]
         self.node_lp_objs[node_id] = lp_obj_val
         # add the column to the queue
         self.branch_queue.put(((1, node_id), node_id))
+        # print
+        local_lb_print = round(lp_obj_val, 2) if not is_integer_sol else "-"
+        log_text = f"solve root node, l_lb: {local_lb_print}, time: {use_time:2f}"
+        if is_integer_sol:  # find integer solution
+            log_text += f", integer obj: {round(lp_obj_val, 2)}"
+        print(Fore.RED + log_text + Style.RESET_ALL)
 
         # main loop
         while not self.branch_queue.empty():
