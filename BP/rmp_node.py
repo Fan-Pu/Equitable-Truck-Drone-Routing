@@ -115,7 +115,15 @@ class RMPNode:
         node_id = node_info.id
         farkas = True if self.status == GRB.INFEASIBLE else False
         label_setting = LabelSetting(self.duals)
+
+        if len(node_info.columns) == 99999:
+            lp.enable()
+            lp.add_function(label_setting.solve)
         reduced_cost, hashable_path, element_path = label_setting.solve(farkas, node_info)
+        if len(node_info.columns) == 999999:
+            lp.disable()
+            lp.print_stats()
+            input()
 
         # reduced_cost, hashable_path, element_path, where = label_setting.solve(farkas, node_info)
 

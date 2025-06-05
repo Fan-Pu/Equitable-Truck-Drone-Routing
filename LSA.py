@@ -29,6 +29,9 @@ class LabelSetting:
         awaiting_labels = defaultdict(dict)  # the new labels awaiting to be appended, key: node, value: dict
 
         _, _, label = self.forward_label_queue.get()
+        # if label.path == ['Source', 'C6', 'H2', 'C2_T', 'C3_T', 'C14']:
+        if label.path == ['Source']:
+            sdsa = 0
         # check extending
         available_extensions = SortedSet(label.alternative_extensions)
         # print(
@@ -48,17 +51,21 @@ class LabelSetting:
             dominated_by_j, other_dominates_j, other_dom_label = (
                 self.dominance_check(label_j, self.forward_labels[node_j].values(), farkas, node_info))
 
+            # dominated_by_j = None
+            # other_dominates_j = False
+            # other_dom_label = None
+
             for key in dominated_by_j.keys():
                 self.forward_labels[node_j].pop(key, None)
 
             # if j is not dominated by others
             if not other_dominates_j:
                 is_new_path = True if tuple(label_j.path) not in self.forward_labels[node_j].keys() else False
+
                 if not is_new_path:
                     continue
                 # is a new path
                 awaiting_labels[node_j][tuple(label_j.path)] = label_j
-
                 # only if this label is possible to be extended
                 if len(label_j.alternative_extensions) > 0:
                     self.forward_label_queue.put((-label_j.depth, next(self.forward_label_counter), label_j))
@@ -129,7 +136,8 @@ class LabelSetting:
 
         while True:
             # forward only
-            while self.best_solution[0] + close_tolerance > 0 and self.forward_label_queue.qsize() > 0:
+            # while self.best_solution[0] + close_tolerance > 0 and self.forward_label_queue.qsize() > 0:
+            while self.forward_label_queue.qsize() > 0:
                 self.forward_labeling_one_step(farkas, node_info)
 
             self.print_runtime_info(s_time, node_info)

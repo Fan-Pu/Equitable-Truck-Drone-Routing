@@ -24,7 +24,7 @@ cw = 0.25
 # cw = 1
 
 arc_gen_prob = 0.01  # the probability of generating a truck arc
-hub_arc_gen_prob = 0.5  # the probability of generating an truck arc that connects a hub
+hub_arc_gen_prob = 0.5  # the probability of generating a truck arc that connects a hub
 drone_arc_gen_prob = 0.5  # the probability of generating a drone arc
 
 columns_list = []
@@ -188,6 +188,8 @@ def create_original_network():
         for j in customers:
             if random.random() <= drone_arc_gen_prob:
                 travel_time = _gen_drone_travel_time(*locations[i], *locations[j])
+                if 2 * travel_time > drone_endurance:  # the drone's battery is not sufficient
+                    continue
                 update_arc_infos(i, j, travel_time, False, truck_travel_times, truck_out_arcs, truck_in_arcs,
                                  drone_travel_times, drone_out_arcs, drone_in_arcs)
                 drone_net.add_edge(i, j)
@@ -372,9 +374,10 @@ def find_initial_routes(original_net, trans_net):
     # Routes that visit only one node
     for n_name in customers:
         truck_route = [depot_source, n_name, depot_sink]
+        # this arc exists
         arrive_time = truck_travel_times[(depot_source, n_name)]
-        cost = cw * (arrive_time - a_lb[n_name]) ** 2 + truck_cost
         return_time = arrive_time + truck_travel_times[(n_name, depot_sink)]
+        cost = cw * (arrive_time - a_lb[n_name]) ** 2 + truck_cost
         cost += cw * return_time
 
         route = {'id': len(routes), 'truck': truck_route, 'drone': {}, 'launches': [], 'cost': cost}

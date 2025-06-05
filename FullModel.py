@@ -345,7 +345,22 @@ class FullModel:
                         model.addConstr(ad_dict[(j, d)] >= rhs, name=f"realized_and3_{cons_id}"))
                     cons_id += 1
 
-        # model.setParam(GRB.Param.TimeLimit, 1)
+        # test constraints
+        truck_paths = [
+            ['Source', 'C11', 'H1', 'C4', 'Sink'],
+            ['Source', 'C13', 'H1', 'C10', 'Sink'],
+            ['Source', 'C6', 'H2', 'Sink'],
+            ['Source', 'H2', 'C8', 'H1', 'C1', 'Sink']
+        ]
+
+        # for k in range(len(truck_paths)):
+        #     truck_path = truck_paths[k]
+        #     for i_name, j_name in zip(truck_path[:], truck_path[1:]):
+        #         i = self.all_nodes_indices[i_name]
+        #         j = self.all_nodes_indices[j_name]
+        #         model.addConstr(x_dict[(i, j, k)] == 1)
+
+        model.setParam(GRB.Param.TimeLimit, 1)
         model.update()
         model.write("full_model.lp")
         model.optimize()
@@ -359,6 +374,8 @@ class FullModel:
         elif model.Status == GRB.UNBOUNDED:
             print("The model is unbounded")
         elif model.Status == GRB.INF_OR_UNBD:
+            model.computeIIS()
+            model.write("model.ilp")
             print("No feasible solution found")
 
         mip_gap_percent = None
@@ -477,7 +494,7 @@ class FullModel:
         fig, ax = plt.subplots()
         plt.sca(ax)
         plt.title("Drone routes")
-        nx.draw_networkx_nodes(self.net.drone_net, pos, node_color=node_colors, node_size=node_size)
+        nx.draw_networkx_nodes(self.net.drone_net, pos, node_color=node_colors, node_size=500)
         nx.draw_networkx_labels(self.net.drone_net, pos, font_size=10, font_weight='bold')
 
         # Draw drone routes with curved dashed edges
