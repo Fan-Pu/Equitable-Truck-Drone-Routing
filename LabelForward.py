@@ -21,7 +21,6 @@ class LabelForward:
         self.drone_flights = {k: v.copy() for k, v in drone_flights.items()}
         self.truck_path = truck_path
         self.latest_hub = None
-        self.hash_path = truck_drone_path_to_hashable(self.truck_path, self.drone_flights) if depth == 0 else None
 
     def dominates(self, other, node_info: NodeInfo, farkas: bool, duals=None):
         """Check if this label dominates another."""
@@ -270,8 +269,6 @@ class LabelForward:
             label_j.drone_flights[label_j.latest_hub].add(node_j)
         elif arc in self.net.arcs_ori or arc in self.net.arcs_cpc:
             label_j.truck_path.append(node_j)
-
-        label_j.hash_path = truck_drone_path_to_hashable(label_j.truck_path, label_j.drone_flights)
 
         return label_j
 

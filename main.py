@@ -1,16 +1,14 @@
 # from BranchAndPrice import *
 import matplotlib.pyplot as plt
-
 import GeneralHelper
-from RMP import *
 from FullModel import FullModel
 from BP.branch_and_price import BranchAndPrice
 
 if __name__ == '__main__':
     # data preparation
-    create_original_network()
-    transform_network()
-    visualize_network()
+    GeneralHelper.create_original_network()
+    GeneralHelper.transform_network()
+    # visualize_network()
 
     test_case = FullModel()
 
@@ -21,7 +19,7 @@ if __name__ == '__main__':
 
     BP_costs = []
     for solution in BP_solution:
-        cost = route_get_cost(solution, GeneralHelper.net, GeneralHelper.transformed_net)
+        cost = GeneralHelper.route_get_cost(solution, GeneralHelper.net, GeneralHelper.transformed_net)
         BP_costs.append(cost)
     sum_BP_cost = sum(BP_costs)
 

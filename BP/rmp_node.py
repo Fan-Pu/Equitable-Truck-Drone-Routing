@@ -2,7 +2,7 @@ from NodeInfo import NodeInfo
 import gurobipy as gp
 import GeneralHelper
 from gurobipy import GRB
-from LSA import *
+from LabelSetting import *
 import BP.branch_and_price as bp
 import cProfile, pstats, io
 
@@ -119,7 +119,7 @@ class RMPNode:
         if len(node_info.columns) == 99999:
             lp.enable()
             lp.add_function(label_setting.solve)
-        reduced_cost, hashable_path, element_path = label_setting.solve(farkas, node_info)
+        reduced_cost, element_path = label_setting.solve(farkas, node_info)
         if len(node_info.columns) == 999999:
             lp.disable()
             lp.print_stats()

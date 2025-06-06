@@ -28,13 +28,12 @@ class BranchAndPrice:
         self.gap = 1  # optimality gap
         self.best_solution_node: RMPNode = None
         # add initial routes
-        self.initial_routes = []
         routes, element_paths = find_initial_routes(GeneralHelper.net, GeneralHelper.transformed_net)
         for i in range(len(routes)):
             route_key, route = routes[i]
             route_dict[route_key] = route
             route_key_id_pairs[route_key] = route['id']
-            self.initial_routes.append(route_key)
+            GeneralHelper.initial_routes.append(route_key)
         self.initial_element_paths = dict(element_paths)
 
     def solve(self):
@@ -46,7 +45,7 @@ class BranchAndPrice:
         node_id = node_id_counter
         root_node = NodeInfo(-1, node_id, 1)
         node_infos[node_id] = root_node
-        root_node.columns = self.initial_routes
+        root_node.columns = GeneralHelper.initial_routes
         root_node.column_elementary_paths = self.initial_element_paths
         # setup the column customer visits
         for route_key, elem_path in root_node.column_elementary_paths.items():

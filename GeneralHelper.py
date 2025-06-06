@@ -4,10 +4,16 @@ import re
 from line_profiler import LineProfiler
 import networkx as nx
 from collections import defaultdict
+
+from streamlit import selectbox
+
 from Network import Network
 from TransformedNetwork import TransformedNetwork
 from sortedcontainers import SortedSet
 import numpy as np
+import matplotlib
+
+matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 from sklearn.cluster import KMeans
 from collections import Counter
@@ -87,6 +93,8 @@ num_drones_per_truck = 4
 num_hubs = 2
 
 locations = {}
+
+initial_routes = []
 
 
 def update_arc_infos(location, term, travel_time, is_truck, truck_travel_times, truck_out_arcs, truck_in_arcs,
@@ -325,40 +333,24 @@ def get_arrive_time(arrival_time, node_i, node_j, last_hub, sync_time, wait_time
     return result
 
 
-def hashable_path_to_route(path, idx, trans_net):
+def elem_path_to_route(path, idx, ori_net: Network, trans_net: TransformedNetwork):
     """
-    convert the hashable path derived from LSA to path stored in solution pool
+    convert the elementary path derived from LSA to path stored in solution pool
     """
-    truck_route = path[0]
-    drone_route = {key: value for key, value in path[-1]}
+    truck_route = []
+    drone_route = defaultdict(list)
     launches = [key for key in drone_route.keys()]
+    for node in path:
+        if node in trans_net.hubs:
+            launches.append(node)
+            truck_route.append(node)
+        elif node in trans_net.customers_prime:
+            drone_route[launches[-1]].append(drone_route)
+        else:
+            truck_route.append(node)
 
-    # calculate the route cost
-    arrival_time = 0
-    wait_time = 0
-    cost = truck_cost
-    for j in range(1, len(truck_route)):
-        node_pre = truck_route[j - 1]
-        node_j = truck_route[j]
-        arrival_time += trans_net.travel_times[(node_pre, node_j)] + wait_time
-        wait_time = 0
-        # update sync time
-        if node_j in launches:
-            sync_time = arrival_time
-            drone_travel_times = []
-            for drone_visit in drone_route[node_j]:
-                cost += drone_cost_per_flight
-                drone_travel_time = trans_net.travel_times[(node_j, drone_visit)]
-                drone_travel_times.append(drone_travel_time)
-                cost += cw * (sync_time + drone_travel_time - trans_net.a_lb[drone_visit.replace("_T", "")]) ** 2
-            if len(drone_travel_times) > 0:
-                wait_time = max(drone_travel_times)
-        elif node_j in trans_net.customers:
-            cost += cw * (arrival_time - trans_net.a_lb[node_j.replace("_T", "")]) ** 2
-        elif node_j == trans_net.depot_sink:
-            cost += cw * arrival_time
-
-    route = {'id': idx, 'truck': truck_route, 'drone': drone_route, 'launches': launches, 'cost': cost}
+    route = {'id': idx, 'truck': truck_route, 'drone': drone_route, 'launches': launches, 'cost': 0}
+    route['cost'] = route_get_cost(route, ori_net, trans_net)
 
     return path, route
 
@@ -374,24 +366,18 @@ def find_initial_routes(original_net, trans_net):
     # Routes that visit only one node
     for n_name in customers:
         truck_route = [depot_source, n_name, depot_sink]
-        # this arc exists
+
         arrive_time = truck_travel_times[(depot_source, n_name)]
         return_time = arrive_time + truck_travel_times[(n_name, depot_sink)]
         cost = cw * (arrive_time - a_lb[n_name]) ** 2 + truck_cost
         cost += cw * return_time
-
         route = {'id': len(routes), 'truck': truck_route, 'drone': {}, 'launches': [], 'cost': cost}
-        key = truck_drone_path_to_hashable(truck_route, {})
+
+        key = tuple(truck_route)
         routes.append((key, route))
         element_paths[key] = truck_route
 
     return routes, element_paths
-
-
-def truck_drone_path_to_hashable(truck_path, drone_flights):
-    truck_path_tuple = tuple(truck_path)
-    drone_flight_frozen = {k: frozenset(v) for k, v in drone_flights.items() if len(v) > 0}
-    return truck_path_tuple, frozenset(drone_flight_frozen.items())
 
 
 def get_route_customer_visits(route):

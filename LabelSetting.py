@@ -16,8 +16,8 @@ class LabelSetting:
         self.net = GeneralHelper.transformed_net
         # the ordered dict is used to ensure the exact visit sequence of the dict (code reproduction)
         self.forward_labels = {node: OrderedDict() for node in self.net.all_nodes}  # save forward label keys
-        # cost, hashable_path, path
-        self.best_solution = (np.inf, None, None)
+        # cost, elem path
+        self.best_solution = (np.inf, None)
         self.duals = duals
         self.forward_label_queue = queue.PriorityQueue()  # priority queue, ordered by depth
         self.forward_label_counter = itertools.count()
@@ -25,13 +25,11 @@ class LabelSetting:
 
     def forward_labeling_one_step(self, farkas, node_info: NodeInfo):
         """Forward search from the depot."""
-        new_labels = defaultdict(list)
-        awaiting_labels = defaultdict(dict)  # the new labels awaiting to be appended, key: node, value: dict
+        new_labels = {}  # the new labels awaiting to be appended, key: node, value: new_label
 
         _, _, label = self.forward_label_queue.get()
         # if label.path == ['Source', 'C6', 'H2', 'C2_T', 'C3_T', 'C14']:
-        if label.path == ['Source']:
-            sdsa = 0
+
         # check extending
         available_extensions = SortedSet(label.alternative_extensions)
         # print(
@@ -47,6 +45,13 @@ class LabelSetting:
 
             label_j = label.extend(node_j, self.duals, farkas, node_info)
 
+            # this is an existing column
+            if tuple(label_j.path) in GeneralHelper.initial_routes:
+                continue
+
+            if tuple(label_j.path) in node_info.columns:
+                continue
+
             # check dominance
             dominated_by_j, other_dominates_j, other_dom_label = (
                 self.dominance_check(label_j, self.forward_labels[node_j].values(), farkas, node_info))
@@ -61,35 +66,30 @@ class LabelSetting:
             # if j is not dominated by others
             if not other_dominates_j:
                 is_new_path = True if tuple(label_j.path) not in self.forward_labels[node_j].keys() else False
-
                 if not is_new_path:
                     continue
                 # is a new path
-                awaiting_labels[node_j][tuple(label_j.path)] = label_j
+                new_labels[node_j] = label_j
                 # only if this label is possible to be extended
                 if len(label_j.alternative_extensions) > 0:
                     self.forward_label_queue.put((-label_j.depth, next(self.forward_label_counter), label_j))
                 # check whether it is completed, update the incumbent
                 if node_j == self.net.depot_sink:
-                    hashable_path = label_j.hash_path
-                    # do not consider the existing columns
-                    if hashable_path not in node_info.columns:
-                        if label_j.cost < self.best_solution[0]:
-                            if enable_DSS:
-                                # check revisit
-                                repeated_cus = get_revisit(label_j.path, GeneralHelper.transformed_net)
-                                if len(repeated_cus) > 0:
-                                    for cus in repeated_cus:
-                                        self.N_hat.update((cus, cus + "_T"))
-                                else:  # no revisit, update the best solution
-                                    self.best_solution = (label_j.cost, hashable_path, label_j.path)
-                            else:
-                                self.best_solution = (label_j.cost, hashable_path, label_j.path)
-                # only append the labels that have not been added
-                new_labels[node_j].append(label_j)
+                    if label_j.cost < self.best_solution[0]:
+                        if enable_DSS:
+                            # check revisit
+                            repeated_cus = get_revisit(label_j.path, GeneralHelper.transformed_net)
+                            if len(repeated_cus) > 0:
+                                for cus in repeated_cus:
+                                    self.N_hat.update((cus, cus + "_T"))
+                            else:  # no revisit, update the best solution
+                                self.best_solution = (label_j.cost, label_j.path)
+                        else:
+                            self.best_solution = (label_j.cost, label_j.path)
+
         # update the forward_labels at once
-        for node, labels in awaiting_labels.items():
-            self.forward_labels[node].update(labels)
+        for node, label in new_labels.items():
+            self.forward_labels[node][tuple(label.path)] = label
 
         return new_labels
 
