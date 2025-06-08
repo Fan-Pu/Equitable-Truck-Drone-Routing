@@ -10,7 +10,6 @@ class NodeInfo:
         self.id = self_id
         self.depth = depth
         self.columns = list()  # value: the keys of routes
-        self.column_elementary_paths = {}  # key: route_key; value: the elementary paths for each column
         self.column_customer_visits = defaultdict(set)  # key: route_key; value: the customers visited by the route
         self.vehicle_fleet_branch_lb = 0
         self.vehicle_fleet_branch_ub = GeneralHelper.net.num_trucks
@@ -33,7 +32,6 @@ class NodeInfo:
 
     def as_child(self, parent: NodeInfo):
         self.columns = parent.columns.copy()
-        self.column_elementary_paths = parent.column_elementary_paths.copy()
         self.column_customer_visits = copy.deepcopy(parent.column_customer_visits)
         self.vehicle_fleet_branch_lb = parent.vehicle_fleet_branch_lb
         self.vehicle_fleet_branch_ub = parent.vehicle_fleet_branch_ub

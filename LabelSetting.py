@@ -1,4 +1,5 @@
 import time
+
 import numpy as np
 import queue
 import GeneralHelper
@@ -12,12 +13,11 @@ import cProfile, pstats, io
 
 class LabelSetting:
     def __init__(self, duals):
-        random.seed(seed)
         self.net = GeneralHelper.transformed_net
         # the ordered dict is used to ensure the exact visit sequence of the dict (code reproduction)
         self.forward_labels = {node: OrderedDict() for node in self.net.all_nodes}  # save forward label keys
         # cost, elem path
-        self.best_solution = (np.inf, None)
+        self.best_solution = (np.inf, [])
         self.duals = duals
         self.forward_label_queue = queue.PriorityQueue()  # priority queue, ordered by depth
         self.forward_label_counter = itertools.count()
@@ -28,16 +28,13 @@ class LabelSetting:
         new_labels = {}  # the new labels awaiting to be appended, key: node, value: new_label
 
         _, _, label = self.forward_label_queue.get()
-        # if label.path == ['Source', 'C6', 'H2', 'C2_T', 'C3_T', 'C14']:
 
         # check extending
-        available_extensions = SortedSet(label.alternative_extensions)
         # print(
         #     f"current path: {label.path}, feasible extension: {list(available_extensions)}, "
         #     f"queue size: {self.forward_label_queue.qsize()}")
-        for node_j in available_extensions:
-            label.alternative_extensions.remove(node_j)
 
+        for node_j in label.alternative_extensions:
             if not label.allow_extend(node_j, node_info, self.N_hat):
                 continue
 
@@ -49,43 +46,38 @@ class LabelSetting:
             if tuple(label_j.path) in GeneralHelper.initial_routes:
                 continue
 
-            if tuple(label_j.path) in node_info.columns:
-                continue
-
-            # check dominance
-            dominated_by_j, other_dominates_j, other_dom_label = (
-                self.dominance_check(label_j, self.forward_labels[node_j].values(), farkas, node_info))
-
-            # dominated_by_j = None
-            # other_dominates_j = False
-            # other_dom_label = None
-
-            for key in dominated_by_j.keys():
-                self.forward_labels[node_j].pop(key, None)
-
-            # if j is not dominated by others
-            if not other_dominates_j:
-                is_new_path = True if tuple(label_j.path) not in self.forward_labels[node_j].keys() else False
-                if not is_new_path:
-                    continue
-                # is a new path
-                new_labels[node_j] = label_j
-                # only if this label is possible to be extended
-                if len(label_j.alternative_extensions) > 0:
-                    self.forward_label_queue.put((-label_j.depth, next(self.forward_label_counter), label_j))
-                # check whether it is completed, update the incumbent
-                if node_j == self.net.depot_sink:
-                    if label_j.cost < self.best_solution[0]:
-                        if enable_DSS:
-                            # check revisit
-                            repeated_cus = get_revisit(label_j.path, GeneralHelper.transformed_net)
-                            if len(repeated_cus) > 0:
-                                for cus in repeated_cus:
-                                    self.N_hat.update((cus, cus + "_T"))
-                            else:  # no revisit, update the best solution
-                                self.best_solution = (label_j.cost, label_j.path)
-                        else:
+            # check whether it is completed, update the incumbent
+            if node_j == self.net.depot_sink:
+                if label_j.cost < self.best_solution[0]:
+                    if enable_DSS:
+                        # check revisit
+                        repeated_cus = get_revisit(label_j.path, GeneralHelper.transformed_net)
+                        if len(repeated_cus) > 0:
+                            for cus in repeated_cus:
+                                self.N_hat.update((cus, cus + "_T"))
+                        else:  # no revisit, update the best solution
                             self.best_solution = (label_j.cost, label_j.path)
+                    else:
+                        self.best_solution = (label_j.cost, label_j.path)
+            else:
+                # check dominance
+                dominated_by_j, other_dominates_j, other_dom_label = (
+                    self.dominance_check(label_j, self.forward_labels[node_j].values(), farkas, node_info))
+
+                # dominated_by_j = None
+                # other_dominates_j = False
+                # other_dom_label = None
+
+                for key in dominated_by_j.keys():
+                    self.forward_labels[node_j].pop(key, None)
+
+                # if j is not dominated by others
+                if not other_dominates_j:
+                    # is a new path
+                    new_labels[node_j] = label_j
+                    # only if this label is possible to be extended
+                    if len(label_j.alternative_extensions) > 0:
+                        self.forward_label_queue.put((-label_j.depth, next(self.forward_label_counter), label_j))
 
         # update the forward_labels at once
         for node, label in new_labels.items():
@@ -110,9 +102,7 @@ class LabelSetting:
                              wait_time=0,
                              psi_set={pi: 0 for pi in node_info.added_SR_keys},
                              cost=truck_cost + self.duals["constant_term"],
-                             depth=0,
-                             drone_flights={},
-                             truck_path=[self.net.depot_source])
+                             depth=0)
             ))
         else:  # Farkas pricing
             self.forward_label_queue.put((
@@ -125,9 +115,7 @@ class LabelSetting:
                              wait_time=0,
                              psi_set={pi: 0 for pi in node_info.added_SR_keys},
                              cost=self.duals["constant_term"],
-                             depth=0,
-                             drone_flights={},
-                             truck_path=[self.net.depot_source])
+                             depth=0)
             ))
 
         s_time = time.time()
@@ -136,11 +124,10 @@ class LabelSetting:
 
         while True:
             # forward only
-            # while self.best_solution[0] + close_tolerance > 0 and self.forward_label_queue.qsize() > 0:
-            while self.forward_label_queue.qsize() > 0:
+            while self.best_solution[0] + close_tolerance > 0 and self.forward_label_queue.qsize() > 0:
+                # while self.forward_label_queue.qsize() > 0:
                 self.forward_labeling_one_step(farkas, node_info)
-
-            self.print_runtime_info(s_time, node_info)
+            # self.print_runtime_info(s_time, node_info)
             return self.best_solution
 
     def dominance_check(self, label_j, other_labels, farkas, node_info: NodeInfo):
@@ -156,6 +143,7 @@ class LabelSetting:
                 dominated_by_j[tuple(other.path)] = other
             else:
                 other_dominates = other.dominates(label_j, node_info, farkas, self.duals)
+
                 if other_dominates:
                     other_dominates_j = True
                     other_dom_label = other
@@ -166,7 +154,7 @@ class LabelSetting:
     def print_runtime_info(self, start_time, node_info: NodeInfo):
         arrival_times, sync_times, wait_times = [0], [0], [0]
         last_hub = None
-        obj, path, element_path = self.best_solution
+        obj, element_path = self.best_solution
 
         if element_path is None:
             return
@@ -188,14 +176,6 @@ class LabelSetting:
             wait_times.append(wait_time)
             runtime = time.time() - start_time
 
-            if runtime > GeneralHelper.max_runtime:
-                GeneralHelper.max_runtime = runtime
-                GeneralHelper.which_node_col_num = len(node_info.columns)
-
-            if runtime > GeneralHelper.max_time:
-                GeneralHelper.max_time = runtime
-                GeneralHelper.max_id = node_info.id
-                GeneralHelper.max_num = len(node_info.columns)
         print(
             f"node info: {node_info.id}, num cols: {len(node_info.columns)}, runtime: {runtime:.4f}s")
         print()

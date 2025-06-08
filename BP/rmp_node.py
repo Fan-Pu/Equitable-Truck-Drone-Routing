@@ -116,10 +116,18 @@ class RMPNode:
         farkas = True if self.status == GRB.INFEASIBLE else False
         label_setting = LabelSetting(self.duals)
 
+        test_path = ['Source', 'C6', 'C7', 'H2', 'Sink']
+        if node_info.id == 3:
+            test_route = elem_path_to_route(test_path, 999, GeneralHelper.net, GeneralHelper.transformed_net)
+            cost = route_get_cost(test_route, GeneralHelper.net, GeneralHelper.transformed_net)
+            reduced_cost = cost + self.duals['constant_term'] - self.duals['mu'][5] - self.duals['mu'][6]
+            dsa = 0
+
         if len(node_info.columns) == 99999:
             lp.enable()
             lp.add_function(label_setting.solve)
         reduced_cost, element_path = label_setting.solve(farkas, node_info)
+
         if len(node_info.columns) == 999999:
             lp.disable()
             lp.print_stats()
@@ -144,16 +152,13 @@ class RMPNode:
 
         # find a new route
         if reduced_cost + close_tolerance < 0:
-            route_key, new_route = hashable_path_to_route(hashable_path, len(bp.route_key_id_pairs),
-                                                          GeneralHelper.transformed_net)
-            # an unexplored route
-            if route_key not in bp.route_dict.keys():
-                bp.route_dict[route_key] = new_route
-                bp.route_key_id_pairs[route_key] = new_route['id']
+            route_key = tuple(element_path)
+            new_route = elem_path_to_route(element_path, len(bp.route_dict), GeneralHelper.net,
+                                           GeneralHelper.transformed_net)
+            bp.route_dict[route_key] = new_route
             # add the column to RMP
             if route_key not in bp.node_infos[node_id].columns:
                 bp.node_infos[node_id].columns.append(route_key)
-                bp.node_infos[node_id].column_elementary_paths[route_key] = element_path
                 bp.node_infos[node_id].column_customer_visits[route_key].update(
                     get_route_customer_visits(bp.route_dict[route_key]))
 

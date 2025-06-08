@@ -12,7 +12,6 @@ import cProfile, pstats, io
 node_id_counter = 0
 node_infos = {}
 route_dict = {}  # key (truck_route, drone_route)
-route_key_id_pairs = {}  # key: route key. value: route id
 RMP_nodes = {}
 
 
@@ -32,7 +31,6 @@ class BranchAndPrice:
         for i in range(len(routes)):
             route_key, route = routes[i]
             route_dict[route_key] = route
-            route_key_id_pairs[route_key] = route['id']
             GeneralHelper.initial_routes.append(route_key)
         self.initial_element_paths = dict(element_paths)
 
@@ -78,6 +76,11 @@ class BranchAndPrice:
             priority, node_id = self.branch_queue.get()
             # solve the current node
             is_integer_sol, branch_candidates, var_vals, lp_iters, lp_obj_val = self.node_solutions[node_id]
+
+            test_sol_include = []
+            for sol in test_solutions:
+                test_sol_include.append(sol in node_infos[node_id].columns)
+            sdas = 0
 
             # feasible node
             if is_integer_sol is not None:
@@ -308,7 +311,6 @@ class BranchAndPrice:
                 # remove the columns
                 for column_key in remove_col_keys_left:
                     node_left.columns.remove(column_key)
-                    del node_left.column_elementary_paths[column_key]
                     del node_left.column_customer_visits[column_key]
                     # check SR infos
                     for triple in node_left.column_in_SR_triples[column_key]:
@@ -318,7 +320,6 @@ class BranchAndPrice:
                     node_left.column_in_SR_triples[column_key].clear()
                 for column_key in remove_col_keys_right:
                     node_right.columns.remove(column_key)
-                    del node_right.column_elementary_paths[column_key]
                     del node_right.column_customer_visits[column_key]
                     # check SR infos
                     for triple in node_right.column_in_SR_triples[column_key]:
@@ -336,7 +337,7 @@ class BranchAndPrice:
                                           i != trans_net.depot_source and j != trans_net.depot_sink}
                 for column_key in current_node.columns:
                     flow_num = var_vals[column_key]
-                    element_path = current_node.column_elementary_paths[column_key]
+                    element_path = list(column_key)
                     for i in range(len(element_path) - 1):
                         node_i = element_path[i]
                         node_j = element_path[i + 1]
@@ -378,8 +379,7 @@ class BranchAndPrice:
                 remove_col_keys_left = set()
                 remove_col_keys_right = set()
                 for column_key in current_node.columns:
-                    element_path = current_node.column_elementary_paths[column_key]
-
+                    element_path = list(column_key)
                     for temp_arc in new_disabled_arcs_left:
                         if if_path_travel_arc(element_path, temp_arc):
                             remove_col_keys_left.add(column_key)
@@ -394,7 +394,6 @@ class BranchAndPrice:
                 # remove the columns
                 for column_key in remove_col_keys_left:
                     node_left.columns.remove(column_key)
-                    del node_left.column_elementary_paths[column_key]
                     del node_left.column_customer_visits[column_key]
                     # check SR infos
                     for triple in node_left.column_in_SR_triples[column_key]:
@@ -404,7 +403,6 @@ class BranchAndPrice:
                     node_left.column_in_SR_triples[column_key].clear()
                 for column_key in remove_col_keys_right:
                     node_right.columns.remove(column_key)
-                    del node_right.column_elementary_paths[column_key]
                     del node_right.column_customer_visits[column_key]
                     # check SR infos
                     for triple in node_right.column_in_SR_triples[column_key]:

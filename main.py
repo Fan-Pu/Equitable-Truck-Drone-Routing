@@ -8,7 +8,7 @@ if __name__ == '__main__':
     # data preparation
     GeneralHelper.create_original_network()
     GeneralHelper.transform_network()
-    # visualize_network()
+    # GeneralHelper.visualize_network()
 
     test_case = FullModel()
 

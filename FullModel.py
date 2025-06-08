@@ -382,7 +382,7 @@ class FullModel:
         obj_val = -1
 
         # Retrieve the values
-        if model.Status == GRB.OPTIMAL or model.Status == GRB.SUBOPTIMAL:
+        if model.Status in [GRB.OPTIMAL, GRB.SUBOPTIMAL, GRB.INTERRUPTED]:
             print(f"Objective value: {model.ObjVal}")
             obj_val = model.ObjVal
             mip_gap_percent = model.MIPGap * 100

@@ -20,7 +20,6 @@ from collections import Counter
 
 M = 10000
 close_tolerance = 0.001
-# cost_scale = 0.01
 
 enable_DSS = False
 
@@ -29,9 +28,9 @@ root_node_max_col_num = 999
 cw = 0.25
 # cw = 1
 
-arc_gen_prob = 0.01  # the probability of generating a truck arc
+arc_gen_prob = 0.1  # the probability of generating a truck arc
 hub_arc_gen_prob = 0.5  # the probability of generating a truck arc that connects a hub
-drone_arc_gen_prob = 0.5  # the probability of generating a drone arc
+drone_arc_gen_prob = 0.2  # the probability of generating a drone arc
 
 columns_list = []
 
@@ -39,13 +38,6 @@ SR_num = 0  # the maximum number of SR inequalities
 SR_num_each_run = 0
 
 node_lp_trace = []
-
-max_runtime = 0
-which_node_col_num = 0
-
-max_time = 0
-max_num = 0
-max_id = 0
 
 allow_extend_checks_passed = 0
 
@@ -95,6 +87,13 @@ num_hubs = 2
 locations = {}
 
 initial_routes = []
+
+test_solutions = [
+    ['Source', 'C6', 'C7', 'H2', 'Sink'],
+    ['Source', 'C13', 'H1', 'C8_T', 'C9_T', 'C15_T', 'C4', 'H2', 'Sink'],
+    ['Source', 'C11', 'C5', 'C14', 'H2', 'C3', 'C10', 'Sink'],
+    ['Source', 'C2', 'C12', 'H1', 'C1', 'Sink']
+]
 
 
 def update_arc_infos(location, term, travel_time, is_truck, truck_travel_times, truck_out_arcs, truck_in_arcs,
@@ -297,32 +296,35 @@ def is_integer(num):
     return abs(num - round(num)) <= close_tolerance
 
 
-def is_subsequence(sub, full):
-    """Check if 'sub' is a subsequence of 'full' while preserving order."""
-    i = 0
-    n = len(sub)
-    if n == 0:
-        return True
-    for x in full:
-        if x == sub[i]:
-            i += 1
-            if i == n:
-                return True
-    return False
+def is_subsequence(sub, full_index_map):
+    """
+    Return True if `sub` is a subsequence of the original `full` list.
+    Because there are no duplicates, we can simply compare indices.
+    """
+    # Keep track of the index in `full` that we matched most recently.
+    prev_index = -1
+    for value in sub:
+        # If `value` does not appear in `full`, it cannot match.
+        if value not in full_index_map:
+            return False
+        current_index = full_index_map[value]
+        # If indices do not increase, the order is wrong.
+        if current_index <= prev_index:
+            return False
+        prev_index = current_index
+    return True
 
 
 def get_arrive_time(arrival_time, node_i, node_j, last_hub, sync_time, wait_time, network: TransformedNetwork):
     """
     return the arrival time at node_j
     """
+
     arc = (node_i, node_j)
     if arc in network.arcs_ori:
         result = arrival_time + network.travel_times[arc]
     elif arc in network.arcs_cpc:
-        if last_hub is None:
-            travel_time = min(network.travel_times[arc].values())
-        else:
-            travel_time = network.travel_times[arc][last_hub]
+        travel_time = network.travel_times[arc][last_hub]
         result = sync_time + wait_time + travel_time
     # arcs_cpcp and arcs_SC'
     else:
@@ -337,22 +339,22 @@ def elem_path_to_route(path, idx, ori_net: Network, trans_net: TransformedNetwor
     """
     convert the elementary path derived from LSA to path stored in solution pool
     """
+
     truck_route = []
     drone_route = defaultdict(list)
-    launches = [key for key in drone_route.keys()]
+    launches = []
     for node in path:
         if node in trans_net.hubs:
             launches.append(node)
-            truck_route.append(node)
-        elif node in trans_net.customers_prime:
-            drone_route[launches[-1]].append(drone_route)
+        if node in trans_net.customers_prime:
+            drone_route[launches[-1]].append(node)
         else:
             truck_route.append(node)
 
-    route = {'id': idx, 'truck': truck_route, 'drone': drone_route, 'launches': launches, 'cost': 0}
+    route = {'id': idx, 'truck': truck_route, 'drone': drone_route, 'cost': 0}
     route['cost'] = route_get_cost(route, ori_net, trans_net)
 
-    return path, route
+    return route
 
 
 def find_initial_routes(original_net, trans_net):
@@ -371,7 +373,7 @@ def find_initial_routes(original_net, trans_net):
         return_time = arrive_time + truck_travel_times[(n_name, depot_sink)]
         cost = cw * (arrive_time - a_lb[n_name]) ** 2 + truck_cost
         cost += cw * return_time
-        route = {'id': len(routes), 'truck': truck_route, 'drone': {}, 'launches': [], 'cost': cost}
+        route = {'id': len(routes), 'truck': truck_route, 'drone': {}, 'cost': cost}
 
         key = tuple(truck_route)
         routes.append((key, route))

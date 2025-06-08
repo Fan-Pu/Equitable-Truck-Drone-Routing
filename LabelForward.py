@@ -4,41 +4,39 @@ from GeneralHelper import *
 
 
 class LabelForward:
-    def __init__(self, path, truck_load, drones_used, arrival_time, sync_time, wait_time, psi_set, cost, depth,
-                 drone_flights, truck_path):
+    def __init__(self, path, truck_load, drones_used, arrival_time, sync_time, wait_time, psi_set, cost, depth):
         self.path = path  # Ordered sequence of visited nodes (partial path)
         self.truck_load = truck_load  # Truck loading weight
         self.drones_used = drones_used  # Number of drones used
         self.arrival_time = arrival_time  # Arrival time at last node
         self.sync_time = sync_time  # Arrival time at last synchronization point
         self.wait_time = wait_time  # truck waiting time
-        self.psi_set = psi_set.copy()
+        self.psi_set = psi_set.copy()  # for SR inequalities
         self.cost = cost  # Accumulated cost
         # auxiliary components
         self.net = GeneralHelper.transformed_net
         self.depth = depth
-        self.alternative_extensions = {node_j for node_j in self.net.out_arcs[self.path[-1]]}
-        self.drone_flights = {k: v.copy() for k, v in drone_flights.items()}
-        self.truck_path = truck_path
+        self.alternative_extensions = [node_j for node_j in self.net.out_arcs[self.path[-1]]]
         self.latest_hub = None
+        self.index_map = {value: idx for idx, value in enumerate(path)}  # for fast subsequence check
 
     def dominates(self, other, node_info: NodeInfo, farkas: bool, duals=None):
         """Check if this label dominates another."""
         strict = False  # check whether contains a strict condition
 
-        # condition 1.1 violated
-        if not is_subsequence(self.path, other.path):
+        # condition subset violated
+        if not is_subsequence(self.path, other.index_map):
             return False
-        elif self.path != other.path:  # Order-sensitive check
+        elif len(self.path) != len(other.path):  # strict subsequence
             strict = True
 
-        # condition 1.2 violated
+        # condition truck load violated
         if self.truck_load > other.truck_load:
             return False
         elif self.truck_load < other.truck_load:
             strict = True
 
-        # condition 1.3 violated
+        # condition drone fleet violated
         if self.drones_used > other.drones_used:
             return False
         elif self.drones_used < other.drones_used:
@@ -95,6 +93,18 @@ class LabelForward:
         _node_j = node_j.replace("_T", "")
         arc = (node_i, node_j)
 
+        # if node_i in self.net.hubs and node_j in self.net.customers_origin:
+        #     return False
+
+        # check Loading Capacity Constraints
+        if self.truck_load + self.net.demand_weights[node_j] > truck_max_weight:
+            return False
+
+        # check Drone Fleet Constraints
+        if arc in self.net.arcs_scp or arc in self.net.arcs_cpcp:
+            if self.drones_used >= num_drones_per_truck:
+                return False
+
         # check branch arcs in transformed network
         if arc in node_info.disabled_arcs_trans:
             return False
@@ -112,7 +122,7 @@ class LabelForward:
             else:  # not a customer node
                 if node_j in self.path:
                     return False
-        else:  # no DSS
+        else:  # enable DSS
             if node_j in N_hat:
                 return False
 
@@ -122,15 +132,6 @@ class LabelForward:
                 return False
         if arc in self.net.arcs_cpc:
             if (self.latest_hub, node_j) not in self.net.arcs_ori:
-                return False
-
-        # check Loading Capacity Constraints
-        if self.truck_load + self.net.demand_weights[node_j] > truck_max_weight:
-            return False
-
-        # check Drone Fleet Constraints
-        if arc in self.net.arcs_scp or arc in self.net.arcs_cpcp:
-            if self.drones_used >= num_drones_per_truck:
                 return False
 
         # check Arrival Time Constraints
@@ -144,15 +145,6 @@ class LabelForward:
         # check disabled truck arcs in the original network
         if arc in self.net.arcs_ori and arc in node_info.disabled_arcs_trucks:
             return False
-
-        # # check completion
-        # if node_j == self.net.depot_sink:
-        #     for i, _ in node_info.must_visit_arcs_trucks:
-        #         if i not in self.path:
-        #             return False
-        #     for i, n in node_info.must_visit_arcs_drones:
-        #         if i not in self.path or n not in self.path:
-        #             return False
 
         # check AD+
         if arc in self.net.arcs_cpc:
@@ -199,19 +191,17 @@ class LabelForward:
             wait_time=self.wait_time,
             psi_set=self.psi_set,
             cost=self.cost,
-            depth=self.depth + 1,
-            drone_flights=self.drone_flights,
-            truck_path=self.truck_path[:])
-        label_j.alternative_extensions = {node for node in self.net.out_arcs[node_j] if node not in self.path}
+            depth=self.depth + 1)
+        label_j.alternative_extensions = [node for node in self.net.out_arcs[node_j] if node not in self.path]
         label_j.latest_hub = self.latest_hub
 
         # update path
         label_j.path.append(node_j)
+        label_j.index_map[node_j] = len(self.path)
 
         # update latest_hub
         if node_j in self.net.hubs:
             label_j.latest_hub = node_j
-            label_j.drone_flights[node_j] = set()
 
         # update truck load
         if node_j in self.net.customers:
@@ -263,12 +253,6 @@ class LabelForward:
                 label_j.cost += -duals["mu"][index] - sum_nu
             else:
                 label_j.cost += -sum_nu
-
-        # update auxiliary infos
-        if arc in self.net.arcs_scp or arc in self.net.arcs_cpcp:
-            label_j.drone_flights[label_j.latest_hub].add(node_j)
-        elif arc in self.net.arcs_ori or arc in self.net.arcs_cpc:
-            label_j.truck_path.append(node_j)
 
         return label_j
 
