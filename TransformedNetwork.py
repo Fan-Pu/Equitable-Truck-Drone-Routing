@@ -80,7 +80,8 @@ class TransformedNetwork:
             omega_D_set[node] = []
             for node_j in net.drone_out_arcs[node]:
                 omega_D_set[node].append(node_j)
-            omega_D_set[node].sort()
+            index_map = {label: i for i, label in enumerate(self.customers_origin)}
+            omega_D_set[node].sort(key=lambda s: index_map[s])
             for j in range(len(omega_D_set[node])):
                 node_j = omega_D_set[node][j]
                 for k in range(j + 1, len(omega_D_set[node])):

@@ -79,8 +79,12 @@ class BranchAndPrice:
 
             test_sol_include = []
             for sol in test_solutions:
-                test_sol_include.append(sol in node_infos[node_id].columns)
+                test_route = elem_path_to_route(sol, 999, GeneralHelper.net, GeneralHelper.transformed_net)
+                cost = route_get_cost(test_route, GeneralHelper.net, GeneralHelper.transformed_net)
+                test_sol_include.append(tuple(sol) in node_infos[node_id].columns)
             sdas = 0
+            if node_id == 1:
+                sdas = 0
 
             # feasible node
             if is_integer_sol is not None:
@@ -369,11 +373,12 @@ class BranchAndPrice:
                         disabled_arc = (node_i, node_next)
                         node_right.disabled_arcs_trans.add(disabled_arc)
                         new_disabled_arcs_right.add(disabled_arc)
-                for node_pre in trans_net.in_arcs[node_j]:
-                    if node_pre != node_i:
-                        disabled_arc = (node_pre, node_j)
-                        node_right.disabled_arcs_trans.add(disabled_arc)
-                        new_disabled_arcs_right.add(disabled_arc)
+                if node_j not in trans_net.hubs:
+                    for node_pre in trans_net.in_arcs[node_j]:
+                        if node_pre != node_i:
+                            disabled_arc = (node_pre, node_j)
+                            node_right.disabled_arcs_trans.add(disabled_arc)
+                            new_disabled_arcs_right.add(disabled_arc)
 
                 # remove columns
                 remove_col_keys_left = set()

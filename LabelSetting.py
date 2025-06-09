@@ -35,12 +35,57 @@ class LabelSetting:
         #     f"queue size: {self.forward_label_queue.qsize()}")
 
         for node_j in label.alternative_extensions:
+
+            if node_info.id == 1 and len(node_info.columns) == 88:
+                if label.path == ['Source'] and node_j == 'C13':
+                    sdsa = 0
+                if label.path == ['Source', 'C13'] and node_j == 'H1':
+                    sdsa = 0
+                if label.path == ['Source', 'C13', 'H1'] and node_j == 'C8_T':
+                    sdsa = 0
+                if label.path == ['Source', 'C13', 'H1', 'C8_T'] and node_j == 'C9_T':
+                    sdsa = 0
+                if label.path == ['Source', 'C13', 'H1', 'C8_T', 'C9_T'] and node_j == 'C15_T':
+                    sdsa = 0
+                if label.path == ['Source', 'C13', 'H1', 'C8_T', 'C9_T', 'C15_T'] and node_j == 'C4':
+                    sdsa = 0
+                if label.path == ['Source', 'C13', 'H1', 'C8_T', 'C9_T', 'C15_T', 'C4'] and node_j == 'H2':
+                    sdsa = 0
+                if label.path == ['Source', 'C13', 'H1', 'C8_T', 'C9_T', 'C15_T', 'C4', 'H2'] and node_j == 'Sink':
+                    sdsa = 0
+
             if not label.allow_extend(node_j, node_info, self.N_hat):
                 continue
 
-            GeneralHelper.allow_extend_checks_passed += 1
-
             label_j = label.extend(node_j, self.duals, farkas, node_info)
+
+            if node_info.id == 1:
+                if label_j.path == ['Source', 'C13', 'H1', 'C8_T', 'C9_T', 'C15_T', 'C4', 'H2',
+                                    'Sink'] and label_j.cost + close_tolerance < 0:
+                    sada = 0
+
+                test_path = ['Source', 'C13', 'H1', 'C8_T', 'C9_T', 'C15_T', 'C4', 'H2', 'Sink']
+                test_route = elem_path_to_route(test_path, 999, GeneralHelper.net, GeneralHelper.transformed_net)
+                cost = route_get_cost(test_route, GeneralHelper.net, GeneralHelper.transformed_net)
+                reduced_cost = cost + self.duals['constant_term'] - self.duals['mu'][12] - self.duals['mu'][7] - \
+                               self.duals['mu'][8] - self.duals['mu'][14] - self.duals['mu'][3]
+                if label_j.path == ['Source', 'C13', 'H1', 'C8_T', 'C9_T', 'C15_T', 'C4', 'H2',
+                                    'Sink'] and reduced_cost + close_tolerance < 0:
+                    dsdsa = 0
+
+            if node_info.id == 3:
+                if label_j.path == ['Source', 'C13', 'H1', 'C8_T', 'C9_T', 'C15_T', 'C4', 'H2',
+                                    'Sink'] and label_j.cost + close_tolerance < 0:
+                    sada = 0
+
+                test_path = ['Source', 'C13', 'H1', 'C8_T', 'C9_T', 'C15_T', 'C4', 'H2', 'Sink']
+                test_route = elem_path_to_route(test_path, 999, GeneralHelper.net, GeneralHelper.transformed_net)
+                cost = route_get_cost(test_route, GeneralHelper.net, GeneralHelper.transformed_net)
+                reduced_cost = cost + self.duals['constant_term'] - self.duals['mu'][12] - self.duals['mu'][7] - \
+                               self.duals['mu'][8] - self.duals['mu'][14] - self.duals['mu'][3]
+                if label_j.path == ['Source', 'C13', 'H1', 'C8_T', 'C9_T', 'C15_T', 'C4', 'H2',
+                                    'Sink'] and reduced_cost + close_tolerance < 0:
+                    dsdsa = 0
 
             # this is an existing column
             if tuple(label_j.path) in GeneralHelper.initial_routes:
@@ -69,6 +114,8 @@ class LabelSetting:
                 # other_dom_label = None
 
                 for key in dominated_by_j.keys():
+                    if node_info.id == 3 and key == debug_route:
+                        sdas = 0
                     self.forward_labels[node_j].pop(key, None)
 
                 # if j is not dominated by others

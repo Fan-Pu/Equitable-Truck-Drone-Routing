@@ -1,19 +1,13 @@
 import math
 import random
-import re
 from line_profiler import LineProfiler
 import networkx as nx
 from collections import defaultdict
-
-from streamlit import selectbox
 
 from Network import Network
 from TransformedNetwork import TransformedNetwork
 from sortedcontainers import SortedSet
 import numpy as np
-import matplotlib
-
-matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 from sklearn.cluster import KMeans
 from collections import Counter
@@ -28,6 +22,10 @@ root_node_max_col_num = 999
 cw = 0.25
 # cw = 1
 
+# debug_route = ['Source', 'C13', 'H1', 'C8_T', 'C9_T', 'C15_T', 'C4', 'H2']
+
+debug_route = ['Source', 'C13', 'H1', 'C8_T', 'C9_T']
+
 arc_gen_prob = 0.1  # the probability of generating a truck arc
 hub_arc_gen_prob = 0.5  # the probability of generating a truck arc that connects a hub
 drone_arc_gen_prob = 0.2  # the probability of generating a drone arc
@@ -38,8 +36,6 @@ SR_num = 0  # the maximum number of SR inequalities
 SR_num_each_run = 0
 
 node_lp_trace = []
-
-allow_extend_checks_passed = 0
 
 forward_dominance_num = 0
 
@@ -529,6 +525,8 @@ def route_get_cost(route, ori: Network, trans: TransformedNetwork):
         wait_time = 0
         if node in ori.customers:
             cost += cw * (truck_arr_time - trans.a_lb[node]) ** 2
+            if truck_arr_time + close_tolerance < trans.a_lb[node]:
+                sdsad = 0
         elif node == trans.depot_sink:
             cost += cw * truck_arr_time
         elif node in ori.hubs:
@@ -540,6 +538,8 @@ def route_get_cost(route, ori: Network, trans: TransformedNetwork):
                     drone_arr_time = truck_arr_time + ori.drone_travel_times[(hub, temp_visit)]
                     cost += cw * (drone_arr_time - trans.a_lb[temp_visit]) ** 2
                     wait_time = max(wait_time, ori.drone_travel_times[hub, temp_visit])
+                    if drone_arr_time + close_tolerance < trans.a_lb[temp_visit]:
+                        sdsa = 0
                 cost += drone_cost_per_flight * len(drone_visits)
         pre_node = node
     return cost

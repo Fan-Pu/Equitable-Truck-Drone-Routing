@@ -116,39 +116,37 @@ class RMPNode:
         farkas = True if self.status == GRB.INFEASIBLE else False
         label_setting = LabelSetting(self.duals)
 
-        test_path = ['Source', 'C6', 'C7', 'H2', 'Sink']
+        test_path = ['Source', 'C13', 'H1', 'C8_T', 'C9_T', 'C15_T', 'C4', 'H2', 'Sink']
+        if node_info.id == 1:
+            test_route = elem_path_to_route(test_path, 999, GeneralHelper.net, GeneralHelper.transformed_net)
+            cost = route_get_cost(test_route, GeneralHelper.net, GeneralHelper.transformed_net)
+            reduced_cost = cost + self.duals['constant_term'] - self.duals['mu'][12] - self.duals['mu'][7] - \
+                           self.duals['mu'][8] - self.duals['mu'][14] - self.duals['mu'][3]
+            if reduced_cost + close_tolerance < 0:
+                dsdsa = 0
         if node_info.id == 3:
             test_route = elem_path_to_route(test_path, 999, GeneralHelper.net, GeneralHelper.transformed_net)
             cost = route_get_cost(test_route, GeneralHelper.net, GeneralHelper.transformed_net)
-            reduced_cost = cost + self.duals['constant_term'] - self.duals['mu'][5] - self.duals['mu'][6]
-            dsa = 0
+            reduced_cost = cost + self.duals['constant_term'] - self.duals['mu'][12] - self.duals['mu'][7] - \
+                           self.duals['mu'][8] - self.duals['mu'][14] - self.duals['mu'][3]
+            if reduced_cost + close_tolerance < 0:
+                dsdsa = 0
 
-        if len(node_info.columns) == 99999:
-            lp.enable()
-            lp.add_function(label_setting.solve)
         reduced_cost, element_path = label_setting.solve(farkas, node_info)
 
-        if len(node_info.columns) == 999999:
-            lp.disable()
-            lp.print_stats()
-            input()
-
-        # reduced_cost, hashable_path, element_path, where = label_setting.solve(farkas, node_info)
-
-        # if element_path is not None:
-        #     route_key, new_route = hashable_path_to_route(hashable_path, len(bp.route_key_id_pairs),
-        #                                                   GeneralHelper.transformed_net)
-        #     # check feasibility
-        #     for i, j in node_info.disabled_arcs_trucks:
-        #         if if_route_travel_arc(new_route, i, j, GeneralHelper.net):
-        #             sdas = 0
-        #     for i, j in node_info.disabled_arcs_drones:
-        #         if if_route_travel_arc(new_route, i, j + "_T", GeneralHelper.net):
-        #             sdas = 0
-        #     for i, j in (node_info.must_visit_arcs_trucks | node_info.must_visit_arcs_drones
-        #                  | node_info.must_visit_arcs_trans):
-        #         if not if_route_travel_arc(new_route, i, j, GeneralHelper.net):
-        #             sda = 0
+        if element_path is not None:
+            new_route = elem_path_to_route(element_path, 999, GeneralHelper.net, GeneralHelper.transformed_net)
+            # check feasibility
+            for i, j in node_info.disabled_arcs_trucks:
+                if if_route_travel_arc(new_route, i, j, GeneralHelper.net):
+                    sdas = 0
+            for i, j in node_info.disabled_arcs_drones:
+                if if_route_travel_arc(new_route, i, j + "_T", GeneralHelper.net):
+                    sdas = 0
+            for i, j in (node_info.must_visit_arcs_trucks | node_info.must_visit_arcs_drones
+                         | node_info.must_visit_arcs_trans):
+                if not if_route_travel_arc(new_route, i, j, GeneralHelper.net):
+                    sda = 0
 
         # find a new route
         if reduced_cost + close_tolerance < 0:
