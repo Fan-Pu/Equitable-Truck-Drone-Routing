@@ -26,13 +26,14 @@ class BranchAndPrice:
         self.global_lower_bound = -float('inf')
         self.gap = 1  # optimality gap
         self.best_solution_node: RMPNode = None
+        self.initial_element_paths = []
         # add initial routes
-        routes, element_paths = find_initial_routes(GeneralHelper.net, GeneralHelper.transformed_net)
-        for i in range(len(routes)):
-            route_key, route = routes[i]
-            route_dict[route_key] = route
-            GeneralHelper.initial_routes.append(route_key)
-        self.initial_element_paths = dict(element_paths)
+        # routes, element_paths = find_initial_routes(GeneralHelper.net, GeneralHelper.transformed_net)
+        # for i in range(len(routes)):
+        #     route_key, route = routes[i]
+        #     route_dict[route_key] = route
+        #     GeneralHelper.initial_routes.append(route_key)
+        # self.initial_element_paths = list(element_paths.values())
 
     def solve(self):
         """Main branch-and-price loop"""
@@ -46,7 +47,8 @@ class BranchAndPrice:
         root_node.columns = GeneralHelper.initial_routes
         root_node.column_elementary_paths = self.initial_element_paths
         # setup the column customer visits
-        for route_key, elem_path in root_node.column_elementary_paths.items():
+        for elem_path in root_node.column_elementary_paths:
+            route_key = tuple(elem_path)
             root_node.column_customer_visits[route_key].update(get_route_customer_visits(route_dict[route_key]))
         # initialize SR infos
         root_node.init_SR_infos()
@@ -54,6 +56,7 @@ class BranchAndPrice:
         RMP_node = RMPNode(root_node)
         RMP_nodes[root_node.id] = RMP_node
         s_t = time.time()
+
         is_integer_sol, branch_candidates, var_vals, lp_iters, lp_obj_val = self.solve_node(root_node, RMP_node)
         use_time = time.time() - s_t
         self.node_solutions[node_id] = [is_integer_sol, branch_candidates, var_vals, lp_iters, lp_obj_val]
@@ -67,6 +70,15 @@ class BranchAndPrice:
             log_text += f", integer obj: {round(lp_obj_val, 2)}"
         print(Fore.RED + log_text + Style.RESET_ALL)
 
+        # test_path = ['Source', 'C13', 'H1', 'C8_T', 'C9_T', 'C15_T', 'C4', 'H2', 'Sink']
+        # test_route = elem_path_to_route(test_path, 999, GeneralHelper.net, GeneralHelper.transformed_net)
+        # cost = route_get_cost(test_route, GeneralHelper.net, GeneralHelper.transformed_net)
+        # reduced_cost = cost + GeneralHelper.duals['constant_term'] - GeneralHelper.duals['mu'][12] - \
+        #                GeneralHelper.duals['mu'][7] - \
+        #                GeneralHelper.duals['mu'][8] - GeneralHelper.duals['mu'][14] - GeneralHelper.duals['mu'][3]
+        # if reduced_cost + close_tolerance < 0:
+        #     dsdsa = 0
+
         # main loop
         while not self.branch_queue.empty():
             if time.time() - start_time > self.max_runtime:
@@ -77,14 +89,14 @@ class BranchAndPrice:
             # solve the current node
             is_integer_sol, branch_candidates, var_vals, lp_iters, lp_obj_val = self.node_solutions[node_id]
 
-            test_sol_include = []
-            for sol in test_solutions:
-                test_route = elem_path_to_route(sol, 999, GeneralHelper.net, GeneralHelper.transformed_net)
-                cost = route_get_cost(test_route, GeneralHelper.net, GeneralHelper.transformed_net)
-                test_sol_include.append(tuple(sol) in node_infos[node_id].columns)
-            sdas = 0
-            if node_id == 1:
-                sdas = 0
+            # test_sol_include = []
+            # for sol in test_solutions:
+            #     test_route = elem_path_to_route(sol, 999, GeneralHelper.net, GeneralHelper.transformed_net)
+            #     cost = route_get_cost(test_route, GeneralHelper.net, GeneralHelper.transformed_net)
+            #     test_sol_include.append(tuple(sol) in node_infos[node_id].columns)
+            # sdas = 0
+            # if node_id == 1:
+            #     sdas = 0
 
             # feasible node
             if is_integer_sol is not None:
@@ -425,6 +437,8 @@ class BranchAndPrice:
         :return: is_integer, branch_candidates, var_vals, lp_iters, lp_obj_val
         """
 
+        s_time = time.time()
+
         rmp_node.solve()
         lp_iters = 1
 
@@ -432,11 +446,10 @@ class BranchAndPrice:
         new_col_num = 0
         while True:
             add_new_column = rmp_node.run_pricer(node_info)
-            if not add_new_column:
-                break
+            run_time = time.time() - s_time
             new_col_num += 1
             rmp_node.solve()
-            if node_info.id == 1 and new_col_num >= root_node_max_col_num:
+            if not add_new_column or run_time > max_node_runtime:
                 break
             # print("LSA returned")
             lp_iters += 1
@@ -467,3 +480,17 @@ class BranchAndPrice:
                 solution.append(route)
                 cost += route['cost']
         return solution, cost
+
+    def add_warm_start_solution(self, route_list):
+        for i in range(len(route_list)):
+            route = route_list[i]
+            elem_path = route_to_elem_path(route, GeneralHelper.transformed_net)
+            route_key = tuple(elem_path)
+            route_id = num_customers + i
+            route_cost = route_get_cost(route, GeneralHelper.net, GeneralHelper.transformed_net)
+            if route_key not in route_dict.keys():
+                route['id'] = route_id
+                route['cost'] = route_cost
+                route_dict[route_key] = route
+                GeneralHelper.initial_routes.append(route_key)
+                self.initial_element_paths.append(elem_path)

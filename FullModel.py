@@ -1,15 +1,24 @@
 import gurobipy as gp
 import matplotlib.cm as cm
 from gurobipy import GRB
-
+from collections import defaultdict
 import GeneralHelper
 from GeneralHelper import *
 
 
 class FullModel:
     def __init__(self):
+        # save the values of decision variable
+        self.a_value = None
+        self.ad_value = None
+        self.ak_value = None
+        self.wk_values = None
+        self.t_values = None
+        self.y_values = None
+        self.x_values = None
         self.net = GeneralHelper.net
         self.constraints = []
+        self.solutions = {k: {} for k in range(self.net.num_trucks)}
         # set drone_dict and kd_dict
         self.drone_dict = {}
         self.kd_dict = {}  # key: drone_id
@@ -36,9 +45,9 @@ class FullModel:
         self.truck_travel_times = self.net.truck_travel_times
         self.demand_weights = self.net.demand_weights
         self.final_route = []
+        self.model = gp.Model("model")
 
-    def solve(self):
-        model = gp.Model("model")
+    def solve(self, time_limit):
         # add decision variables
         x_dict = {}
         y_dict = {}
@@ -47,14 +56,12 @@ class FullModel:
                 i = self.all_nodes_indices[n]
                 j = self.all_nodes_indices[node_j]
                 for k in range(self.net.num_trucks):
-                    x_dict[(i, j, k)] = model.addVar(name=f"x_{(i, j, k)}",
-                                                     vtype=GRB.BINARY)
+                    x_dict[(i, j, k)] = self.model.addVar(name=f"x_{(i, j, k)}", vtype=GRB.BINARY, lb=0, ub=1)
             for node_j in self.drone_out_arcs[n]:
                 i = self.all_nodes_indices[n]
                 j = self.all_nodes_indices[node_j]
                 for d in range(self.total_drone_num):
-                    y_dict[(i, j, d)] = model.addVar(name=f"y_{(i, j, d)}",
-                                                     vtype=GRB.BINARY)
+                    y_dict[(i, j, d)] = self.model.addVar(name=f"y_{(i, j, d)}", vtype=GRB.BINARY, lb=0, ub=1)
         # auxiliary variables
         ad_dict = {}
         ak_dict = {}
@@ -62,18 +69,13 @@ class FullModel:
         t_dict = {}
         wk_dict = {}
         for n in range(len(self.all_nodes_indices)):
-            a_dict[n] = model.addVar(name=f"t_{n}",
-                                     vtype=GRB.CONTINUOUS, lb=0)
+            a_dict[n] = self.model.addVar(name=f"t_{n}", vtype=GRB.CONTINUOUS, lb=0)
             for d in range(self.total_drone_num):
-                wk_dict[(n, d)] = model.addVar(name=f"wk_{(n, d)}",
-                                               vtype=GRB.CONTINUOUS, lb=0)
-                ad_dict[(n, d)] = model.addVar(name=f"ad_{(n, d)}",
-                                               vtype=GRB.CONTINUOUS, lb=0)
+                wk_dict[(n, d)] = self.model.addVar(name=f"wk_{(n, d)}", vtype=GRB.CONTINUOUS, lb=0)
+                ad_dict[(n, d)] = self.model.addVar(name=f"ad_{(n, d)}", vtype=GRB.CONTINUOUS, lb=0)
             for k in range(self.net.num_trucks):
-                ak_dict[(n, k)] = model.addVar(name=f"ak_{(n, k)}",
-                                               vtype=GRB.CONTINUOUS, lb=0)
-                t_dict[(n, k)] = model.addVar(name=f"t_{(n, k)}",
-                                              vtype=GRB.CONTINUOUS, lb=0)
+                ak_dict[(n, k)] = self.model.addVar(name=f"ak_{(n, k)}", vtype=GRB.CONTINUOUS, lb=0)
+                t_dict[(n, k)] = self.model.addVar(name=f"t_{(n, k)}", vtype=GRB.CONTINUOUS, lb=0)
 
         # add objective function
         obj_expr = 0
@@ -93,7 +95,7 @@ class FullModel:
                 for j_name in self.drone_out_arcs[n_name]:
                     j = self.all_nodes_indices[j_name]
                     obj_expr += drone_cost_per_flight * y_dict[(n, j, d)]
-        model.setObjective(obj_expr, GRB.MINIMIZE)
+        self.model.setObjective(obj_expr, GRB.MINIMIZE)
 
         # flow conservation ************************************************************
         cons_id = 0
@@ -109,7 +111,7 @@ class FullModel:
                 n, i = self.all_nodes_indices[n_name], self.all_nodes_indices[i_name]
                 rhs += x_dict[(i, n, k)]
             self.constraints.append(
-                model.addConstr(lhs == rhs, name=f"conserv1_{cons_id}"))
+                self.model.addConstr(lhs == rhs, name=f"conserv1_{cons_id}"))
             cons_id += 1
 
         # cons 2
@@ -126,7 +128,7 @@ class FullModel:
                     i = self.all_nodes_indices[i_name]
                     rhs += x_dict[(i, n, k)]
                 self.constraints.append(
-                    model.addConstr(lhs == rhs, name=f"conserv2_{cons_id}"))
+                    self.model.addConstr(lhs == rhs, name=f"conserv2_{cons_id}"))
                 cons_id += 1
 
         # only launch from depot once ************************************************************
@@ -137,7 +139,7 @@ class FullModel:
                 n, j = self.all_nodes_indices[self.depot_source], self.all_nodes_indices[j_name]
                 lhs += x_dict[(n, j, k)]
             self.constraints.append(
-                model.addConstr(lhs <= 1, name=f"launch_once_{cons_id}"))
+                self.model.addConstr(lhs <= 1, name=f"launch_once_{cons_id}"))
             cons_id += 1
 
         # customer serve once ************************************************************
@@ -154,7 +156,7 @@ class FullModel:
                 for d in range(self.total_drone_num):
                     lhs += y_dict[(i, n, d)]
             self.constraints.append(
-                model.addConstr(lhs == 1, name=f"servonce_{cons_id}"))
+                self.model.addConstr(lhs == 1, name=f"servonce_{cons_id}"))
             cons_id += 1
 
         # drone launch ************************************************************
@@ -172,7 +174,7 @@ class FullModel:
                     rhs += x_dict[(i, n, k)]
                 rhs *= len(self.drone_dict[k])
                 self.constraints.append(
-                    model.addConstr(lhs <= rhs, name=f"drone_launch_{cons_id}"))
+                    self.model.addConstr(lhs <= rhs, name=f"drone_launch_{cons_id}"))
                 cons_id += 1
 
         # drone battery ************************************************************
@@ -185,8 +187,8 @@ class FullModel:
                 for d in range(self.total_drone_num):
                     lhs = 2 * travel_time * y_dict[(n, j, d)]
                     self.constraints.append(
-                        model.addConstr(lhs <= drone_endurance,
-                                        name=f"drone_battery_{cons_id}"))
+                        self.model.addConstr(lhs <= drone_endurance,
+                                             name=f"drone_battery_{cons_id}"))
                     cons_id += 1
 
         # payload ************************************************************
@@ -196,8 +198,8 @@ class FullModel:
             n = self.all_nodes_indices[n_name]
             for k in range(self.net.num_trucks):
                 self.constraints.append(
-                    model.addConstr(wk_dict[(n, k)] <= truck_max_weight,
-                                    name=f"payload1_{cons_id}"))
+                    self.model.addConstr(wk_dict[(n, k)] <= truck_max_weight,
+                                         name=f"payload1_{cons_id}"))
                 cons_id += 1
         # cons 2
         for n_name in self.customers:
@@ -206,7 +208,7 @@ class FullModel:
                 i = self.all_nodes_indices[i_name]
                 for k in range(self.net.num_trucks):
                     self.constraints.append(
-                        model.addConstr(
+                        self.model.addConstr(
                             wk_dict[(n, k)]
                             >= wk_dict[(i, k)]
                             + self.demand_weights[n]
@@ -226,7 +228,7 @@ class FullModel:
                         for d in self.drone_dict[k]:
                             rhs += demand_weight * y_dict[(n, j, d)]
                     self.constraints.append(
-                        model.addConstr(
+                        self.model.addConstr(
                             wk_dict[(n, k)] >= wk_dict[(i, k)] + self.demand_weights[n] + rhs + M * (
                                     x_dict[(i, n, k)] - 1),
                             name=f"payload3_{cons_id}"))
@@ -245,8 +247,8 @@ class FullModel:
                     for d in self.drone_dict[k]:
                         rhs += travel_time * y_dict[(n, j, d)]
                     self.constraints.append(
-                        model.addConstr(t_dict[(n, k)] >= rhs,
-                                        name=f"wait1_{cons_id}"))
+                        self.model.addConstr(t_dict[(n, k)] >= rhs,
+                                             name=f"wait1_{cons_id}"))
                     cons_id += 1
         # cons 2
         for n_name in self.all_nodes:
@@ -255,8 +257,8 @@ class FullModel:
             n = self.all_nodes_indices[n_name]
             for k in range(self.net.num_trucks):
                 self.constraints.append(
-                    model.addConstr(t_dict[(n, k)] <= 0,
-                                    name=f"wait2_{cons_id}"))
+                    self.model.addConstr(t_dict[(n, k)] <= 0,
+                                         name=f"wait2_{cons_id}"))
                 cons_id += 1
 
         # realized service times ************************************************************
@@ -267,21 +269,21 @@ class FullModel:
         for d in range(self.total_drone_num):
             lhs += ad_dict[(src, d)]
         self.constraints.append(
-            model.addConstr(lhs <= 0, name="realized_sum"))
+            self.model.addConstr(lhs <= 0, name="realized_sum"))
         # cons a_n
         cons_id = 0
         for n_name in self.customers:
             n = self.all_nodes_indices[n_name]
             for k in range(self.net.num_trucks):
                 self.constraints.append(
-                    model.addConstr(a_dict[n] >= ak_dict[(n, k)], name=f"realized_an1_{cons_id}"))
+                    self.model.addConstr(a_dict[n] >= ak_dict[(n, k)], name=f"realized_an1_{cons_id}"))
                 cons_id += 1
         # cons a_n
         for n_name in self.customers:
             n = self.all_nodes_indices[n_name]
             for d in range(self.total_drone_num):
                 self.constraints.append(
-                    model.addConstr(a_dict[n] >= ad_dict[(n, d)], name=f"realized_an2_{cons_id}"))
+                    self.model.addConstr(a_dict[n] >= ad_dict[(n, d)], name=f"realized_an2_{cons_id}"))
                 cons_id += 1
         # cons a_n,k
         for n_name in self.all_nodes:
@@ -297,7 +299,7 @@ class FullModel:
                            + travel_time * x_dict[(i, n, k)]
                            + M * (x_dict[(i, n, k)] - 1))
                     self.constraints.append(
-                        model.addConstr(ak_dict[(n, k)] >= rhs, name=f"realized_ank1_{cons_id}"))
+                        self.model.addConstr(ak_dict[(n, k)] >= rhs, name=f"realized_ank1_{cons_id}"))
                     cons_id += 1
 
                     rhs = (ak_dict[(i, k)]
@@ -305,7 +307,7 @@ class FullModel:
                            + travel_time * x_dict[(i, n, k)]
                            + M * (1 - x_dict[(i, n, k)]))
                     self.constraints.append(
-                        model.addConstr(ak_dict[(n, k)] <= rhs, name=f"realized_ank2_{cons_id}"))
+                        self.model.addConstr(ak_dict[(n, k)] <= rhs, name=f"realized_ank2_{cons_id}"))
                     cons_id += 1
         for n_name in self.customers:
             n = self.all_nodes_indices[n_name]
@@ -314,7 +316,7 @@ class FullModel:
                 for k in range(self.net.num_trucks):
                     rhs = (GeneralHelper.transformed_net.a_lb[n_name] + M * (x_dict[(i, n, k)] - 1))
                     self.constraints.append(
-                        model.addConstr(ak_dict[(n, k)] >= rhs, name=f"realized_ank3_{cons_id}"))
+                        self.model.addConstr(ak_dict[(n, k)] >= rhs, name=f"realized_ank3_{cons_id}"))
                     cons_id += 1
         # cons a_n,d
         for n_name in self.hubs:
@@ -328,64 +330,67 @@ class FullModel:
                            + travel_time * y_dict[(n, j, d)]
                            + M * (y_dict[(n, j, d)] - 1))
                     self.constraints.append(
-                        model.addConstr(ad_dict[(j, d)] >= rhs,
-                                        name=f"realized_and1_{cons_id}"))
+                        self.model.addConstr(ad_dict[(j, d)] >= rhs,
+                                             name=f"realized_and1_{cons_id}"))
                     cons_id += 1
                     # cons 2
                     rhs = (ak_dict[(n, self.kd_dict[d])]
                            + travel_time * y_dict[(n, j, d)]
                            + M * (1 - y_dict[(n, j, d)]))
                     self.constraints.append(
-                        model.addConstr(ad_dict[(j, d)] <= rhs,
-                                        name=f"realized_and2_{cons_id}"))
+                        self.model.addConstr(ad_dict[(j, d)] <= rhs,
+                                             name=f"realized_and2_{cons_id}"))
                     cons_id += 1
                     # cons 3
                     rhs = (GeneralHelper.transformed_net.a_lb[j_name] + M * (y_dict[(n, j, d)] - 1))
                     self.constraints.append(
-                        model.addConstr(ad_dict[(j, d)] >= rhs, name=f"realized_and3_{cons_id}"))
+                        self.model.addConstr(ad_dict[(j, d)] >= rhs, name=f"realized_and3_{cons_id}"))
                     cons_id += 1
 
-        # test constraints
-        truck_paths = [
-            ['Source', 'C11', 'H1', 'C4', 'Sink'],
-            ['Source', 'C13', 'H1', 'C10', 'Sink'],
-            ['Source', 'C6', 'H2', 'Sink'],
-            ['Source', 'H2', 'C8', 'H1', 'C1', 'Sink']
-        ]
+        # truck_hub
+        cons_id = 0
+        for n_name in self.hubs:
+            n = self.all_nodes_indices[n_name]
+            for k in range(self.net.num_trucks):
+                lhs = 0
+                for j_name in self.truck_out_arcs[n_name]:
+                    j = self.all_nodes_indices[j_name]
+                    lhs += x_dict[(n, j, k)]
+                rhs = 0
+                for d in self.drone_dict[k]:
+                    for j_name in self.drone_out_arcs[n_name]:
+                        j = self.all_nodes_indices[j_name]
+                        rhs += y_dict[(n, j, d)]
+                self.constraints.append(
+                    self.model.addConstr(lhs <= rhs, name=f"truck_hub_{cons_id}"))
+                cons_id += 1
 
-        # for k in range(len(truck_paths)):
-        #     truck_path = truck_paths[k]
-        #     for i_name, j_name in zip(truck_path[:], truck_path[1:]):
-        #         i = self.all_nodes_indices[i_name]
-        #         j = self.all_nodes_indices[j_name]
-        #         model.addConstr(x_dict[(i, j, k)] == 1)
+        self.model.setParam(GRB.Param.TimeLimit, time_limit)
+        self.model.update()
+        self.model.write("full_model.lp")
+        self.model.optimize()
 
-        model.setParam(GRB.Param.TimeLimit, 1)
-        model.update()
-        model.write("full_model.lp")
-        model.optimize()
-
-        if model.Status == GRB.OPTIMAL:
+        if self.model.Status == GRB.OPTIMAL:
             print("Optimal solution found")
-        elif model.Status == GRB.INFEASIBLE:
-            model.computeIIS()
-            model.write("model.ilp")
+        elif self.model.Status == GRB.INFEASIBLE:
+            self.model.computeIIS()
+            self.model.write("self.model.ilp")
             print("No feasible solution found")
-        elif model.Status == GRB.UNBOUNDED:
+        elif self.model.Status == GRB.UNBOUNDED:
             print("The model is unbounded")
-        elif model.Status == GRB.INF_OR_UNBD:
-            model.computeIIS()
-            model.write("model.ilp")
+        elif self.model.Status == GRB.INF_OR_UNBD:
+            self.model.computeIIS()
+            self.model.write("self.model.ilp")
             print("No feasible solution found")
 
         mip_gap_percent = None
         obj_val = -1
 
         # Retrieve the values
-        if model.Status in [GRB.OPTIMAL, GRB.SUBOPTIMAL, GRB.INTERRUPTED]:
-            print(f"Objective value: {model.ObjVal}")
-            obj_val = model.ObjVal
-            mip_gap_percent = model.MIPGap * 100
+        if self.model.Status in [GRB.OPTIMAL, GRB.SUBOPTIMAL, GRB.INTERRUPTED, GRB.TIME_LIMIT]:
+            print(f"Objective value: {self.model.ObjVal}")
+            obj_val = self.model.ObjVal
+            mip_gap_percent = self.model.MIPGap * 100
             self.x_values = {(i, j, k): var.X for (i, j, k), var in x_dict.items()}
             self.y_values = {(i, j, d): var.X for (i, j, d), var in y_dict.items()}
             self.t_values = {(n, k): var.X for (n, k), var in t_dict.items()}
@@ -394,7 +399,6 @@ class FullModel:
             self.ad_value = {(n, d): var.X for (n, d), var in ad_dict.items()}
             self.a_value = {n: var.X for n, var in a_dict.items()}
 
-            costs = []
             # construct the route
             truck_routes = {k: [] for k in range(self.net.num_trucks)}
             for (i, j, k), var in x_dict.items():
@@ -406,31 +410,26 @@ class FullModel:
                 if abs(var.X - 1) <= close_tolerance:
                     drone_routes[d].append((self.all_nodes[i], self.all_nodes[j]))
 
-            solutions = {k: defaultdict(list) for k in range(self.net.num_trucks)}
             truck_routes = {k: self.sort_arcs_to_path(val) for k, val in truck_routes.items()}
             for k, path in truck_routes.items():
                 if not path:
                     continue
+                self.solutions[k]['truck'] = []
                 for pre_node, next_node in path:
-                    solutions[k]['truck'].append(pre_node)
-                solutions[k]['truck'].append(path[-1][-1])
-                solutions[k]['drone'] = defaultdict()
+                    self.solutions[k]['truck'].append(pre_node)
+                self.solutions[k]['truck'].append(path[-1][-1])
+                self.solutions[k]['drone'] = {}
             for d, path in drone_routes.items():
                 k = int(d / num_drones_per_truck)
                 for hub, node in path:
-                    if hub not in solutions[k]['drone']:
-                        solutions[k]['drone'][hub] = [node]
+                    if hub not in self.solutions[k]['drone']:
+                        self.solutions[k]['drone'][hub] = [node + "_T"]
                     else:
-                        solutions[k]['drone'][hub].append(node)
-            for k in solutions.keys():
-                cost = route_get_cost(solutions[k], GeneralHelper.net, GeneralHelper.transformed_net)
-                costs.append(cost)
-            total = sum(costs)
-            dsadsa = 0
+                        self.solutions[k]['drone'][hub].append(node + "_T")
 
-        solving_time = model.Runtime
+        solving_time = self.model.Runtime
 
-        return obj_val, solving_time, mip_gap_percent
+        return obj_val, solving_time, mip_gap_percent, [sol for sol in self.solutions.values()]
 
     def visualize_routes(self):
         pos = nx.circular_layout(self.net.truck_net)
@@ -528,6 +527,7 @@ class FullModel:
         Given a list of arcs as (origin, destination) pairs,
         return a list of arcs ordered into a single path.
         """
+
         if not arcs:
             return []
 
@@ -551,3 +551,8 @@ class FullModel:
             cur = nxt
 
         return path
+
+    def reset(self):
+        for key, sol in self.solutions.items():
+            sol.clear()
+        self.model.reset()

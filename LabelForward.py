@@ -93,8 +93,9 @@ class LabelForward:
         _node_j = node_j.replace("_T", "")
         arc = (node_i, node_j)
 
-        # if node_i in self.net.hubs and node_j in self.net.customers_origin:
-        #     return False
+        # the vehicle cannot visit hub if it does not launch drones at the hub
+        if node_i in self.net.hubs and node_j in self.net.customers_origin:
+            return False
 
         # check Loading Capacity Constraints
         if self.truck_load + self.net.demand_weights[node_j] > truck_max_weight:
@@ -139,7 +140,7 @@ class LabelForward:
             # get the arrival time at j
             node_j_arrive_t = get_arrive_time(self.arrival_time, node_i, node_j, self.latest_hub,
                                               self.sync_time, self.wait_time, self.net)
-            if node_j_arrive_t < self.net.a_lb[node_j.replace("_T", "")]:
+            if node_j_arrive_t + close_tolerance < self.net.a_lb[_node_j]:
                 return False
 
         # check disabled truck arcs in the original network
@@ -181,7 +182,6 @@ class LabelForward:
         """
 
         node_i = self.path[-1]
-        arc = (node_i, node_j)
         label_j = self.__class__(
             path=self.path[:],
             truck_load=self.truck_load,

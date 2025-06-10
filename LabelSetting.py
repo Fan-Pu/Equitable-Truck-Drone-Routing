@@ -35,57 +35,10 @@ class LabelSetting:
         #     f"queue size: {self.forward_label_queue.qsize()}")
 
         for node_j in label.alternative_extensions:
-
-            if node_info.id == 1 and len(node_info.columns) == 88:
-                if label.path == ['Source'] and node_j == 'C13':
-                    sdsa = 0
-                if label.path == ['Source', 'C13'] and node_j == 'H1':
-                    sdsa = 0
-                if label.path == ['Source', 'C13', 'H1'] and node_j == 'C8_T':
-                    sdsa = 0
-                if label.path == ['Source', 'C13', 'H1', 'C8_T'] and node_j == 'C9_T':
-                    sdsa = 0
-                if label.path == ['Source', 'C13', 'H1', 'C8_T', 'C9_T'] and node_j == 'C15_T':
-                    sdsa = 0
-                if label.path == ['Source', 'C13', 'H1', 'C8_T', 'C9_T', 'C15_T'] and node_j == 'C4':
-                    sdsa = 0
-                if label.path == ['Source', 'C13', 'H1', 'C8_T', 'C9_T', 'C15_T', 'C4'] and node_j == 'H2':
-                    sdsa = 0
-                if label.path == ['Source', 'C13', 'H1', 'C8_T', 'C9_T', 'C15_T', 'C4', 'H2'] and node_j == 'Sink':
-                    sdsa = 0
-
             if not label.allow_extend(node_j, node_info, self.N_hat):
                 continue
 
             label_j = label.extend(node_j, self.duals, farkas, node_info)
-
-            if node_info.id == 1:
-                if label_j.path == ['Source', 'C13', 'H1', 'C8_T', 'C9_T', 'C15_T', 'C4', 'H2',
-                                    'Sink'] and label_j.cost + close_tolerance < 0:
-                    sada = 0
-
-                test_path = ['Source', 'C13', 'H1', 'C8_T', 'C9_T', 'C15_T', 'C4', 'H2', 'Sink']
-                test_route = elem_path_to_route(test_path, 999, GeneralHelper.net, GeneralHelper.transformed_net)
-                cost = route_get_cost(test_route, GeneralHelper.net, GeneralHelper.transformed_net)
-                reduced_cost = cost + self.duals['constant_term'] - self.duals['mu'][12] - self.duals['mu'][7] - \
-                               self.duals['mu'][8] - self.duals['mu'][14] - self.duals['mu'][3]
-                if label_j.path == ['Source', 'C13', 'H1', 'C8_T', 'C9_T', 'C15_T', 'C4', 'H2',
-                                    'Sink'] and reduced_cost + close_tolerance < 0:
-                    dsdsa = 0
-
-            if node_info.id == 3:
-                if label_j.path == ['Source', 'C13', 'H1', 'C8_T', 'C9_T', 'C15_T', 'C4', 'H2',
-                                    'Sink'] and label_j.cost + close_tolerance < 0:
-                    sada = 0
-
-                test_path = ['Source', 'C13', 'H1', 'C8_T', 'C9_T', 'C15_T', 'C4', 'H2', 'Sink']
-                test_route = elem_path_to_route(test_path, 999, GeneralHelper.net, GeneralHelper.transformed_net)
-                cost = route_get_cost(test_route, GeneralHelper.net, GeneralHelper.transformed_net)
-                reduced_cost = cost + self.duals['constant_term'] - self.duals['mu'][12] - self.duals['mu'][7] - \
-                               self.duals['mu'][8] - self.duals['mu'][14] - self.duals['mu'][3]
-                if label_j.path == ['Source', 'C13', 'H1', 'C8_T', 'C9_T', 'C15_T', 'C4', 'H2',
-                                    'Sink'] and reduced_cost + close_tolerance < 0:
-                    dsdsa = 0
 
             # this is an existing column
             if tuple(label_j.path) in GeneralHelper.initial_routes:
@@ -114,8 +67,6 @@ class LabelSetting:
                 # other_dom_label = None
 
                 for key in dominated_by_j.keys():
-                    if node_info.id == 3 and key == debug_route:
-                        sdas = 0
                     self.forward_labels[node_j].pop(key, None)
 
                 # if j is not dominated by others
@@ -172,7 +123,8 @@ class LabelSetting:
         while True:
             # forward only
             while self.best_solution[0] + close_tolerance > 0 and self.forward_label_queue.qsize() > 0:
-                # while self.forward_label_queue.qsize() > 0:
+                if time.time() - s_time >= max_node_runtime:
+                    break
                 self.forward_labeling_one_step(farkas, node_info)
             # self.print_runtime_info(s_time, node_info)
             return self.best_solution
@@ -206,23 +158,24 @@ class LabelSetting:
         if element_path is None:
             return
 
-        for j in range(1, len(element_path)):
-            node_i, node_j = element_path[j - 1], element_path[j]
-            arrive_time = get_arrive_time(arrival_times[-1], node_i, node_j, last_hub, sync_times[-1], wait_times[-1],
-                                          self.net)
+        # for j in range(1, len(element_path)):
+        #     node_i, node_j = element_path[j - 1], element_path[j]
+        #     arrive_time = get_arrive_time(arrival_times[-1], node_i, node_j, last_hub, sync_times[-1], wait_times[-1],
+        #                                   self.net)
+        #
+        #     sync_time = arrive_time if node_j in self.net.hubs else sync_times[-1]
+        #     wait_time = max(wait_times[-1], arrive_time - sync_time) if ((node_i, node_j) in self.net.arcs_scp
+        #                                                                  or (
+        #                                                                      node_i,
+        #                                                                      node_j) in self.net.arcs_cpcp) else 0
+        #     last_hub = node_j.replace("_T", "") if node_j in self.net.hubs else last_hub
+        #
+        #     arrival_times.append(arrive_time)
+        #     sync_times.append(sync_time)
+        #     wait_times.append(wait_time)
 
-            sync_time = arrive_time if node_j in self.net.hubs else sync_times[-1]
-            wait_time = max(wait_times[-1], arrive_time - sync_time) if ((node_i, node_j) in self.net.arcs_scp
-                                                                         or (
-                                                                             node_i,
-                                                                             node_j) in self.net.arcs_cpcp) else 0
-            last_hub = node_j.replace("_T", "") if node_j in self.net.hubs else last_hub
-
-            arrival_times.append(arrive_time)
-            sync_times.append(sync_time)
-            wait_times.append(wait_time)
-            runtime = time.time() - start_time
+        runtime = time.time() - start_time
 
         print(
-            f"node info: {node_info.id}, num cols: {len(node_info.columns)}, runtime: {runtime:.4f}s")
+            f"node info: {node_info.id}, num cols: {len(node_info.columns)}, obj:{obj:.4f}, runtime: {runtime:.4f}s")
         print()

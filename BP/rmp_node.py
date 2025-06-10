@@ -62,9 +62,10 @@ class RMPNode:
 
     def solve(self):
         self.model.setParam('OutputFlag', 0)
+        self.model.setParam('Method', 0)
         self.model.setParam('InfUnbdInfo', 1)
-        self.model.setParam('DualReductions', 0)
-        self.model.setParam('Presolve', 0)
+        # self.model.setParam('DualReductions', 0)
+        # self.model.setParam('Presolve', 0)
         self.model.update()
         self.model.write("node.lp")
         self.model.optimize()
@@ -109,44 +110,30 @@ class RMPNode:
 
     def run_pricer(self, node_info: NodeInfo):
         """
-        run the pricer once
+        run the pricer once, solve the pricing problem
         """
         add_new_column = False
         node_id = node_info.id
         farkas = True if self.status == GRB.INFEASIBLE else False
         label_setting = LabelSetting(self.duals)
 
-        test_path = ['Source', 'C13', 'H1', 'C8_T', 'C9_T', 'C15_T', 'C4', 'H2', 'Sink']
-        if node_info.id == 1:
-            test_route = elem_path_to_route(test_path, 999, GeneralHelper.net, GeneralHelper.transformed_net)
-            cost = route_get_cost(test_route, GeneralHelper.net, GeneralHelper.transformed_net)
-            reduced_cost = cost + self.duals['constant_term'] - self.duals['mu'][12] - self.duals['mu'][7] - \
-                           self.duals['mu'][8] - self.duals['mu'][14] - self.duals['mu'][3]
-            if reduced_cost + close_tolerance < 0:
-                dsdsa = 0
-        if node_info.id == 3:
-            test_route = elem_path_to_route(test_path, 999, GeneralHelper.net, GeneralHelper.transformed_net)
-            cost = route_get_cost(test_route, GeneralHelper.net, GeneralHelper.transformed_net)
-            reduced_cost = cost + self.duals['constant_term'] - self.duals['mu'][12] - self.duals['mu'][7] - \
-                           self.duals['mu'][8] - self.duals['mu'][14] - self.duals['mu'][3]
-            if reduced_cost + close_tolerance < 0:
-                dsdsa = 0
+        GeneralHelper.duals = self.duals
 
         reduced_cost, element_path = label_setting.solve(farkas, node_info)
 
-        if element_path is not None:
-            new_route = elem_path_to_route(element_path, 999, GeneralHelper.net, GeneralHelper.transformed_net)
-            # check feasibility
-            for i, j in node_info.disabled_arcs_trucks:
-                if if_route_travel_arc(new_route, i, j, GeneralHelper.net):
-                    sdas = 0
-            for i, j in node_info.disabled_arcs_drones:
-                if if_route_travel_arc(new_route, i, j + "_T", GeneralHelper.net):
-                    sdas = 0
-            for i, j in (node_info.must_visit_arcs_trucks | node_info.must_visit_arcs_drones
-                         | node_info.must_visit_arcs_trans):
-                if not if_route_travel_arc(new_route, i, j, GeneralHelper.net):
-                    sda = 0
+        # if element_path is not None:
+        #     new_route = elem_path_to_route(element_path, 999, GeneralHelper.net, GeneralHelper.transformed_net)
+        #     # check feasibility
+        #     for i, j in node_info.disabled_arcs_trucks:
+        #         if if_route_travel_arc(new_route, i, j, GeneralHelper.net):
+        #             sdas = 0
+        #     for i, j in node_info.disabled_arcs_drones:
+        #         if if_route_travel_arc(new_route, i, j + "_T", GeneralHelper.net):
+        #             sdas = 0
+        #     for i, j in (node_info.must_visit_arcs_trucks | node_info.must_visit_arcs_drones
+        #                  | node_info.must_visit_arcs_trans):
+        #         if not if_route_travel_arc(new_route, i, j, GeneralHelper.net):
+        #             sda = 0
 
         # find a new route
         if reduced_cost + close_tolerance < 0:

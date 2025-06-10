@@ -1,5 +1,3 @@
-# from BranchAndPrice import *
-import matplotlib.pyplot as plt
 import GeneralHelper
 from FullModel import FullModel
 from BP.branch_and_price import BranchAndPrice
@@ -10,18 +8,18 @@ if __name__ == '__main__':
     GeneralHelper.transform_network()
     # GeneralHelper.visualize_network()
 
-    test_case = FullModel()
+    # the integrated model
+    full_model = FullModel()
+    full_obj_val, full_solve_time, gap, _ = full_model.solve(time_limit=5)
 
-    full_obj_val, full_solve_time, gap = test_case.solve()
-
+    # branch and price
     BP = BranchAndPrice()
+    # get the warm start solution
+    full_model.reset()
+    warm_obj_val, _, _, warm_start_sols = full_model.solve(time_limit=60)
+    print(f"\nBP warm start: {warm_obj_val:.4f}")
+    BP.add_warm_start_solution(warm_start_sols)
     BP_solve_time, BP_solution, BP_cost = BP.solve()
-
-    BP_costs = []
-    for solution in BP_solution:
-        cost = GeneralHelper.route_get_cost(solution, GeneralHelper.net, GeneralHelper.transformed_net)
-        BP_costs.append(cost)
-    sum_BP_cost = sum(BP_costs)
 
     if gap is not None:
         print(f"full model solved in {full_solve_time:.4f} s with obj val: {full_obj_val} and Gap: {gap:.2f}%")
