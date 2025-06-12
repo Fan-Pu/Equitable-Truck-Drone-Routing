@@ -73,9 +73,9 @@ class LabelForward:
                 if self.psi_set[triple] in {1, 3} and other.psi_set[triple] in {0, 2}:
                     sum_nu += duals[triple]
 
-            if self.cost - sum_nu > other.cost:
+            if self.cost - sum_nu + close_tolerance > other.cost:
                 return False
-            elif self.cost - sum_nu < other.cost:
+            elif self.cost - sum_nu + close_tolerance < other.cost:
                 strict = True
 
         if strict:

@@ -140,6 +140,7 @@ class RMPNode:
             route_key = tuple(element_path)
             new_route = elem_path_to_route(element_path, len(bp.route_dict), GeneralHelper.net,
                                            GeneralHelper.transformed_net)
+
             bp.route_dict[route_key] = new_route
             # add the column to RMP
             if route_key not in bp.node_infos[node_id].columns:

@@ -27,7 +27,7 @@ class LabelSetting:
         """Forward search from the depot."""
         new_labels = {}  # the new labels awaiting to be appended, key: node, value: new_label
 
-        _, _, label = self.forward_label_queue.get()
+        _, _, _, label = self.forward_label_queue.get()
 
         # check extending
         # print(
@@ -75,7 +75,8 @@ class LabelSetting:
                     new_labels[node_j] = label_j
                     # only if this label is possible to be extended
                     if len(label_j.alternative_extensions) > 0:
-                        self.forward_label_queue.put((-label_j.depth, next(self.forward_label_counter), label_j))
+                        self.forward_label_queue.put(
+                            (-label_j.depth, label_j.cost, next(self.forward_label_counter), label_j))
 
         # update the forward_labels at once
         for node, label in new_labels.items():
@@ -90,8 +91,9 @@ class LabelSetting:
 
         # forward label initialization
         if not farkas:  # normal pricing
+            initial_cost = truck_cost + self.duals["constant_term"]
             self.forward_label_queue.put((
-                0, next(self.forward_label_counter),
+                0, initial_cost, next(self.forward_label_counter),
                 LabelForward(path=[self.net.depot_source],
                              truck_load=0,
                              drones_used=0,
@@ -99,12 +101,13 @@ class LabelSetting:
                              sync_time=0,
                              wait_time=0,
                              psi_set={pi: 0 for pi in node_info.added_SR_keys},
-                             cost=truck_cost + self.duals["constant_term"],
+                             cost=initial_cost,
                              depth=0)
             ))
         else:  # Farkas pricing
+            initial_cost = self.duals["constant_term"]
             self.forward_label_queue.put((
-                0, next(self.forward_label_counter),
+                0, initial_cost, next(self.forward_label_counter),
                 LabelForward(path=[self.net.depot_source],
                              truck_load=0,
                              drones_used=0,
@@ -112,7 +115,7 @@ class LabelSetting:
                              sync_time=0,
                              wait_time=0,
                              psi_set={pi: 0 for pi in node_info.added_SR_keys},
-                             cost=self.duals["constant_term"],
+                             cost=initial_cost,
                              depth=0)
             ))
 
@@ -126,7 +129,7 @@ class LabelSetting:
                 if time.time() - s_time >= max_node_runtime:
                     break
                 self.forward_labeling_one_step(farkas, node_info)
-            # self.print_runtime_info(s_time, node_info)
+            self.print_runtime_info(s_time, node_info)
             return self.best_solution
 
     def dominance_check(self, label_j, other_labels, farkas, node_info: NodeInfo):

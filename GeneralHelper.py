@@ -30,9 +30,11 @@ enable_DSS = False
 M = 10000
 close_tolerance = 0.001
 
+max_node_label_num = 50  # the maximum number of labels kept in a physical node
+
 cw = 0.25
 
-max_node_runtime = 300  # in seconds
+max_node_runtime = 3600  # in seconds
 
 columns_list = []
 

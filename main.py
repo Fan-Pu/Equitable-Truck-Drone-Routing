@@ -10,7 +10,7 @@ if __name__ == '__main__':
 
     # the integrated model
     full_model = FullModel()
-    full_obj_val, full_solve_time, gap, _ = full_model.solve(time_limit=5)
+    full_obj_val, full_solve_time, gap, _ = full_model.solve(time_limit=1)
 
     # branch and price
     BP = BranchAndPrice()

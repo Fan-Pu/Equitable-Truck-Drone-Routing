@@ -387,7 +387,8 @@ class FullModel:
         obj_val = -1
 
         # Retrieve the values
-        if self.model.Status in [GRB.OPTIMAL, GRB.SUBOPTIMAL, GRB.INTERRUPTED, GRB.TIME_LIMIT]:
+        # if self.model.Status in [GRB.OPTIMAL, GRB.SUBOPTIMAL, GRB.INTERRUPTED, GRB.TIME_LIMIT]:
+        if self.model.SolCount > 0:
             print(f"Objective value: {self.model.ObjVal}")
             obj_val = self.model.ObjVal
             mip_gap_percent = self.model.MIPGap * 100
