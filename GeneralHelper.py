@@ -5,32 +5,31 @@ import networkx as nx
 from collections import defaultdict
 from Network import Network
 from TransformedNetwork import TransformedNetwork
-from sortedcontainers import SortedSet
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.cluster import KMeans
 from collections import Counter
 
 num_trucks = 4  # 2, 4, 6
-num_customers = 25  # 5, 15, 25
+num_customers = 20  # 5, 10, 20
 custom_dist = "PS"  # customer distribution "PS", "PC", "mixed"
 # num_drones_per_truck = 4
-num_drones_per_truck = 4
+num_drones_per_truck = 2
 # num_hubs = int(math.floor(num_customers / 5))
 num_hubs = 2
 
 # arc generation
-truck_arc_gen_prob = 0.1  # the probability of generating a truck arc
-customer_depot_arc_prob = 0.8  # the probability of generating a truck arc connecting the customer and depot
-hub_arc_gen_prob = 0.2  # the probability of generating a truck arc that connects a hub
-drone_arc_gen_prob = 0.4  # the probability of generating a drone arc
+truck_arc_gen_prob = 0.2  # the probability of generating a truck arc
+hub_arc_gen_prob = 0.5  # the probability of generating a truck arc that connects a hub
 
 enable_DSS = False
+
+num_threads = 3
 
 M = 10000
 close_tolerance = 0.001
 
-max_node_label_num = 50  # the maximum number of labels kept in a physical node
+max_node_label_num = 999  # the maximum number of labels kept in a physical node
 
 cw = 0.25
 
@@ -46,6 +45,9 @@ node_lp_trace = []
 forward_dominance_num = 0
 
 lp = LineProfiler()
+
+debug = False
+lp_enable = False
 
 seed = 2024
 
@@ -63,12 +65,17 @@ truck_speed = 40
 drone_speed = 40
 
 # parcel weights
-demand_weight_mean = 1
-demand_weight_std = 5
-demand_weight_min = 0.5
+low_demand_customer_ratio = 0.5
+low_demand_weight_mean = 1
+low_demand_weight_std = 5
+low_demand_weight_min = 0.5
+# heavy parcels
+high_demand_weight_mean = 10
+high_demand_weight_std = 5
+high_demand_weight_min = 6
 
 truck_max_weight = 50
-drone_max_weight = 3
+drone_max_weight = 2
 
 # flight endurance
 drone_endurance = 30
@@ -153,10 +160,6 @@ def create_original_network():
 
     # generate truck arcs *************************************************************
     for node in customers + hubs:
-        prob = random.random()
-        # each hub has a path from depot_source and a path to depot_sink
-        if node in customers and prob > customer_depot_arc_prob:
-            continue
         travel_time = _gen_truck_travel_time(*locations[depot_source], *locations[node])
         # from source
         update_arc_infos(depot_source, node, travel_time, True, truck_travel_times, truck_out_arcs,
@@ -189,20 +192,29 @@ def create_original_network():
     # generate arcs for drones ********************************
     for i in hubs:
         for j in customers:
-            if random.random() <= drone_arc_gen_prob:
-                travel_time = _gen_drone_travel_time(*locations[i], *locations[j])
-                if 2 * travel_time > drone_endurance:  # the drone's battery is not sufficient
-                    continue
-                update_arc_infos(i, j, travel_time, False, truck_travel_times, truck_out_arcs, truck_in_arcs,
-                                 drone_travel_times, drone_out_arcs, drone_in_arcs)
-                drone_net.add_edge(i, j)
+            travel_time = _gen_drone_travel_time(*locations[i], *locations[j])
+            if 2 * travel_time > drone_endurance:  # the drone's battery is not sufficient
+                continue
+            update_arc_infos(i, j, travel_time, False, truck_travel_times, truck_out_arcs, truck_in_arcs,
+                             drone_travel_times, drone_out_arcs, drone_in_arcs)
+            drone_net.add_edge(i, j)
 
     demand_weights = {}
-    temp_demands = np.clip(np.random.normal(loc=demand_weight_mean, scale=demand_weight_std, size=num_customers),
-                           demand_weight_min, None)
-    for n_name in customers:
+    # low demands
+    low_dem_customers = random.sample(customers, int(low_demand_customer_ratio * len(customers)))
+    low_demands = np.clip(
+        np.random.normal(loc=low_demand_weight_mean, scale=low_demand_weight_std, size=len(low_dem_customers)),
+        low_demand_weight_min, None)
+    high_dem_customers = [cus for cus in customers if cus not in low_dem_customers]
+    high_demands = np.clip(
+        np.random.normal(loc=high_demand_weight_mean, scale=high_demand_weight_std,
+                         size=num_customers - len(low_dem_customers)), high_demand_weight_min, None)
+    for n_name in low_dem_customers:
         n = all_nodes_indices[n_name]
-        demand_weights[n] = round(temp_demands[customers.index(n_name)], 2)
+        demand_weights[n] = round(low_demands[low_dem_customers.index(n_name)], 2)
+    for n_name in high_dem_customers:
+        n = all_nodes_indices[n_name]
+        demand_weights[n] = round(high_demands[high_dem_customers.index(n_name)], 2)
     for s_name in hubs:
         s = all_nodes_indices[s_name]
         demand_weights[s] = epsilon
@@ -290,26 +302,6 @@ def is_close(x, y):
 
 def is_integer(num):
     return abs(num - round(num)) <= close_tolerance
-
-
-def is_subsequence(sub, full_index_map):
-    """
-    Return True if `sub` is a subsequence of the original `full` list.
-    Because there are no duplicates, we can simply compare indices.
-    """
-
-    # Keep track of the index in `full` that we matched most recently.
-    prev_index = -1
-    for value in sub:
-        # If `value` does not appear in `full`, it cannot match.
-        if value not in full_index_map:
-            return False
-        current_index = full_index_map[value]
-        # If indices do not increase, the order is wrong.
-        if current_index <= prev_index:
-            return False
-        prev_index = current_index
-    return True
 
 
 def get_arrive_time(arrival_time, node_i, node_j, last_hub, sync_time, wait_time, network: TransformedNetwork):
@@ -453,9 +445,13 @@ def _gen_truck_travel_time(xi, yi, xj, yj):
 
 
 def _gen_drone_travel_time(xi, yi, xj, yj):
-    euc_dist = math.hypot(xi - xj, yi - yj)  # km
+    euc_dist = _get_euc_dist(xi, yi, xj, yj)
     t_drone = euc_dist / drone_speed * 60  # to minutes
     return t_drone
+
+
+def _get_euc_dist(xi, yi, xj, yj):
+    return math.hypot(xi - xj, yi - yj)
 
 
 def visualize_network():

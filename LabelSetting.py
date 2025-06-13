@@ -1,5 +1,5 @@
 import time
-
+from sortedcontainers import SortedDict
 import numpy as np
 import queue
 import GeneralHelper
@@ -15,11 +15,12 @@ class LabelSetting:
     def __init__(self, duals):
         self.net = GeneralHelper.transformed_net
         # the ordered dict is used to ensure the exact visit sequence of the dict (code reproduction)
-        self.forward_labels = {node: OrderedDict() for node in self.net.all_nodes}  # save forward label keys
+        self.forward_labels = {node: SortedDict() for node in self.net.all_nodes}  # save forward label keys
+        # self.forward_labels = {node: OrderedDict() for node in self.net.all_nodes}  # save forward label keys
         # cost, elem path
         self.best_solution = (np.inf, [])
         self.duals = duals
-        self.forward_label_queue = queue.PriorityQueue()  # priority queue, ordered by depth
+        self.forward_label_queue = queue.PriorityQueue()  # priority queue
         self.forward_label_counter = itertools.count()
         self.N_hat = set()  # the set for DSS
 
@@ -67,7 +68,7 @@ class LabelSetting:
                 # other_dom_label = None
 
                 for key in dominated_by_j.keys():
-                    self.forward_labels[node_j].pop(key, None)
+                    self.forward_labels[node_j].pop(key)
 
                 # if j is not dominated by others
                 if not other_dominates_j:
@@ -80,7 +81,15 @@ class LabelSetting:
 
         # update the forward_labels at once
         for node, label in new_labels.items():
-            self.forward_labels[node][tuple(label.path)] = label
+            if len(self.forward_labels[node]) >= max_node_label_num:
+                (worst_val, worst_path), temp_label = self.forward_labels[node].peekitem(-1)
+                if label.cost + close_tolerance > worst_val:
+                    continue
+                # pops out the worst element
+                self.forward_labels[node].pop((worst_val, worst_path))
+                self.forward_labels[node][(label.cost, tuple(label.path))] = label
+            else:
+                self.forward_labels[node][(label.cost, tuple(label.path))] = label
 
         return new_labels
 
@@ -130,11 +139,12 @@ class LabelSetting:
                     break
                 self.forward_labeling_one_step(farkas, node_info)
             self.print_runtime_info(s_time, node_info)
+
             return self.best_solution
 
     def dominance_check(self, label_j, other_labels, farkas, node_info: NodeInfo):
         """Check if label_j dominates any other label in a parallelized manner."""
-        dominated_by_j = {}
+        dominated_by_j = {}  # key: (cost,path)
         other_dominates_j = False
         other_dom_label = None
 
@@ -142,7 +152,7 @@ class LabelSetting:
             j_dominates = label_j.dominates(other, node_info, farkas, self.duals)
 
             if j_dominates:
-                dominated_by_j[tuple(other.path)] = other
+                dominated_by_j[(other.cost, tuple(other.path))] = other
             else:
                 other_dominates = other.dominates(label_j, node_info, farkas, self.duals)
 

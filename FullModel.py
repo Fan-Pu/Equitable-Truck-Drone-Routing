@@ -79,6 +79,7 @@ class FullModel:
 
         # add objective function
         obj_expr = 0
+        coef_list = []
         for n_name in self.customers:
             n = self.all_nodes_indices[n_name]
             obj_expr += cw * (a_dict[n] - GeneralHelper.transformed_net.a_lb[n_name]) ** 2

@@ -5,6 +5,7 @@ from gurobipy import GRB
 from LabelSetting import *
 import BP.branch_and_price as bp
 import cProfile, pstats, io
+from concurrent.futures import ThreadPoolExecutor
 
 
 class RMPNode:
@@ -115,11 +116,14 @@ class RMPNode:
         add_new_column = False
         node_id = node_info.id
         farkas = True if self.status == GRB.INFEASIBLE else False
+
+        LSA_list = [LabelSetting(self.duals) for i in range(num_threads)]
+
         label_setting = LabelSetting(self.duals)
 
-        GeneralHelper.duals = self.duals
-
         reduced_cost, element_path = label_setting.solve(farkas, node_info)
+
+        print(element_path)
 
         # if element_path is not None:
         #     new_route = elem_path_to_route(element_path, 999, GeneralHelper.net, GeneralHelper.transformed_net)

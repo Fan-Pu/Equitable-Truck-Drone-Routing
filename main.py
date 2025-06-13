@@ -10,13 +10,13 @@ if __name__ == '__main__':
 
     # the integrated model
     full_model = FullModel()
-    full_obj_val, full_solve_time, gap, _ = full_model.solve(time_limit=1)
+    full_obj_val, full_solve_time, gap, _ = full_model.solve(time_limit=3600)
 
     # branch and price
     BP = BranchAndPrice()
     # get the warm start solution
     full_model.reset()
-    warm_obj_val, _, _, warm_start_sols = full_model.solve(time_limit=60)
+    warm_obj_val, _, _, warm_start_sols = full_model.solve(time_limit=20)
     print(f"\nBP warm start: {warm_obj_val:.4f}")
     BP.add_warm_start_solution(warm_start_sols)
     BP_solve_time, BP_solution, BP_cost = BP.solve()

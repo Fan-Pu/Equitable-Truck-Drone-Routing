@@ -18,16 +18,16 @@ class LabelForward:
         self.depth = depth
         self.alternative_extensions = [node_j for node_j in self.net.out_arcs[self.path[-1]]]
         self.latest_hub = None
-        self.index_map = {value: idx for idx, value in enumerate(path)}  # for fast subsequence check
+        self.path_set = set()
 
     def dominates(self, other, node_info: NodeInfo, farkas: bool, duals=None):
         """Check if this label dominates another."""
         strict = False  # check whether contains a strict condition
 
         # condition subset violated
-        if not is_subsequence(self.path, other.index_map):
+        if not self.path_set.issubset(other.path_set):
             return False
-        elif len(self.path) != len(other.path):  # strict subsequence
+        elif len(self.path_set) != len(other.path_set):  # strict subset
             strict = True
 
         # condition truck load violated
@@ -197,7 +197,8 @@ class LabelForward:
 
         # update path
         label_j.path.append(node_j)
-        label_j.index_map[node_j] = len(self.path)
+        label_j.path_set = self.path_set.copy()
+        label_j.path_set.add(node_j)
 
         # update latest_hub
         if node_j in self.net.hubs:

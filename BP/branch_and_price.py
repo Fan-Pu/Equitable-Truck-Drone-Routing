@@ -28,12 +28,12 @@ class BranchAndPrice:
         self.best_solution_node: RMPNode = None
         self.initial_element_paths = []
         # add initial routes
-        # routes, element_paths = find_initial_routes(GeneralHelper.net, GeneralHelper.transformed_net)
-        # for i in range(len(routes)):
-        #     route_key, route = routes[i]
-        #     route_dict[route_key] = route
-        #     GeneralHelper.initial_routes.append(route_key)
-        # self.initial_element_paths = list(element_paths.values())
+        routes, element_paths = find_initial_routes(GeneralHelper.net, GeneralHelper.transformed_net)
+        for i in range(len(routes)):
+            route_key, route = routes[i]
+            route_dict[route_key] = route
+            GeneralHelper.initial_routes.append(route_key)
+        self.initial_element_paths = list(element_paths.values())
 
     def solve(self):
         """Main branch-and-price loop"""
@@ -441,7 +441,7 @@ class BranchAndPrice:
 
         rmp_node.solve()
         lp_iters = 1
-
+        
         # column generation
         new_col_num = 0
         while True:
@@ -484,6 +484,8 @@ class BranchAndPrice:
     def add_warm_start_solution(self, route_list):
         for i in range(len(route_list)):
             route = route_list[i]
+            if len(route) == 0:
+                continue
             elem_path = route_to_elem_path(route, GeneralHelper.transformed_net)
             route_key = tuple(elem_path)
             route_id = num_customers + i
