@@ -1,19 +1,20 @@
-import time
-from sortedcontainers import SortedDict
-import numpy as np
 import queue
-import GeneralHelper
-from GeneralHelper import *
+import time
+
+import numpy as np
+from sortedcontainers import SortedDict
+
+import CommonHelper
 from LabelForward import LabelForward
-import itertools
-from collections import OrderedDict, defaultdict
 from NodeInfo import NodeInfo
-import cProfile, pstats, io
 
 
 class LabelSetting:
-    def __init__(self, duals):
-        self.net = GeneralHelper.transformed_net
+    def __init__(self, duals, thread_id):
+        # self.net = CommonHelper.transformed_net
+        # self.ini_routes = CommonHelper.initial_routes
+        self.net = CommonHelper.transformed_net
+        self.ini_routes = CommonHelper.initial_routes
         # the ordered dict is used to ensure the exact visit sequence of the dict (code reproduction)
         self.forward_labels = {node: SortedDict() for node in self.net.all_nodes}  # save forward label keys
         # self.forward_labels = {node: OrderedDict() for node in self.net.all_nodes}  # save forward label keys
@@ -21,8 +22,22 @@ class LabelSetting:
         self.best_solution = (np.inf, [])
         self.duals = duals
         self.forward_label_queue = queue.PriorityQueue()  # priority queue
-        self.forward_label_counter = itertools.count()
+        self.forward_label_counter = 0
         self.N_hat = set()  # the set for DSS
+        self.thread_id = thread_id
+        self.print_text = ""
+
+    def __getstate__(self):
+        # called when pickling: drop the unpicklable bits
+        state = self.__dict__.copy()
+        state.pop('forward_label_queue', None)
+        return state
+
+    def __setstate__(self, state):
+        # called when unpickling: restore everything else…
+        self.__dict__.update(state)
+        # …then rebuild the queue and counter
+        self.forward_label_queue = queue.PriorityQueue()
 
     def forward_labeling_one_step(self, farkas, node_info: NodeInfo):
         """Forward search from the depot."""
@@ -42,15 +57,15 @@ class LabelSetting:
             label_j = label.extend(node_j, self.duals, farkas, node_info)
 
             # this is an existing column
-            if tuple(label_j.path) in GeneralHelper.initial_routes:
+            if tuple(label_j.path) in self.ini_routes:
                 continue
 
             # check whether it is completed, update the incumbent
             if node_j == self.net.depot_sink:
                 if label_j.cost < self.best_solution[0]:
-                    if enable_DSS:
+                    if CommonHelper.enable_DSS:
                         # check revisit
-                        repeated_cus = get_revisit(label_j.path, GeneralHelper.transformed_net)
+                        repeated_cus = CommonHelper.get_revisit(label_j.path, self.net)
                         if len(repeated_cus) > 0:
                             for cus in repeated_cus:
                                 self.N_hat.update((cus, cus + "_T"))
@@ -76,14 +91,15 @@ class LabelSetting:
                     new_labels[node_j] = label_j
                     # only if this label is possible to be extended
                     if len(label_j.alternative_extensions) > 0:
+                        self.forward_label_counter += 1
                         self.forward_label_queue.put(
-                            (-label_j.depth, label_j.cost, next(self.forward_label_counter), label_j))
+                            (-label_j.depth, label_j.cost, self.forward_label_counter, label_j))
 
         # update the forward_labels at once
         for node, label in new_labels.items():
-            if len(self.forward_labels[node]) >= max_node_label_num:
+            if len(self.forward_labels[node]) >= CommonHelper.max_node_label_num:
                 (worst_val, worst_path), temp_label = self.forward_labels[node].peekitem(-1)
-                if label.cost + close_tolerance > worst_val:
+                if label.cost + CommonHelper.close_tolerance > worst_val:
                     continue
                 # pops out the worst element
                 self.forward_labels[node].pop((worst_val, worst_path))
@@ -93,16 +109,16 @@ class LabelSetting:
 
         return new_labels
 
-    def solve(self, farkas, node_info: NodeInfo):
+    def solve(self, farkas, node_info: NodeInfo, stop_event):
         """
         Execute forward, backward, and merge steps.
         """
 
         # forward label initialization
         if not farkas:  # normal pricing
-            initial_cost = truck_cost + self.duals["constant_term"]
+            initial_cost = CommonHelper.truck_cost + self.duals["constant_term"]
             self.forward_label_queue.put((
-                0, initial_cost, next(self.forward_label_counter),
+                0, initial_cost, self.forward_label_counter,
                 LabelForward(path=[self.net.depot_source],
                              truck_load=0,
                              drones_used=0,
@@ -111,12 +127,14 @@ class LabelSetting:
                              wait_time=0,
                              psi_set={pi: 0 for pi in node_info.added_SR_keys},
                              cost=initial_cost,
-                             depth=0)
+                             depth=0,
+                             alternative_extensions=self.net.start_node_dict[self.thread_id],
+                             trans_net=self.net)
             ))
         else:  # Farkas pricing
             initial_cost = self.duals["constant_term"]
             self.forward_label_queue.put((
-                0, initial_cost, next(self.forward_label_counter),
+                0, initial_cost, self.forward_label_counter,
                 LabelForward(path=[self.net.depot_source],
                              truck_load=0,
                              drones_used=0,
@@ -125,22 +143,21 @@ class LabelSetting:
                              wait_time=0,
                              psi_set={pi: 0 for pi in node_info.added_SR_keys},
                              cost=initial_cost,
-                             depth=0)
+                             depth=0,
+                             alternative_extensions=self.net.start_node_dict[self.thread_id],
+                             trans_net=self.net)
             ))
 
         s_time = time.time()
-        GeneralHelper.allow_extend_checks_passed = 0
-        GeneralHelper.forward_dominance_num = 0
 
-        while True:
-            # forward only
-            while self.best_solution[0] + close_tolerance > 0 and self.forward_label_queue.qsize() > 0:
-                if time.time() - s_time >= max_node_runtime:
-                    break
-                self.forward_labeling_one_step(farkas, node_info)
-            self.print_runtime_info(s_time, node_info)
+        # forward only
+        while self.best_solution[0] + CommonHelper.close_tolerance > 0 and self.forward_label_queue.qsize() > 0:
+            if time.time() - s_time >= CommonHelper.max_run_time or stop_event.is_set():
+                break
+            self.forward_labeling_one_step(farkas, node_info)
 
-            return self.best_solution
+        # self.print_runtime_info(s_time, node_info)
+        return self.print_text, self.best_solution
 
     def dominance_check(self, label_j, other_labels, farkas, node_info: NodeInfo):
         """Check if label_j dominates any other label in a parallelized manner."""
@@ -189,6 +206,12 @@ class LabelSetting:
 
         runtime = time.time() - start_time
 
-        print(
-            f"node info: {node_info.id}, num cols: {len(node_info.columns)}, obj:{obj:.4f}, runtime: {runtime:.4f}s")
-        print()
+        self.print_text = (f"node info: {node_info.id}, thread: {self.thread_id}, num cols: {len(node_info.columns)},"
+                           f" obj:{obj:.4f}, ") + f"runtime: {runtime:.4f}s"
+
+        sdas = 0
+
+        # print(
+        #     f"node info: {node_info.id}, thread: {self.thread_id}, num cols: {len(node_info.columns)}, obj:{obj:.4f}, "
+        #     f"runtime: {runtime:.4f}s")
+        # print()

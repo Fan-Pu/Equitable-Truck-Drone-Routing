@@ -1,8 +1,11 @@
 import copy
 import heapq
-from sortedcontainers import SortedSet
-from Network import Network
 import itertools
+
+from sortedcontainers import SortedSet
+
+import CommonHelper
+from Network import Network
 
 
 class TransformedNetwork:
@@ -35,6 +38,7 @@ class TransformedNetwork:
         self.arcs_cpc = SortedSet()  # links c'c
         self.arcs = SortedSet()
         self.PI = list()  # for SR inequality
+        self.start_node_dict = {i: [] for i in range(CommonHelper.num_threads)}
 
         # duplicate the nodes
         for node in net.customers:
@@ -151,6 +155,15 @@ class TransformedNetwork:
 
         # for SR inequality
         self.PI = list(itertools.combinations(net.customers, 3))
+
+        # get start_node_dict
+        n = len(self.out_arcs[self.depot_source])
+        q, r = divmod(n, CommonHelper.num_threads)
+        start = 0
+        for i in range(CommonHelper.num_threads):
+            size = q + (1 if i < r else 0)
+            self.start_node_dict[i].extend(self.out_arcs[self.depot_source][start:start + size])
+            start += size
 
         # set the arrival time lower bound
         self.astar_shortest_path()

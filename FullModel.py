@@ -1,9 +1,43 @@
+import os
+import time
+
 import gurobipy as gp
 import matplotlib.cm as cm
 from gurobipy import GRB
-from collections import defaultdict
-import GeneralHelper
-from GeneralHelper import *
+
+import CommonHelper
+from CommonHelper import *
+
+
+def sort_arcs_to_path(arcs: list):
+    """
+    Given a list of arcs as (origin, destination) pairs,
+    return a list of arcs ordered into a single path.
+    """
+
+    if not arcs:
+        return []
+
+    # find the start node: appears as origin but never as destination
+    origins = {u for u, v in arcs}
+    destinations = {v for u, v in arcs}
+    starts = origins - destinations
+    if len(starts) != 1:
+        raise ValueError(f"Expected exactly one start node, got {starts}")
+    start = next(iter(starts))
+
+    # build a lookup from each node to its next node
+    next_node = {u: v for u, v in arcs}
+
+    # walk from start until no further arc is found
+    path = []
+    cur = start
+    while cur in next_node:
+        nxt = next_node[cur]
+        path.append((cur, nxt))
+        cur = nxt
+
+    return path
 
 
 class FullModel:
@@ -16,7 +50,7 @@ class FullModel:
         self.t_values = None
         self.y_values = None
         self.x_values = None
-        self.net = GeneralHelper.net
+        self.net = CommonHelper.net
         self.constraints = []
         self.solutions = {k: {} for k in range(self.net.num_trucks)}
         # set drone_dict and kd_dict
@@ -47,7 +81,7 @@ class FullModel:
         self.final_route = []
         self.model = gp.Model("model")
 
-    def solve(self, time_limit):
+    def solve(self, time_limit=None, use_cb=False, log_file=None):
         # add decision variables
         x_dict = {}
         y_dict = {}
@@ -79,10 +113,9 @@ class FullModel:
 
         # add objective function
         obj_expr = 0
-        coef_list = []
         for n_name in self.customers:
             n = self.all_nodes_indices[n_name]
-            obj_expr += cw * (a_dict[n] - GeneralHelper.transformed_net.a_lb[n_name]) ** 2
+            obj_expr += cw * (a_dict[n] - CommonHelper.transformed_net.a_lb[n_name]) ** 2
         for k in range(self.net.num_trucks):
             n = self.all_nodes_indices[self.depot_sink]
             obj_expr += cw * ak_dict[(n, k)]
@@ -315,7 +348,7 @@ class FullModel:
             for i_name in self.truck_in_arcs[n_name]:
                 i = self.all_nodes_indices[i_name]
                 for k in range(self.net.num_trucks):
-                    rhs = (GeneralHelper.transformed_net.a_lb[n_name] + M * (x_dict[(i, n, k)] - 1))
+                    rhs = (CommonHelper.transformed_net.a_lb[n_name] + M * (x_dict[(i, n, k)] - 1))
                     self.constraints.append(
                         self.model.addConstr(ak_dict[(n, k)] >= rhs, name=f"realized_ank3_{cons_id}"))
                     cons_id += 1
@@ -343,33 +376,29 @@ class FullModel:
                                              name=f"realized_and2_{cons_id}"))
                     cons_id += 1
                     # cons 3
-                    rhs = (GeneralHelper.transformed_net.a_lb[j_name] + M * (y_dict[(n, j, d)] - 1))
+                    rhs = (CommonHelper.transformed_net.a_lb[j_name] + M * (y_dict[(n, j, d)] - 1))
                     self.constraints.append(
                         self.model.addConstr(ad_dict[(j, d)] >= rhs, name=f"realized_and3_{cons_id}"))
                     cons_id += 1
 
-        # truck_hub
-        cons_id = 0
-        for n_name in self.hubs:
-            n = self.all_nodes_indices[n_name]
-            for k in range(self.net.num_trucks):
-                lhs = 0
-                for j_name in self.truck_out_arcs[n_name]:
-                    j = self.all_nodes_indices[j_name]
-                    lhs += x_dict[(n, j, k)]
-                rhs = 0
-                for d in self.drone_dict[k]:
-                    for j_name in self.drone_out_arcs[n_name]:
-                        j = self.all_nodes_indices[j_name]
-                        rhs += y_dict[(n, j, d)]
-                self.constraints.append(
-                    self.model.addConstr(lhs <= rhs, name=f"truck_hub_{cons_id}"))
-                cons_id += 1
-
-        self.model.setParam(GRB.Param.TimeLimit, time_limit)
+        if time_limit is not None:
+            self.model.setParam(GRB.Param.TimeLimit, time_limit)
+        if log_file is not None:
+            if os.path.exists(log_file):
+                # wipe it out
+                open(log_file, 'w').close()
+            self.model.setParam("LogFile", log_file)
         self.model.update()
+        if use_cb:
+            cb = NoImprovementCallback()
+            cb.last_update_time = time.time()
+            print("Solving warm start model...")
+            self.model.params.OutputFlag = 0
+            self.model.optimize(cb)
+        else:
+            self.model.optimize()
+
         self.model.write("full_model.lp")
-        self.model.optimize()
 
         if self.model.Status == GRB.OPTIMAL:
             print("Optimal solution found")
@@ -388,7 +417,6 @@ class FullModel:
         obj_val = -1
 
         # Retrieve the values
-        # if self.model.Status in [GRB.OPTIMAL, GRB.SUBOPTIMAL, GRB.INTERRUPTED, GRB.TIME_LIMIT]:
         if self.model.SolCount > 0:
             print(f"Objective value: {self.model.ObjVal}")
             obj_val = self.model.ObjVal
@@ -412,7 +440,7 @@ class FullModel:
                 if abs(var.X - 1) <= close_tolerance:
                     drone_routes[d].append((self.all_nodes[i], self.all_nodes[j]))
 
-            truck_routes = {k: self.sort_arcs_to_path(val) for k, val in truck_routes.items()}
+            truck_routes = {k: sort_arcs_to_path(val) for k, val in truck_routes.items()}
             for k, path in truck_routes.items():
                 if not path:
                     continue
@@ -524,37 +552,19 @@ class FullModel:
         # Add a legend
         plt.legend()
 
-    def sort_arcs_to_path(self, arcs: list):
-        """
-        Given a list of arcs as (origin, destination) pairs,
-        return a list of arcs ordered into a single path.
-        """
 
-        if not arcs:
-            return []
+class NoImprovementCallback:
+    def __init__(self):
+        self.last_update_time = 0.0
 
-        # find the start node: appears as origin but never as destination
-        origins = {u for u, v in arcs}
-        destinations = {v for u, v in arcs}
-        starts = origins - destinations
-        if len(starts) != 1:
-            raise ValueError(f"Expected exactly one start node, got {starts}")
-        start = next(iter(starts))
+    def __call__(self, model, where):
+        # When a new incumbent solution is found
+        if where == GRB.Callback.MIPSOL:
+            # record the time (you can also use model.cbGet(GRB.Callback.RUNTIME))
+            self.last_update_time = time.time()
 
-        # build a lookup from each node to its next node
-        next_node = {u: v for u, v in arcs}
-
-        # walk from start until no further arc is found
-        path = []
-        cur = start
-        while cur in next_node:
-            nxt = next_node[cur]
-            path.append((cur, nxt))
-            cur = nxt
-
-        return path
-
-    def reset(self):
-        for key, sol in self.solutions.items():
-            sol.clear()
-        self.model.reset()
+        # At regular MIP callbacks, check elapsed time
+        if where == GRB.Callback.MIP:
+            if time.time() - self.last_update_time > warm_start_MIP_no_improve:
+                # tell Gurobi to stop as soon as it can
+                model.terminate()

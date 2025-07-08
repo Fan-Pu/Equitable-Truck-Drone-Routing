@@ -1,10 +1,11 @@
-import GeneralHelper
+import CommonHelper
 from NodeInfo import NodeInfo
-from GeneralHelper import *
+from TransformedNetwork import TransformedNetwork
 
 
 class LabelForward:
-    def __init__(self, path, truck_load, drones_used, arrival_time, sync_time, wait_time, psi_set, cost, depth):
+    def __init__(self, path, truck_load, drones_used, arrival_time, sync_time, wait_time, psi_set, cost, depth,
+                 trans_net: TransformedNetwork, alternative_extensions=None):
         self.path = path  # Ordered sequence of visited nodes (partial path)
         self.truck_load = truck_load  # Truck loading weight
         self.drones_used = drones_used  # Number of drones used
@@ -14,9 +15,12 @@ class LabelForward:
         self.psi_set = psi_set.copy()  # for SR inequalities
         self.cost = cost  # Accumulated cost
         # auxiliary components
-        self.net = GeneralHelper.transformed_net
+        self.net = trans_net
         self.depth = depth
-        self.alternative_extensions = [node_j for node_j in self.net.out_arcs[self.path[-1]]]
+        if alternative_extensions is None:
+            self.alternative_extensions = [node_j for node_j in self.net.out_arcs[self.path[-1]]]
+        else:
+            self.alternative_extensions = alternative_extensions.copy()
         self.latest_hub = None
         self.path_set = set()
 
@@ -73,13 +77,10 @@ class LabelForward:
                 if self.psi_set[triple] in {1, 3} and other.psi_set[triple] in {0, 2}:
                     sum_nu += duals[triple]
 
-            if self.cost - sum_nu + close_tolerance > other.cost:
+            if self.cost - sum_nu + CommonHelper.close_tolerance > other.cost:
                 return False
-            elif self.cost - sum_nu + close_tolerance < other.cost:
+            elif self.cost - sum_nu + CommonHelper.close_tolerance < other.cost:
                 strict = True
-
-        if strict:
-            GeneralHelper.forward_dominance_num += 1
 
         # here all conditions are satisfied, we need to ensure that at least one is strict
         return strict
@@ -93,17 +94,13 @@ class LabelForward:
         _node_j = node_j.replace("_T", "")
         arc = (node_i, node_j)
 
-        # the vehicle cannot visit hub if it does not launch drones at the hub
-        if node_i in self.net.hubs and node_j in self.net.customers_origin:
-            return False
-
         # check Loading Capacity Constraints
-        if self.truck_load + self.net.demand_weights[node_j] > truck_max_weight:
+        if self.truck_load + self.net.demand_weights[node_j] > CommonHelper.truck_max_weight:
             return False
 
         # check Drone Fleet Constraints
         if arc in self.net.arcs_scp or arc in self.net.arcs_cpcp:
-            if self.drones_used >= num_drones_per_truck:
+            if self.drones_used >= CommonHelper.num_drones_per_truck:
                 return False
 
         # check branch arcs in transformed network
@@ -111,7 +108,7 @@ class LabelForward:
             return False
 
         # check Customer Visits Constraints
-        if not enable_DSS:
+        if not CommonHelper.enable_DSS:
             if node_j in self.net.customers_origin:
                 dup_node = node_j + "_T"
                 if node_j in self.path or dup_node in self.path:
@@ -138,9 +135,11 @@ class LabelForward:
         # check Arrival Time Constraints
         if node_j in self.net.customers:
             # get the arrival time at j
-            node_j_arrive_t = get_arrive_time(self.arrival_time, node_i, node_j, self.latest_hub,
-                                              self.sync_time, self.wait_time, self.net)
-            if node_j_arrive_t + close_tolerance < self.net.a_lb[_node_j]:
+            node_j_arrive_t = CommonHelper.get_arrive_time(self.arrival_time, node_i, node_j, self.latest_hub,
+                                                           self.sync_time, self.wait_time, self.net)
+            if node_j == "C":
+                sdas = 0
+            if node_j_arrive_t + CommonHelper.close_tolerance < self.net.a_lb[_node_j]:
                 return False
 
         # check disabled truck arcs in the original network
@@ -191,7 +190,9 @@ class LabelForward:
             wait_time=self.wait_time,
             psi_set=self.psi_set,
             cost=self.cost,
-            depth=self.depth + 1)
+            depth=self.depth + 1,
+            trans_net=self.net
+        )
         label_j.alternative_extensions = [node for node in self.net.out_arcs[node_j] if node not in self.path]
         label_j.latest_hub = self.latest_hub
 
@@ -215,8 +216,8 @@ class LabelForward:
             label_j.drones_used = 0
 
         # update a
-        label_j.arrival_time = get_arrive_time(self.arrival_time, node_i, node_j, label_j.latest_hub, self.sync_time,
-                                               self.wait_time, self.net)
+        label_j.arrival_time = CommonHelper.get_arrive_time(self.arrival_time, node_i, node_j, label_j.latest_hub,
+                                                            self.sync_time, self.wait_time, self.net)
 
         # update sync time
         if node_j in self.net.hubs:
@@ -241,11 +242,12 @@ class LabelForward:
             if node_j in self.net.customers:
                 _node_j = node_j.replace("_T", "")
                 index = self.net.customers.index(_node_j)
-                label_j.cost += cw * (label_j.arrival_time - self.net.a_lb[_node_j]) ** 2 - duals["mu"][index] - sum_nu
+                label_j.cost += CommonHelper.cw * (label_j.arrival_time - self.net.a_lb[_node_j]) ** 2 - duals["mu"][
+                    index] - sum_nu
                 if node_j in self.net.customers_prime:
-                    label_j.cost += drone_cost_per_flight
+                    label_j.cost += CommonHelper.drone_cost_per_flight
             elif node_j == self.net.depot_sink:
-                label_j.cost += cw * label_j.arrival_time - sum_nu
+                label_j.cost += CommonHelper.cw * label_j.arrival_time - sum_nu
             else:
                 label_j.cost += -sum_nu
         else:

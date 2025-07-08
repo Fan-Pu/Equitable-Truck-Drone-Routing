@@ -1,7 +1,9 @@
 from __future__ import annotations
+
 import copy
-import GeneralHelper
 from collections import defaultdict
+
+import CommonHelper
 
 
 class NodeInfo:
@@ -12,10 +14,10 @@ class NodeInfo:
         self.columns = list()  # value: the keys of routes
         self.column_customer_visits = defaultdict(set)  # key: route_key; value: the customers visited by the route
         self.vehicle_fleet_branch_lb = 0
-        self.vehicle_fleet_branch_ub = GeneralHelper.net.num_trucks
+        self.vehicle_fleet_branch_ub = CommonHelper.net.num_trucks
         # SR inequalities
         self.SR_infos = {customer_triple: [] for customer_triple in
-                         GeneralHelper.transformed_net.PI}  # value: column keys
+                         CommonHelper.transformed_net.PI}  # value: column keys
         self.added_SR_keys = set()  # the keys of SR inequalities that has been added to current RMP
         self.column_in_SR_triples = defaultdict(list)  # key: column_key; value: involved SR inequality keys
         # branching constraints
@@ -47,11 +49,78 @@ class NodeInfo:
         self.removed_columns_keys = parent.removed_columns_keys.copy()
 
     def init_SR_infos(self):
-        for triple in GeneralHelper.transformed_net.PI:
-            if len(self.added_SR_keys) >= GeneralHelper.SR_num:
+        for triple in CommonHelper.transformed_net.PI:
+            if len(self.added_SR_keys) >= CommonHelper.SR_num:
                 break
             for route_key, covered_customer in self.column_customer_visits.items():
                 if len(covered_customer & set(triple)) >= 2:
                     self.SR_infos[triple].append(route_key)
                     self.added_SR_keys.add(triple)
                     self.column_in_SR_triples[route_key].append(triple)
+
+    # def serialize(self) -> dict:
+    #     """Turn this NodeInfo into a pure‐Python dict."""
+    #     return {
+    #         'parent_id': self.parent_id,
+    #         'id': self.id,
+    #         'depth': self.depth,
+    #         'columns': list(self.columns),
+    #         'column_customer_visits': {
+    #             ck: list(customers)
+    #             for ck, customers in self.column_customer_visits.items()
+    #         },
+    #         'vehicle_fleet_branch_lb': self.vehicle_fleet_branch_lb,
+    #         'vehicle_fleet_branch_ub': self.vehicle_fleet_branch_ub,
+    #         'SR_infos': {
+    #             tuple(triple): list(cols)
+    #             for triple, cols in self.SR_infos.items()
+    #         },
+    #         'added_SR_keys': [tuple(k) for k in self.added_SR_keys],
+    #         'column_in_SR_triples': {
+    #             ck: [tuple(t) for t in triples]
+    #             for ck, triples in self.column_in_SR_triples.items()
+    #         },
+    #         'child_ids': list(self.child_ids),
+    #         'disabled_arcs_trucks': [tuple(a) for a in self.disabled_arcs_trucks],
+    #         'disabled_arcs_drones': [tuple(a) for a in self.disabled_arcs_drones],
+    #         'must_visit_arcs_trucks': [tuple(a) for a in self.must_visit_arcs_trucks],
+    #         'must_visit_arcs_drones': [tuple(a) for a in self.must_visit_arcs_drones],
+    #         'disabled_arcs_trans': [tuple(a) for a in self.disabled_arcs_trans],
+    #         'must_visit_arcs_trans': [tuple(a) for a in self.must_visit_arcs_trans],
+    #         'removed_columns_keys': list(self.removed_columns_keys),
+    #     }
+    #
+    # @classmethod
+    # def deserialize(cls, data: dict) -> NodeInfo:
+    #     """Rebuild a NodeInfo from one made by serialize()."""
+    #     ni = cls(
+    #         parent_id=data['parent_id'],
+    #         self_id=data['id'],
+    #         depth=data['depth']
+    #     )
+    #     ni.columns = data['columns']
+    #     ni.column_customer_visits = defaultdict(
+    #         set,
+    #         {ck: set(v) for ck, v in data['column_customer_visits'].items()}
+    #     )
+    #     ni.vehicle_fleet_branch_lb = data['vehicle_fleet_branch_lb']
+    #     ni.vehicle_fleet_branch_ub = data['vehicle_fleet_branch_ub']
+    #     ni.SR_infos = {
+    #         tuple(triple): list(cols)
+    #         for triple, cols in data['SR_infos'].items()
+    #     }
+    #     ni.added_SR_keys = {tuple(k) for k in data['added_SR_keys']}
+    #     ni.column_in_SR_triples = defaultdict(
+    #         list,
+    #         {ck: [tuple(t) for t in triples]
+    #          for ck, triples in data['column_in_SR_triples'].items()}
+    #     )
+    #     ni.child_ids = data['child_ids']
+    #     ni.disabled_arcs_trucks = {tuple(a) for a in data['disabled_arcs_trucks']}
+    #     ni.disabled_arcs_drones = {tuple(a) for a in data['disabled_arcs_drones']}
+    #     ni.must_visit_arcs_trucks = {tuple(a) for a in data['must_visit_arcs_trucks']}
+    #     ni.must_visit_arcs_drones = {tuple(a) for a in data['must_visit_arcs_drones']}
+    #     ni.disabled_arcs_trans = {tuple(a) for a in data['disabled_arcs_trans']}
+    #     ni.must_visit_arcs_trans = {tuple(a) for a in data['must_visit_arcs_trans']}
+    #     ni.removed_columns_keys = set(data['removed_columns_keys'])
+    #     return ni
