@@ -15,12 +15,14 @@ from sklearn.cluster import KMeans
 from Network import Network
 from TransformedNetwork import TransformedNetwork
 
+sensitivity_analysis = True
+
 # 1,2,3
-seed = 3
+seed = 1
 
 # feasible combinations (2,5), (5, 15), (8,25),  (5,20)
-num_trucks, num_customers = (5, 20)
-custom_dist = "PC"  # customer distribution "PS", "PC", "mixed"
+num_trucks, num_customers = (2, 5)
+custom_dist = "PS"  # customer distribution "PS", "PC", "mixed"
 # num_drones_per_truck = 4
 num_drones_per_truck = 3
 num_hubs = 2
@@ -33,8 +35,12 @@ enable_DSS = False
 
 enable_warm_start = True
 enable_primal_heuristics = True
+# enable_warm_start = False
+# enable_primal_heuristics = False
+# SR_num = 0  # the maximum number of SR inequalities, 10
+# SR_num_each_run = 0
 SR_num = 10  # the maximum number of SR inequalities, 10
-SR_num_each_run = 2  # 2
+SR_num_each_run = 2
 
 num_threads = 4  # if this value exceeds the maximum number N of logic processors, change it to N
 
@@ -47,8 +53,9 @@ close_tolerance = 0.001
 max_node_label_num = 9999  # the maximum number of labels kept in a physical node
 
 # cw = 0.25
-alpha = 0.99
-cw = (1 - alpha) / alpha
+cw = 9
+alpha = 0.4
+# cw = (1 - alpha) / alpha
 
 max_run_time = 1800  # in seconds
 
@@ -167,7 +174,6 @@ def create_original_network():
 
     # sample customer & hub locations
     customer_locations = _sample_customers(num_customers, custom_dist)
-
     for i in range(len(customers)):
         locations[customers[i]] = tuple(customer_locations[i])
     # locations[depot_source] = tuple(customer_locations.mean(axis=0))
@@ -291,8 +297,9 @@ def create_original_network():
         "drone_travel_times": drone_travel_times,
         "demand_weights": demand_weights
     }
-    global net
+    global net, cw
     net = Network(num_trucks, num_drones_per_truck, **params)
+    print(f"cw is {cw}")
 
 
 def _sample_customers(n, dist):
@@ -323,7 +330,7 @@ def _sample_customers(n, dist):
         raise ValueError(f'Unknown distribution type: {dist}')
 
 
-def choose_hubs_by_kmeans(cust, k, min_dist=2):
+def choose_hubs_by_kmeans(cust, k, min_dist=0.5):
     """
     Given an array of customer coordinates cust (shape: n x 2),
     compute k hub coordinates using k-means clustering.
@@ -858,35 +865,41 @@ def plot_set_style():
 
 def get_SA_infos(BP_solutions, trans_net: TransformedNetwork):
     # get the information for the sensitivity analysis
-    truck_customer_visit_nums = 0
+    truck_customer_visit_num = 0
     truck_customer_visits = {}
     drone_launch_times = {key: 0 for key in trans_net.hubs}
     total_drone_flights = 0
     total_cost = 0
+    num_truck_dispatched = 0
+    delay_times = {}
     for solution in BP_solutions:
+        # get the delay info
+        _, arrive_times = route_get_cost(solution, net, transformed_net)
+        for cust, vals in arrive_times.items():
+            arr_t, arr_t_lb = vals
+            delay_times[cust] = float(arr_t - arr_t_lb)
+
         truck_route = solution['truck']
         total_cost += solution['cost']
         truck_customer_visit = []
+        if len(truck_route) > 0:
+            num_truck_dispatched += 1
         for node in truck_route:
             if node in trans_net.customers_origin:
                 truck_customer_visit.append(node)
         if len(truck_customer_visit) > 0:
-            truck_customer_visit_nums += len(truck_customer_visit)
+            truck_customer_visit_num += len(truck_customer_visit)
             truck_customer_visits[solution['id']] = truck_customer_visit
         drone_routes = solution['drone']
         for hub, visits in drone_routes.items():
             drone_launch_times[hub] += len(visits)
 
-    num_truck_dispatched = len(truck_customer_visits)
     f_cost = num_truck_dispatched * truck_cost + drone_cost_per_flight * total_drone_flights
     f_time = (total_cost - f_cost) / cw
-    n_stop = truck_customer_visit_nums / num_truck_dispatched
-    print(f"f_cost: {f_cost}")
-    print(f"f_time: {f_time}")
-    print(f"n_truck: {num_truck_dispatched}")
-    print(f"n_stop: {n_stop}")
-    for hub, drone_visit_num in drone_launch_times.items():
-        print(f"hub {hub}: {drone_visit_num}")
+    drone_flight_num = sum(drone_launch_times.values())
+    drone_ratio = drone_flight_num / num_customers * 100
+
+    return num_truck_dispatched, truck_customer_visit_num, drone_flight_num, drone_ratio, f_time, f_cost, delay_times
 
 
 def read_sol_get_delay_times():
@@ -935,8 +948,8 @@ def read_sol_get_delay_times():
         for temp_seed, solution in solutions:
             global seed, net, transformed_net
             seed = temp_seed
-            net = create_original_network()
-            transformed_net = transform_network(net)
+            create_original_network()
+            transform_network()
             for route in solution:
                 _, arrive_times = route_get_cost(route, net, transformed_net)
                 delays = [float(arrive_times[cus][0] - arrive_times[cus][1]) for cus in arrive_times.keys()]
@@ -946,3 +959,13 @@ def read_sol_get_delay_times():
         print()
     for alpha, sols in sorted(bp_by_alpha.items()):
         print(f'alpha = {alpha!s}: found {len(sols)} entries →', sols)
+
+
+def update_inputs(_seed, _num_trucks, _num_customers, _custom_dist, _drone_num, _cw):
+    global seed, num_trucks, num_customers, custom_dist, num_drones_per_truck, cw
+    seed = _seed
+    num_trucks = _num_trucks
+    num_customers = _num_customers
+    custom_dist = _custom_dist
+    num_drones_per_truck = _drone_num
+    cw = _cw

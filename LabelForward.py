@@ -137,8 +137,6 @@ class LabelForward:
             # get the arrival time at j
             node_j_arrive_t = CommonHelper.get_arrive_time(self.arrival_time, node_i, node_j, self.latest_hub,
                                                            self.sync_time, self.wait_time, self.net)
-            if node_j == "C":
-                sdas = 0
             if node_j_arrive_t + CommonHelper.close_tolerance < self.net.a_lb[_node_j]:
                 return False
 

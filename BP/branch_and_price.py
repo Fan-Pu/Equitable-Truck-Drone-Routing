@@ -5,6 +5,7 @@ from queue import PriorityQueue
 from colorama import Fore, Style
 from gurobipy import GRB
 
+import BP.rmp_node
 import CommonHelper
 from BP.rmp_node import RMPNode
 from NodeInfo import NodeInfo
@@ -326,7 +327,7 @@ class BranchAndPrice:
     def solve(self):
         """Main branch-and-price loop"""
         if self.s_time is None:
-            start_time = time.time()
+            self.s_time = time.time()
         global node_id_counter
         # add root node
         node_id_counter += 1
@@ -459,6 +460,8 @@ class BranchAndPrice:
         final_solution, cost = self.construct_final_route()
         print(f"total nodes: {len(node_infos)}")
 
+        BP.rmp_node._pool = None
+        
         return time.time() - self.s_time, final_solution, cost
 
     def construct_final_route(self):

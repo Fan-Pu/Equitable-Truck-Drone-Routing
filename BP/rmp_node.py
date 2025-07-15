@@ -12,19 +12,21 @@ _pool = None
 _stop_event = None
 
 
-def worker_init():
+def worker_init(seed, num_trucks, num_customers, custom_dist, drone_num, cw):
+    CommonHelper.update_inputs(seed, num_trucks, num_customers, custom_dist, drone_num, cw)
     CommonHelper.create_original_network()
     CommonHelper.transform_network()
 
 
-def get_pricer_pool(num_threads):
+def get_pricer_pool(num_threads, seed, num_trucks, num_customers, custom_dist, drone_num, cw):
     global _pool, _stop_event
     if _pool is None:
         mgr = Manager()
         _stop_event = mgr.Event()
         _pool = ProcessPoolExecutor(
             max_workers=num_threads,
-            initializer=worker_init
+            initializer=worker_init,
+            initargs=(seed, num_trucks, num_customers, custom_dist, drone_num, cw)
         )
     return _pool, _stop_event
 
@@ -156,7 +158,9 @@ class RMPNode:
         node_id = node_info.id
         farkas = True if self.status == GRB.INFEASIBLE else False
 
-        executor, stop_evt = get_pricer_pool(CommonHelper.num_threads)
+        executor, stop_evt = get_pricer_pool(CommonHelper.num_threads, CommonHelper.seed, CommonHelper.num_trucks,
+                                             CommonHelper.num_customers, CommonHelper.custom_dist,
+                                             CommonHelper.num_drones_per_truck, CommonHelper.cw)
         stop_evt.clear()  # reset from any previous run
 
         futures = [

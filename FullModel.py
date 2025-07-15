@@ -3,10 +3,11 @@ import time
 
 import gurobipy as gp
 import matplotlib.cm as cm
+import matplotlib.pyplot as plt
+import networkx as nx
 from gurobipy import GRB
 
 import CommonHelper
-from CommonHelper import *
 
 
 def sort_arcs_to_path(arcs: list):
@@ -115,20 +116,20 @@ class FullModel:
         obj_expr = 0
         for n_name in self.customers:
             n = self.all_nodes_indices[n_name]
-            obj_expr += cw * (a_dict[n] - CommonHelper.transformed_net.a_lb[n_name]) ** 2
+            obj_expr += CommonHelper.cw * (a_dict[n] - CommonHelper.transformed_net.a_lb[n_name]) ** 2
         for k in range(self.net.num_trucks):
             n = self.all_nodes_indices[self.depot_sink]
-            obj_expr += cw * ak_dict[(n, k)]
+            obj_expr += CommonHelper.cw * ak_dict[(n, k)]
         for k in range(self.net.num_trucks):
             for j_name in self.truck_out_arcs[self.depot_source]:
                 n, j = self.all_nodes_indices[self.depot_source], self.all_nodes_indices[j_name]
-                obj_expr += truck_cost * x_dict[(n, j, k)]
+                obj_expr += CommonHelper.truck_cost * x_dict[(n, j, k)]
         for d in range(self.total_drone_num):
             for n_name in self.hubs:
                 n = self.all_nodes_indices[n_name]
                 for j_name in self.drone_out_arcs[n_name]:
                     j = self.all_nodes_indices[j_name]
-                    obj_expr += drone_cost_per_flight * y_dict[(n, j, d)]
+                    obj_expr += CommonHelper.drone_cost_per_flight * y_dict[(n, j, d)]
         self.model.setObjective(obj_expr, GRB.MINIMIZE)
 
         # flow conservation ************************************************************
@@ -221,7 +222,7 @@ class FullModel:
                 for d in range(self.total_drone_num):
                     lhs = 2 * travel_time * y_dict[(n, j, d)]
                     self.constraints.append(
-                        self.model.addConstr(lhs <= drone_endurance,
+                        self.model.addConstr(lhs <= CommonHelper.drone_endurance,
                                              name=f"drone_battery_{cons_id}"))
                     cons_id += 1
 
@@ -232,7 +233,7 @@ class FullModel:
             n = self.all_nodes_indices[n_name]
             for k in range(self.net.num_trucks):
                 self.constraints.append(
-                    self.model.addConstr(wk_dict[(n, k)] <= truck_max_weight,
+                    self.model.addConstr(wk_dict[(n, k)] <= CommonHelper.truck_max_weight,
                                          name=f"payload1_{cons_id}"))
                 cons_id += 1
         # cons 2
@@ -246,7 +247,7 @@ class FullModel:
                             wk_dict[(n, k)]
                             >= wk_dict[(i, k)]
                             + self.demand_weights[n]
-                            + M * (x_dict[(i, n, k)] - 1),
+                            + CommonHelper.M * (x_dict[(i, n, k)] - 1),
                             name=f"payload2_{cons_id}"))
                     cons_id += 1
         # cons 3
@@ -263,14 +264,14 @@ class FullModel:
                             rhs += demand_weight * y_dict[(n, j, d)]
                     self.constraints.append(
                         self.model.addConstr(
-                            wk_dict[(n, k)] >= wk_dict[(i, k)] + self.demand_weights[n] + rhs + M * (
+                            wk_dict[(n, k)] >= wk_dict[(i, k)] + self.demand_weights[n] + rhs + CommonHelper.M * (
                                     x_dict[(i, n, k)] - 1),
                             name=f"payload3_{cons_id}"))
                     cons_id += 1
 
         # truck waiting times ************************************************************
         cons_id = 0
-        # cons 1
+        # cons 1.1
         for n_name in self.hubs:
             n = self.all_nodes_indices[n_name]
             for k in range(self.net.num_trucks):
@@ -282,8 +283,21 @@ class FullModel:
                         rhs += travel_time * y_dict[(n, j, d)]
                     self.constraints.append(
                         self.model.addConstr(t_dict[(n, k)] >= rhs,
-                                             name=f"wait1_{cons_id}"))
+                                             name=f"wait11_{cons_id}"))
                     cons_id += 1
+        # cons 1.2
+        for n_name in self.hubs:
+            n = self.all_nodes_indices[n_name]
+            for k in range(self.net.num_trucks):
+                rhs = 0
+                for j_name in self.drone_out_arcs[n_name]:
+                    j = self.all_nodes_indices[j_name]
+                    for d in self.drone_dict[k]:
+                        rhs += y_dict[(n, j, d)]
+                self.constraints.append(
+                    self.model.addConstr(t_dict[(n, k)] <= CommonHelper.M * rhs,
+                                         name=f"wait12_{cons_id}"))
+                cons_id += 1
         # cons 2
         for n_name in self.all_nodes:
             if n_name in self.hubs:
@@ -331,15 +345,14 @@ class FullModel:
                     rhs = (ak_dict[(i, k)]
                            + t_dict[(i, k)]
                            + travel_time * x_dict[(i, n, k)]
-                           + M * (x_dict[(i, n, k)] - 1))
+                           + CommonHelper.M * (x_dict[(i, n, k)] - 1))
                     self.constraints.append(
                         self.model.addConstr(ak_dict[(n, k)] >= rhs, name=f"realized_ank1_{cons_id}"))
                     cons_id += 1
-
                     rhs = (ak_dict[(i, k)]
                            + t_dict[(i, k)]
                            + travel_time * x_dict[(i, n, k)]
-                           + M * (1 - x_dict[(i, n, k)]))
+                           + CommonHelper.M * (1 - x_dict[(i, n, k)]))
                     self.constraints.append(
                         self.model.addConstr(ak_dict[(n, k)] <= rhs, name=f"realized_ank2_{cons_id}"))
                     cons_id += 1
@@ -348,7 +361,7 @@ class FullModel:
             for i_name in self.truck_in_arcs[n_name]:
                 i = self.all_nodes_indices[i_name]
                 for k in range(self.net.num_trucks):
-                    rhs = (CommonHelper.transformed_net.a_lb[n_name] + M * (x_dict[(i, n, k)] - 1))
+                    rhs = (CommonHelper.transformed_net.a_lb[n_name] + CommonHelper.M * (x_dict[(i, n, k)] - 1))
                     self.constraints.append(
                         self.model.addConstr(ak_dict[(n, k)] >= rhs, name=f"realized_ank3_{cons_id}"))
                     cons_id += 1
@@ -362,7 +375,7 @@ class FullModel:
                     # cons 1
                     rhs = (ak_dict[(n, self.kd_dict[d])]
                            + travel_time * y_dict[(n, j, d)]
-                           + M * (y_dict[(n, j, d)] - 1))
+                           + CommonHelper.M * (y_dict[(n, j, d)] - 1))
                     self.constraints.append(
                         self.model.addConstr(ad_dict[(j, d)] >= rhs,
                                              name=f"realized_and1_{cons_id}"))
@@ -370,13 +383,13 @@ class FullModel:
                     # cons 2
                     rhs = (ak_dict[(n, self.kd_dict[d])]
                            + travel_time * y_dict[(n, j, d)]
-                           + M * (1 - y_dict[(n, j, d)]))
+                           + CommonHelper.M * (1 - y_dict[(n, j, d)]))
                     self.constraints.append(
                         self.model.addConstr(ad_dict[(j, d)] <= rhs,
                                              name=f"realized_and2_{cons_id}"))
                     cons_id += 1
                     # cons 3
-                    rhs = (CommonHelper.transformed_net.a_lb[j_name] + M * (y_dict[(n, j, d)] - 1))
+                    rhs = (CommonHelper.transformed_net.a_lb[j_name] + CommonHelper.M * (y_dict[(n, j, d)] - 1))
                     self.constraints.append(
                         self.model.addConstr(ad_dict[(j, d)] >= rhs, name=f"realized_and3_{cons_id}"))
                     cons_id += 1
@@ -388,6 +401,7 @@ class FullModel:
                 # wipe it out
                 open(log_file, 'w').close()
             self.model.setParam("LogFile", log_file)
+        self.model.setParam('FeasibilityTol', 1e-9)
         self.model.update()
         if use_cb:
             cb = NoImprovementCallback()
@@ -432,12 +446,12 @@ class FullModel:
             # construct the route
             truck_routes = {k: [] for k in range(self.net.num_trucks)}
             for (i, j, k), var in x_dict.items():
-                if abs(var.X - 1) <= close_tolerance:
+                if abs(var.X - 1) <= CommonHelper.close_tolerance:
                     truck_routes[k].append((self.all_nodes[i], self.all_nodes[j]))
             from collections import defaultdict
             drone_routes = defaultdict(list)
             for (i, j, d), var in y_dict.items():
-                if abs(var.X - 1) <= close_tolerance:
+                if abs(var.X - 1) <= CommonHelper.close_tolerance:
                     drone_routes[d].append((self.all_nodes[i], self.all_nodes[j]))
 
             truck_routes = {k: sort_arcs_to_path(val) for k, val in truck_routes.items()}
@@ -450,7 +464,7 @@ class FullModel:
                 self.solutions[k]['truck'].append(path[-1][-1])
                 self.solutions[k]['drone'] = {}
             for d, path in drone_routes.items():
-                k = int(d / num_drones_per_truck)
+                k = int(d / CommonHelper.num_drones_per_truck)
                 for hub, node in path:
                     if hub not in self.solutions[k]['drone']:
                         self.solutions[k]['drone'][hub] = [node + "_T"]
@@ -565,6 +579,6 @@ class NoImprovementCallback:
 
         # At regular MIP callbacks, check elapsed time
         if where == GRB.Callback.MIP:
-            if time.time() - self.last_update_time > warm_start_MIP_no_improve:
+            if time.time() - self.last_update_time > CommonHelper.warm_start_MIP_no_improve:
                 # tell Gurobi to stop as soon as it can
                 model.terminate()
