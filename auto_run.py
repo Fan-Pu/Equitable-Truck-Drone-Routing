@@ -4,20 +4,19 @@ import subprocess
 import CommonHelper
 
 seed_dict = {
-    "PS": [1, 2, 3],
-    "PC": [1, 3, 4],
-    "mixed": [1, 2, 3]
+    "PS": [1, 3, 4],
+    "PC": [3],
+    "mixed": [1, 3, 4]
 }
 # net_profiles = [(5, 15), (8, 25)]
-net_profiles = [(8, 25)]
+net_profiles = [(5, 15)]
 # custom_dists = ["PS", "PC", "mixed"]
-custom_dists = ["PS"]
+custom_dists = ["PC"]
 
 # loop over every combination
 for net_profile, custom_dist in itertools.product(net_profiles, custom_dists):
     (num_trucks, num_customers) = net_profile
     for seed in seed_dict[custom_dist]:
-        seed = 3
         subprocess.run([
             "python", "main.py",
             "--seed", str(seed),
@@ -28,4 +27,4 @@ for net_profile, custom_dist in itertools.product(net_profiles, custom_dists):
             "--cw", str(0.25),
             "--enable_sens", str(False)
         ], check=True)
-        dsa = 0
+    sdsa = 0

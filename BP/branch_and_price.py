@@ -37,16 +37,16 @@ def branch(current_node_id, branch_candidates, var_vals: dict):
     ori_net = CommonHelper.net
     trans_net = CommonHelper.transformed_net
     # branch on vehicle fleet
-    sum_vals = sum(var_vals.values())
-    if not CommonHelper.is_integer(sum_vals):
-        fleet_ub, fleet_lb = int(sum_vals), int(sum_vals) + 1
-        # update node info
-        if node_left.vehicle_fleet_branch_ub > fleet_ub:
-            node_left.vehicle_fleet_branch_ub = fleet_ub
-        if node_right.vehicle_fleet_branch_lb < fleet_lb:
-            node_right.vehicle_fleet_branch_lb = fleet_lb
+    # sum_vals = sum(var_vals.values())
+    # if not CommonHelper.is_integer(sum_vals):
+    #     fleet_ub, fleet_lb = int(sum_vals), int(sum_vals) + 1
+    #     # update node info
+    #     if node_left.vehicle_fleet_branch_ub > fleet_ub:
+    #         node_left.vehicle_fleet_branch_ub = fleet_ub
+    #     if node_right.vehicle_fleet_branch_lb < fleet_lb:
+    #         node_right.vehicle_fleet_branch_lb = fleet_lb
     # branch on the arc-flow
-    else:
+    if True:
         # exam flows on all arcs, two types of arc can be revisited: (Source, hub) and (hub, Sink)
         truck_arc_flows = {(i, j): 0.0 for i, j in ori_net.truck_arcs if
                            i != ori_net.depot_source and j != ori_net.depot_sink}
@@ -461,7 +461,7 @@ class BranchAndPrice:
         print(f"total nodes: {len(node_infos)}")
 
         BP.rmp_node._pool = None
-        
+
         return time.time() - self.s_time, final_solution, cost
 
     def construct_final_route(self):

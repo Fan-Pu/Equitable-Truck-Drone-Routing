@@ -9,17 +9,17 @@ import CommonHelper
 
 net_profile = (5, 15)
 # custom_dists = ["PS", "PC", "mixed"]
-custom_dists = ["PC", "mixed"]
-# seed_dict = {
-#     "PS": [3, 4, 5, 7],
-#     "PC": [1, 6, 7, 8],
-#     "mixed": [1, 2, 4, 5]
-# }
-
+custom_dists = ["mixed"]
 seed_dict = {
+    "PS": [3, 4, 5, 7],
     "PC": [1, 6, 7, 8],
     "mixed": [1, 2, 4, 5]
 }
+
+# seed_dict = {
+#     "PC": [1, 6, 7, 8],
+#     "mixed": [1, 2, 4, 5]
+# }
 
 # custom_dists = ["PS", "PC"]
 # seed_dict = {
