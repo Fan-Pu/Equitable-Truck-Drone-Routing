@@ -47,7 +47,7 @@ num_threads = 4  # if this value exceeds the maximum number N of logic processor
 warm_start_MIP_no_improve = 30  # seconds
 primal_heuristic_time = 30
 
-M = 10000
+M = 1000
 close_tolerance = 0.001
 
 max_node_label_num = 9999  # the maximum number of labels kept in a physical node
