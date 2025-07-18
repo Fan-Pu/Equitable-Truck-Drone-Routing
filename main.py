@@ -43,7 +43,7 @@ def main(seed, num_trucks, num_customers, custom_dist, drone_num, cw, enable_sen
     # the integrated model
     if drone_num > 0:
         full_model = FullModel()
-        full_obj_val, full_solve_time, gap, full_sol = full_model.solve(time_limit=1, use_cb=False,
+        full_obj_val, full_solve_time, gap, full_sol = full_model.solve(time_limit=1800, use_cb=False,
                                                                         log_file=ins_dir + "full_solve.log")
         CommonHelper.solver_sol = full_sol
         full_model.model.dispose()

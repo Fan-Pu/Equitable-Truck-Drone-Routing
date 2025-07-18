@@ -9,14 +9,14 @@ import CommonHelper
 #     "mixed": [1, 3, 4]
 # }
 seed_dict = {
-    "PS": [1, 3, 4],
-    "PC": [3],
-    "mixed": [4]
+    "PS": [1],
+    "PC": [1, 3, 4],
+    "mixed": [1, 2, 3]
 }
 # net_profiles = [(5, 15), (8, 25)]
 net_profiles = [(5, 15)]
-# custom_dists = ["PS", "PC", "mixed"]
-custom_dists = ["mixed"]
+custom_dists = ["PS", "PC", "mixed"]
+# custom_dists = ["PC"]
 
 # loop over every combination
 for net_profile, custom_dist in itertools.product(net_profiles, custom_dists):
@@ -29,6 +29,6 @@ for net_profile, custom_dist in itertools.product(net_profiles, custom_dists):
             "--num_customers", str(num_customers),
             "--custom_dist", str(custom_dist),
             "--drone_num", str(CommonHelper.num_drones_per_truck),
-            "--cw", str((1 - 0.30000000000000004) / 0.30000000000000004),
+            "--cw", str(0.25),
             "--enable_sens", str(False)
         ], check=True)

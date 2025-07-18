@@ -101,31 +101,56 @@ initial_routes = []
 # solution visualization
 solution_to_show = [
     {
-        "id": 11,
+        "id": 2,
         "truck": [
             "Source",
-            "C4",
             "C3",
             "Sink"
         ],
         "drone": {},
-        "cost": 46.353421514412354
+        "cost": 27.882377542459313
     },
     {
-        "id": 19,
         "truck": [
             "Source",
-            "C2",
-            "C5",
-            "H2",
+            "C7",
+            "C8",
+            "C4",
             "Sink"
         ],
-        "drone": {
-            "H2": [
-                "C1_T"
-            ]
-        },
-        "cost": 56.8971511692913
+        "drone": {},
+        "id": 18,
+        "cost": 42.55642446286775
+    },
+    {
+        "id": 25,
+        "truck": [
+            "Source",
+            "C1",
+            "C13",
+            "C14",
+            "C9",
+            "C10",
+            "C11",
+            "Sink"
+        ],
+        "drone": {},
+        "cost": 41.442190073302065
+    },
+    {
+        "id": 189,
+        "truck": [
+            "Source",
+            "C5",
+            "C2",
+            "C6",
+            "H2",
+            "C15",
+            "C12",
+            "Sink"
+        ],
+        "drone": {},
+        "cost": 42.284303712731905
     }
 ]
 truck_colors = [
@@ -830,18 +855,19 @@ def plot_solution_waiting_times(original_net: Network, trans_net: TransformedNet
     # give 10% headroom so labels are never cut off
     all_heights = [b.get_height() for b in bars1] + [b.get_height() for b in bars2]
     ax.set_ylim(0, max(all_heights) * 1.10)
+    ax.set_ylim(0, 65)
 
     # labels and legend
     ax.set_xticks(x)
     ax.set_xticklabels(categories)
     ax.set_xlabel('Customer name')
     ax.set_ylabel('Arrival time (min)')
-    ax.legend(loc='upper right', frameon=True, framealpha=1)  # no box around legend
+    ax.legend(loc='upper center', frameon=True, framealpha=1)  # no box around legend
     fig.tight_layout()
 
     # save as PDF to include in your INFORMS submission
     fig.savefig('arrival_times.pdf')
-    sdas = 0
+    sdsad = 0
 
 
 def plot_set_style():
@@ -858,7 +884,7 @@ def plot_set_style():
     mpl.rcParams['lines.linewidth'] = 0.8
     mpl.rcParams['savefig.dpi'] = 300
     mpl.rcParams['savefig.format'] = 'pdf'
-    # mpl.rcParams['figure.figsize'] = (10, 5)  # width = 10", height = 5"
+    mpl.rcParams['figure.figsize'] = (10, 5)  # width = 10", height = 5"
     # mpl.rcParams['figure.figsize'] = (15, 5)  # width = 10", height = 5"
     mpl.rcParams['figure.autolayout'] = True
 

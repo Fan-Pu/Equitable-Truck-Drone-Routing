@@ -1,0 +1,1077 @@
+{
+    "sensitivity_analysis": true,
+    "seed": 5,
+    "num_trucks": 5,
+    "num_customers": 15,
+    "custom_dist": "mixed",
+    "num_drones_per_truck": 3,
+    "num_hubs": 2,
+    "truck_arc_gen_prob": 0.2,
+    "hub_arc_gen_prob": 0.5,
+    "enable_DSS": false,
+    "enable_warm_start": true,
+    "enable_primal_heuristics": true,
+    "SR_num": 10,
+    "SR_num_each_run": 2,
+    "num_threads": 4,
+    "warm_start_MIP_no_improve": 30,
+    "primal_heuristic_time": 30,
+    "M": 1000,
+    "close_tolerance": 0.001,
+    "max_node_label_num": 9999,
+    "cw": 0.42857142857142844,
+    "alpha": 0.4,
+    "max_run_time": 1800,
+    "node_lp_trace": [
+        [
+            1,
+            296.70365973318803
+        ],
+        [
+            3,
+            297.2613042304697
+        ],
+        [
+            4,
+            298.62988735401336
+        ],
+        [
+            2,
+            299.10124648383913
+        ],
+        [
+            9,
+            299.68606404229683
+        ],
+        [
+            6,
+            299.76852570666904
+        ]
+    ],
+    "area_side": 14,
+    "truck_cost": 20,
+    "drone_cost_per_flight": 6,
+    "truck_speed": 40,
+    "drone_speed": 40,
+    "low_demand_customer_ratio": 0.5,
+    "low_demand_weight_mean": 1,
+    "low_demand_weight_std": 5,
+    "low_demand_weight_min": 0.5,
+    "high_demand_weight_mean": 10,
+    "high_demand_weight_std": 5,
+    "high_demand_weight_min": 6,
+    "truck_max_weight": 50,
+    "drone_max_weight": 2.3,
+    "drone_endurance": 30,
+    "epsilon": 0.001,
+    "initial_routes": [
+        [
+            "Source",
+            "C1",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C2",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C3",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C4",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C5",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C6",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C7",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C8",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C9",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C10",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C11",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C12",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C13",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C14",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C15",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C7",
+            "C14",
+            "C3",
+            "Sink"
+        ],
+        [
+            "Source",
+            "H2",
+            "C2_T",
+            "C6_T",
+            "C15_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C5",
+            "H1",
+            "C4_T",
+            "C8_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C11",
+            "C1",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C12",
+            "H2",
+            "C9_T",
+            "C10_T",
+            "C13_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C2",
+            "C1",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C4",
+            "H1",
+            "C8_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C6",
+            "C3",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C13",
+            "C12",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C12",
+            "C13",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C12",
+            "C5",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C12",
+            "C13",
+            "H1",
+            "C4",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C12",
+            "C13",
+            "H1",
+            "C8_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C12",
+            "H2",
+            "C2_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C15",
+            "C14",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C15",
+            "C2",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C15",
+            "C4",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C7",
+            "C4",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C15",
+            "C14",
+            "C11",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C15",
+            "C14",
+            "C3",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C7",
+            "C3",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C13",
+            "H2",
+            "C1_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C13",
+            "H2",
+            "C2_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C15",
+            "C14",
+            "C11",
+            "C1",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C7",
+            "C14",
+            "C11",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C13",
+            "C12",
+            "H2",
+            "C10",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C13",
+            "C12",
+            "H2",
+            "C1_T",
+            "C10_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C12",
+            "C13",
+            "H1",
+            "C8_T",
+            "C4",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C12",
+            "C5",
+            "C8",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C13",
+            "C12",
+            "H2",
+            "C1_T",
+            "C3_T",
+            "C10_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C13",
+            "H2",
+            "C1_T",
+            "C10_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C7",
+            "C14",
+            "C11",
+            "C1",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C13",
+            "H2",
+            "C2_T",
+            "C3_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C7",
+            "H1",
+            "C4_T",
+            "C8_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C13",
+            "H2",
+            "C1_T",
+            "C3_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C13",
+            "H2",
+            "C1_T",
+            "C3_T",
+            "C10_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C13",
+            "H2",
+            "C1_T",
+            "C3_T",
+            "C4_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C7",
+            "H2",
+            "C2_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C5",
+            "C8",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C12",
+            "C5",
+            "C3",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C12",
+            "C13",
+            "H1",
+            "C4_T",
+            "C8_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "H2",
+            "C1_T",
+            "C10_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "H2",
+            "C2_T",
+            "C10_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "H2",
+            "C2_T",
+            "C10_T",
+            "C15_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C5",
+            "C3",
+            "Sink"
+        ],
+        [
+            "Source",
+            "H2",
+            "C1_T",
+            "C9_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "H2",
+            "C1_T",
+            "C15_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "H2",
+            "C1_T",
+            "C6_T",
+            "C9_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "H2",
+            "C1_T",
+            "C6_T",
+            "C10_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "H2",
+            "C2_T",
+            "C11_T",
+            "C15_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "H2",
+            "C2_T",
+            "C9_T",
+            "C11_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C7",
+            "H2",
+            "C4_T",
+            "C9_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C7",
+            "H2",
+            "C3_T",
+            "C4_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "H2",
+            "C2_T",
+            "C13_T",
+            "C15_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "H2",
+            "C2_T",
+            "C8_T",
+            "C9_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "H2",
+            "C2_T",
+            "C9_T",
+            "C13_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "H2",
+            "C2_T",
+            "C6_T",
+            "C9_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "H2",
+            "C2_T",
+            "C9_T",
+            "C10_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C12",
+            "C13",
+            "H2",
+            "C1_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C12",
+            "C13",
+            "H2",
+            "C1_T",
+            "C3_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C5",
+            "C6",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C7",
+            "H2",
+            "C3_T",
+            "C4_T",
+            "C9_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "H2",
+            "C2_T",
+            "C11_T",
+            "C13_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "H2",
+            "C2_T",
+            "C10_T",
+            "C13_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "H2",
+            "C2_T",
+            "C10_T",
+            "C11_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "H2",
+            "C2_T",
+            "C6_T",
+            "C10_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "H2",
+            "C2_T",
+            "C8_T",
+            "C10_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C7",
+            "H2",
+            "C1_T",
+            "C3_T",
+            "C4_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "H2",
+            "C6_T",
+            "C13_T",
+            "C15_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "H2",
+            "C6_T",
+            "C11_T",
+            "C13_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "H2",
+            "C2_T",
+            "C6_T",
+            "C13_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "H2",
+            "C2_T",
+            "C6_T",
+            "C11_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "H2",
+            "C1_T",
+            "C2_T",
+            "C6_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C7",
+            "H2",
+            "C3_T",
+            "C4_T",
+            "C13_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C7",
+            "H2",
+            "C2_T",
+            "C3_T",
+            "C4_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "H2",
+            "C10_T",
+            "C11_T",
+            "C15_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "H2",
+            "C10_T",
+            "C11_T",
+            "C15_T",
+            "C9",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C12",
+            "C13",
+            "H2",
+            "C3_T",
+            "C4_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "H2",
+            "C11_T",
+            "C13_T",
+            "C15_T",
+            "C9",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C12",
+            "H2",
+            "C2_T",
+            "C13_T",
+            "C15_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "H2",
+            "C10_T",
+            "C13_T",
+            "C15_T",
+            "C9",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C12",
+            "H2",
+            "C2_T",
+            "C10_T",
+            "C13_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C12",
+            "H2",
+            "C1_T",
+            "C2_T",
+            "C13_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "H2",
+            "C1_T",
+            "C10_T",
+            "C15_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "H2",
+            "C6_T",
+            "C10_T",
+            "C15_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "H2",
+            "C1_T",
+            "C2_T",
+            "C10_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C12",
+            "H2",
+            "C2_T",
+            "C10_T",
+            "C15_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C12",
+            "H2",
+            "C2_T",
+            "C9_T",
+            "C10_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C12",
+            "H2",
+            "C2_T",
+            "C6_T",
+            "C10_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C12",
+            "H2",
+            "C1_T",
+            "C10_T",
+            "C13_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "H2",
+            "C10_T",
+            "C11_T",
+            "C13_T",
+            "C9",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C12",
+            "H2",
+            "C1_T",
+            "C2_T",
+            "C10_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "H2",
+            "C6_T",
+            "C10_T",
+            "C13_T",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C12",
+            "H2",
+            "C1_T",
+            "C2_T",
+            "C6_T",
+            "Sink"
+        ]
+    ],
+    "solution_to_show": [
+        {
+            "id": 11,
+            "truck": [
+                "Source",
+                "C4",
+                "C3",
+                "Sink"
+            ],
+            "drone": {},
+            "cost": 46.353421514412354
+        },
+        {
+            "id": 19,
+            "truck": [
+                "Source",
+                "C2",
+                "C5",
+                "H2",
+                "Sink"
+            ],
+            "drone": {
+                "H2": [
+                    "C1_T"
+                ]
+            },
+            "cost": 56.8971511692913
+        }
+    ],
+    "truck_colors": [
+        "#9aab4b",
+        "#febd2b",
+        "#d94f21",
+        "#82cbec",
+        "#a291c7",
+        "#5f4e94",
+        "#182b55",
+        "#900c3f"
+    ],
+    "node_log_list": {
+        "1": "LP iters: 90, node id: 1, queue: 2, gap: 1.6%, cols: 109, g_ub: 301.5202751703889, g_lb: 296.70365973318803, l_lb: 296.7",
+        "3": "LP iters: 2, node id: 3, queue: 3, gap: 1.41%, cols: 78, g_ub: 301.5202751703889, g_lb: 297.2613042304697, l_lb: 297.26",
+        "4": "LP iters: 1, node id: 4, queue: 4, gap: 0.96%, cols: 77, g_ub: 301.5202751703889, g_lb: 298.62988735401336, l_lb: 298.63",
+        "2": "LP iters: 6, node id: 2, queue: 5, gap: 0.8%, cols: 108, g_ub: 301.5202751703889, g_lb: 299.10124648383913, l_lb: 299.1",
+        "9": "LP iters: 3, node id: 9, queue: 6, gap: 0.61%, cols: 67, g_ub: 301.5202751703889, g_lb: 299.68606404229683, l_lb: 299.69",
+        "6": "LP iters: 9, node id: 6, queue: 7, gap: 0.58%, cols: 83, g_ub: 301.5202751703889, g_lb: 299.76852570666904, l_lb: 299.77",
+        "7": "LP iters: 7, node id: 7, queue: 6, gap: 0.07%, cols: 61, g_ub: 299.9799973750354, g_lb: 299.76852570666904, l_lb: -, integer obj: 299.98",
+        "12": "LP iters: 13, node id: 12, queue: 5, gap: 0.07%, cols: 91, g_ub: 299.9799973750354, g_lb: 299.76852570666904, l_lb: -, integer obj: 299.98",
+        "11": "LP iters: 3, node id: 11, queue: 4, gap: 0.07%, cols: 60, g_ub: 299.9799973750354, g_lb: 299.76852570666904, l_lb: 300.27, pruned by UB",
+        "8": "LP iters: 4, node id: 8, queue: 3, gap: 0.07%, cols: 106, g_ub: 299.9799973750354, g_lb: 299.76852570666904, l_lb: 301.11, pruned by UB",
+        "5": "LP iters: 9, node id: 5, queue: 2, gap: 0.07%, cols: 70, g_ub: 299.9799973750354, g_lb: 299.76852570666904, l_lb: 301.15, pruned by UB",
+        "13": "LP iters: 9, node id: 13, queue: 1, gap: 0.07%, cols: 77, g_ub: 299.9799973750354, g_lb: 299.76852570666904, l_lb: 301.78, pruned by UB",
+        "10": "LP iters: 3, node id: 10, queue: 0, gap: 0.07%, cols: 67, g_ub: 299.9799973750354, g_lb: 299.76852570666904, l_lb: 301.91, pruned by UB"
+    },
+    "num_of_arcs": 398,
+    "root_node_runtime": 26.28977084159851,
+    "BP_runtime": 39.033472776412964,
+    "solver_sol": [
+        {
+            "truck": [
+                "Source",
+                "C7",
+                "H2",
+                "C6",
+                "Sink"
+            ],
+            "drone": {
+                "H2": [
+                    "C9_T"
+                ]
+            }
+        },
+        {
+            "truck": [
+                "Source",
+                "H2",
+                "C15",
+                "C4",
+                "H1",
+                "Sink"
+            ],
+            "drone": {
+                "H2": [
+                    "C2_T"
+                ]
+            }
+        },
+        {
+            "truck": [
+                "Source",
+                "C13",
+                "H1",
+                "C14",
+                "Sink"
+            ],
+            "drone": {
+                "H1": [
+                    "C3_T"
+                ]
+            }
+        },
+        {
+            "truck": [
+                "Source",
+                "C11",
+                "C1",
+                "Sink"
+            ],
+            "drone": {}
+        },
+        {
+            "truck": [
+                "Source",
+                "C12",
+                "C5",
+                "C8",
+                "C10",
+                "Sink"
+            ],
+            "drone": {}
+        }
+    ],
+    "BP_sol": [
+        {
+            "id": 20,
+            "truck": [
+                "Source",
+                "C2",
+                "C1",
+                "Sink"
+            ],
+            "drone": {},
+            "cost": 42.263897965445814
+        },
+        {
+            "id": 33,
+            "truck": [
+                "Source",
+                "C15",
+                "C14",
+                "C11",
+                "Sink"
+            ],
+            "drone": {},
+            "cost": 38.929079986574045
+        },
+        {
+            "id": 53,
+            "truck": [
+                "Source",
+                "C5",
+                "C8",
+                "Sink"
+            ],
+            "drone": {},
+            "cost": 40.77242287748305
+        },
+        {
+            "id": 76,
+            "truck": [
+                "Source",
+                "C7",
+                "H2",
+                "Sink"
+            ],
+            "drone": {
+                "H2": [
+                    "C3_T",
+                    "C4_T",
+                    "C9_T"
+                ]
+            },
+            "cost": 71.00724890278798
+        },
+        {
+            "id": 152,
+            "truck": [
+                "Source",
+                "C12",
+                "H2",
+                "Sink"
+            ],
+            "drone": {
+                "H2": [
+                    "C6_T",
+                    "C10_T",
+                    "C13_T"
+                ]
+            },
+            "cost": 107.0073476427445
+        }
+    ],
+    "sol_summary": [
+        "full model solved in 1.0080 s with obj val: 1505.7026534804959 and Gap: 99.60%",
+        "\nBP warm start: 335.6385",
+        "LSA solved in 39.0335 s with cost: 299.9799973750354"
+    ]
+}
