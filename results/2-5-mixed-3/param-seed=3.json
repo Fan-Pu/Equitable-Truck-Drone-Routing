@@ -1,0 +1,351 @@
+{
+    "sensitivity_analysis": true,
+    "seed": 3,
+    "num_trucks": 2,
+    "num_customers": 5,
+    "custom_dist": "mixed",
+    "num_drones_per_truck": 3,
+    "num_hubs": 2,
+    "truck_arc_gen_prob": 0.2,
+    "hub_arc_gen_prob": 0.5,
+    "enable_DSS": false,
+    "enable_warm_start": false,
+    "enable_primal_heuristics": false,
+    "SR_num": 0,
+    "SR_num_each_run": 0,
+    "num_threads": 4,
+    "warm_start_MIP_no_improve": 30,
+    "primal_heuristic_time": 30,
+    "M": 1000,
+    "close_tolerance": 0.001,
+    "max_node_label_num": 9999,
+    "cw": 0.25,
+    "alpha": 0.4,
+    "max_run_time": 1800,
+    "node_lp_trace": [],
+    "area_side": 14,
+    "truck_cost": 20,
+    "drone_cost_per_flight": 6,
+    "truck_speed": 40,
+    "drone_speed": 40,
+    "low_demand_customer_ratio": 0.5,
+    "low_demand_weight_mean": 1,
+    "low_demand_weight_std": 5,
+    "low_demand_weight_min": 0.5,
+    "high_demand_weight_mean": 10,
+    "high_demand_weight_std": 5,
+    "high_demand_weight_min": 6,
+    "truck_max_weight": 50,
+    "drone_max_weight": 2.3,
+    "drone_endurance": 30,
+    "epsilon": 0.001,
+    "initial_routes": [
+        [
+            "Source",
+            "C1",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C2",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C3",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C4",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C5",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C1",
+            "H2",
+            "C2",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C1",
+            "H2",
+            "C3",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C2",
+            "C1",
+            "H2",
+            "C3",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C1",
+            "H2",
+            "C3",
+            "C5",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C2",
+            "H2",
+            "C3",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C2",
+            "C1",
+            "H2",
+            "C4",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C2",
+            "H2",
+            "C4",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C1",
+            "H2",
+            "C5_T",
+            "C3",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C1",
+            "H2",
+            "C4_T",
+            "C5_T",
+            "C3",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C4",
+            "C5",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C1",
+            "H2",
+            "C4_T",
+            "C3",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C4",
+            "C5",
+            "C2",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C4",
+            "C5",
+            "C2",
+            "C1",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C2",
+            "C1",
+            "H2",
+            "C4_T",
+            "C3",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C2",
+            "H2",
+            "C4_T",
+            "C3",
+            "Sink"
+        ],
+        [
+            "Source",
+            "C4",
+            "C5",
+            "C2",
+            "H2",
+            "C3",
+            "Sink"
+        ],
+        [
+            "Source",
+            "H2",
+            "C4_T",
+            "C3",
+            "Sink"
+        ],
+        [
+            "Source",
+            "H2",
+            "C5_T",
+            "C3",
+            "Sink"
+        ],
+        [
+            "Source",
+            "H2",
+            "C4_T",
+            "C5_T",
+            "C3",
+            "Sink"
+        ]
+    ],
+    "solution_to_show": [
+        {
+            "truck": [
+                "Source",
+                "C14",
+                "H1",
+                "C13",
+                "C4",
+                "Sink"
+            ],
+            "drone": {},
+            "id": 15,
+            "cost": 38.3077623388404
+        },
+        {
+            "truck": [
+                "Source",
+                "C12",
+                "C1",
+                "Sink"
+            ],
+            "drone": {},
+            "id": 16,
+            "cost": 27.78991551511874
+        },
+        {
+            "truck": [
+                "Source",
+                "C5",
+                "C2",
+                "C6",
+                "C9",
+                "Sink"
+            ],
+            "drone": {},
+            "id": 17,
+            "cost": 35.06003680150449
+        },
+        {
+            "truck": [
+                "Source",
+                "C15",
+                "C7",
+                "C8",
+                "Sink"
+            ],
+            "drone": {},
+            "id": 18,
+            "cost": 37.56457428890215
+        },
+        {
+            "truck": [
+                "Source",
+                "C11",
+                "H2",
+                "Sink"
+            ],
+            "drone": {
+                "H2": [
+                    "C3_T",
+                    "C10_T"
+                ]
+            },
+            "id": 19,
+            "cost": 48.64967948226368
+        }
+    ],
+    "truck_colors": [
+        "#9aab4b",
+        "#febd2b",
+        "#d94f21",
+        "#82cbec",
+        "#a291c7",
+        "#5f4e94",
+        "#182b55",
+        "#900c3f"
+    ],
+    "node_log_list": {
+        "1": "LP iters: 20, node id: 1, queue: 0, gap: -%, cols: 24, g_ub: 72.00595056897463, g_lb: -, l_lb: -, integer obj: 72.01"
+    },
+    "num_of_arcs": 58,
+    "root_node_runtime": 15.656164646148682,
+    "BP_runtime": 15.656164646148682,
+    "solver_sol": [
+        {
+            "truck": [
+                "Source",
+                "C4",
+                "C5",
+                "C2",
+                "C1",
+                "H2",
+                "Sink"
+            ],
+            "drone": {}
+        },
+        {
+            "truck": [
+                "Source",
+                "C3",
+                "Sink"
+            ],
+            "drone": {}
+        }
+    ],
+    "BP_sol": [
+        {
+            "id": 2,
+            "truck": [
+                "Source",
+                "C3",
+                "Sink"
+            ],
+            "drone": {},
+            "cost": 38.78702045445148
+        },
+        {
+            "id": 17,
+            "truck": [
+                "Source",
+                "C4",
+                "C5",
+                "C2",
+                "C1",
+                "Sink"
+            ],
+            "drone": {},
+            "cost": 33.21893011452315
+        }
+    ],
+    "sol_summary": [
+        "full model solved in 0.1300 s with obj val: 72.00595056897339 and Gap: 0.00%",
+        "LSA solved in 15.6562 s with cost: 72.00595056897463"
+    ],
+    "branch_ori_nodes": [],
+    "branch_trans_nodes": []
+}

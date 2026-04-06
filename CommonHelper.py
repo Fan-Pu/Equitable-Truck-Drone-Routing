@@ -33,14 +33,14 @@ hub_arc_gen_prob = 0.5  # the probability of generating a truck arc that connect
 
 enable_DSS = False
 
-enable_warm_start = True
-enable_primal_heuristics = True
-# enable_warm_start = False
-# enable_primal_heuristics = False
-# SR_num = 0  # the maximum number of SR inequalities, 10
-# SR_num_each_run = 0
-SR_num = 10  # the maximum number of SR inequalities, 10
-SR_num_each_run = 2
+# enable_warm_start = True
+# enable_primal_heuristics = True
+enable_warm_start = False
+enable_primal_heuristics = False
+SR_num = 0  # the maximum number of SR inequalities, 10
+SR_num_each_run = 0
+# SR_num = 10  # the maximum number of SR inequalities, 10
+# SR_num_each_run = 2
 
 num_threads = 4  # if this value exceeds the maximum number N of logic processors, change it to N
 
@@ -101,56 +101,19 @@ initial_routes = []
 # solution visualization
 solution_to_show = [
     {
-        "id": 2,
+        "id": 15,
         "truck": [
             "Source",
+            "C1",
+            "C2",
+            "C5",
             "C3",
-            "Sink"
-        ],
-        "drone": {},
-        "cost": 27.882377542459313
-    },
-    {
-        "truck": [
-            "Source",
-            "C7",
-            "C8",
+            "H1",
             "C4",
             "Sink"
         ],
         "drone": {},
-        "id": 18,
-        "cost": 42.55642446286775
-    },
-    {
-        "id": 25,
-        "truck": [
-            "Source",
-            "C1",
-            "C13",
-            "C14",
-            "C9",
-            "C10",
-            "C11",
-            "Sink"
-        ],
-        "drone": {},
-        "cost": 41.442190073302065
-    },
-    {
-        "id": 189,
-        "truck": [
-            "Source",
-            "C5",
-            "C2",
-            "C6",
-            "H2",
-            "C15",
-            "C12",
-            "Sink"
-        ],
-        "drone": {},
-        "cost": 42.284303712731905
+        "cost": 49.10797576301199
     }
 ]
 truck_colors = [
@@ -172,6 +135,9 @@ BP_runtime = -1
 solver_sol = None
 BP_sol = None
 sol_summary = []
+
+branch_ori_nodes = []
+branch_trans_nodes = []
 
 
 def update_arc_infos(location, term, travel_time, is_truck, truck_travel_times, truck_out_arcs, truck_in_arcs,
@@ -642,8 +608,6 @@ def route_get_cost(route, ori: Network, trans: TransformedNetwork):
         if node in ori.customers:
             cost += cw * (truck_arr_time - trans.a_lb[node]) ** 2
             arrive_times[node] = (truck_arr_time, trans.a_lb[node])
-            if arrive_times[node][0] + close_tolerance < arrive_times[node][1]:
-                sdas = 0
         elif node == trans.depot_sink:
             cost += cw * truck_arr_time
         elif node in ori.hubs:
@@ -655,8 +619,6 @@ def route_get_cost(route, ori: Network, trans: TransformedNetwork):
                     drone_arr_time = truck_arr_time + ori.drone_travel_times[(hub, temp_visit)]
                     cost += cw * (drone_arr_time - trans.a_lb[temp_visit]) ** 2
                     arrive_times[temp_visit] = (drone_arr_time, trans.a_lb[temp_visit])
-                    if arrive_times[temp_visit][0] + close_tolerance < arrive_times[temp_visit][1]:
-                        sdas = 0
                     wait_time = max(wait_time, ori.drone_travel_times[hub, temp_visit])
                 cost += drone_cost_per_flight * len(drone_visits)
         pre_node = node
@@ -855,14 +817,14 @@ def plot_solution_waiting_times(original_net: Network, trans_net: TransformedNet
     # give 10% headroom so labels are never cut off
     all_heights = [b.get_height() for b in bars1] + [b.get_height() for b in bars2]
     ax.set_ylim(0, max(all_heights) * 1.10)
-    ax.set_ylim(0, 65)
+    ax.set_ylim(0, 35)
 
     # labels and legend
     ax.set_xticks(x)
     ax.set_xticklabels(categories)
     ax.set_xlabel('Customer name')
     ax.set_ylabel('Arrival time (min)')
-    ax.legend(loc='upper center', frameon=True, framealpha=1)  # no box around legend
+    ax.legend(loc='lower right', frameon=True, framealpha=1)  # no box around legend
     fig.tight_layout()
 
     # save as PDF to include in your INFORMS submission
@@ -884,7 +846,7 @@ def plot_set_style():
     mpl.rcParams['lines.linewidth'] = 0.8
     mpl.rcParams['savefig.dpi'] = 300
     mpl.rcParams['savefig.format'] = 'pdf'
-    mpl.rcParams['figure.figsize'] = (10, 5)  # width = 10", height = 5"
+    # mpl.rcParams['figure.figsize'] = (10, 5)  # width = 10", height = 5"
     # mpl.rcParams['figure.figsize'] = (15, 5)  # width = 10", height = 5"
     mpl.rcParams['figure.autolayout'] = True
 
@@ -919,6 +881,7 @@ def get_SA_infos(BP_solutions, trans_net: TransformedNetwork):
         drone_routes = solution['drone']
         for hub, visits in drone_routes.items():
             drone_launch_times[hub] += len(visits)
+            total_drone_flights += 1
 
     f_cost = num_truck_dispatched * truck_cost + drone_cost_per_flight * total_drone_flights
     f_time = (total_cost - f_cost) / cw

@@ -123,13 +123,13 @@ class FullModel:
         for k in range(self.net.num_trucks):
             for j_name in self.truck_out_arcs[self.depot_source]:
                 n, j = self.all_nodes_indices[self.depot_source], self.all_nodes_indices[j_name]
-                obj_expr += CommonHelper.truck_cost * x_dict[(n, j, k)]
+                # obj_expr += CommonHelper.truck_cost * x_dict[(n, j, k)]
         for d in range(self.total_drone_num):
             for n_name in self.hubs:
                 n = self.all_nodes_indices[n_name]
                 for j_name in self.drone_out_arcs[n_name]:
                     j = self.all_nodes_indices[j_name]
-                    obj_expr += CommonHelper.drone_cost_per_flight * y_dict[(n, j, d)]
+                    # obj_expr += CommonHelper.drone_cost_per_flight * y_dict[(n, j, d)]
         self.model.setObjective(obj_expr, GRB.MINIMIZE)
 
         # flow conservation ************************************************************

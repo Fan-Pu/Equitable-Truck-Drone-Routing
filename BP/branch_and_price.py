@@ -93,6 +93,7 @@ def branch(current_node_id, branch_candidates, var_vals: dict):
 
         # branch on original network
         if arc is not None and flow is not None:
+            CommonHelper.branch_ori_nodes.append(current_node_id)
             node_i, node_j = arc
             # the arcs disabled in the original network
             new_disabled_arcs_left = set()
@@ -178,6 +179,7 @@ def branch(current_node_id, branch_candidates, var_vals: dict):
                 node_right.column_in_SR_triples[column_key].clear()
         # branch on the transformed network
         else:
+            CommonHelper.branch_trans_nodes.append(current_node_id)
             # exam flows on all arcs, two types of arc can be revisited: (Source, hub) and (hub, Sink)
             arc_flows = {(i, j): 0.0 for i, j in trans_net.arcs if
                          i != trans_net.depot_source and j != trans_net.depot_sink}

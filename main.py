@@ -32,7 +32,7 @@ def main(seed, num_trucks, num_customers, custom_dist, drone_num, cw, enable_sen
     CommonHelper.create_original_network()
     CommonHelper.transform_network()
     CommonHelper.num_of_arcs = len(CommonHelper.transformed_net.arcs)
-    # CommonHelper.visualize_network()
+    CommonHelper.visualize_network()
 
     # CommonHelper.visualize_solution()
     # CommonHelper.plot_set_style()
