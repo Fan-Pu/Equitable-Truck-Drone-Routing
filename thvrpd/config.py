@@ -202,7 +202,7 @@ class SolverConfig:
     promised_drone_insert_top_k_pads: int = 5
     promised_drone_exchange_top_k_pairs: int = 50
     promised_drone_min_improvement: float = 1e-9
-    no_drone_incumbent_trigger: bool = True
+    no_drone_incumbent_trigger: bool = False
     compact_after_no_drone_incumbent: str = "small_budget"
     join_eval_budget: int = 0
     pricing_certification_slice_seconds: float = 0.0

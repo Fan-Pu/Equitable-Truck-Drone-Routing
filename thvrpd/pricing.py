@@ -275,8 +275,16 @@ class PricingDiagnostics:
     forward_physical_location_dominance_tests: int = 0
     forward_physical_location_dominance_rejections: int = 0
     forward_return_time_credit_checks: int = 0
+    forward_return_time_credit_checks_skipped: int = 0
     forward_branch_language_failures: int = 0
     forward_mask_scalar_prefilter_failures: int = 0
+    dom_gate_pairs_seen: int = 0
+    dom_gate_mask_failures: int = 0
+    dom_gate_scalar_failures: int = 0
+    dom_gate_branch_failures: int = 0
+    dom_gate_deadline_failures: int = 0
+    labels_dominated_same_node: int = 0
+    labels_dominated_physical: int = 0
     dom_prefilter_pairs: int = 0
     dom_prefilter_mask_fail: int = 0
     dom_prefilter_branch_fail: int = 0
@@ -333,8 +341,16 @@ class _DeadlinePricingCounters:
     forward_physical_location_dominance_tests: int = 0
     forward_physical_location_dominance_rejections: int = 0
     forward_return_time_credit_checks: int = 0
+    forward_return_time_credit_checks_skipped: int = 0
     forward_branch_language_failures: int = 0
     forward_mask_scalar_prefilter_failures: int = 0
+    dom_gate_pairs_seen: int = 0
+    dom_gate_mask_failures: int = 0
+    dom_gate_scalar_failures: int = 0
+    dom_gate_branch_failures: int = 0
+    dom_gate_deadline_failures: int = 0
+    labels_dominated_same_node: int = 0
+    labels_dominated_physical: int = 0
     dom_prefilter_pairs: int = 0
     dom_prefilter_mask_fail: int = 0
     dom_prefilter_branch_fail: int = 0
@@ -1748,8 +1764,18 @@ def _merge_parallel_forward_results(
             item.forward_physical_location_dominance_rejections for item in diagnostics
         ),
         forward_return_time_credit_checks=sum(item.forward_return_time_credit_checks for item in diagnostics),
+        forward_return_time_credit_checks_skipped=sum(
+            item.forward_return_time_credit_checks_skipped for item in diagnostics
+        ),
         forward_branch_language_failures=sum(item.forward_branch_language_failures for item in diagnostics),
         forward_mask_scalar_prefilter_failures=sum(item.forward_mask_scalar_prefilter_failures for item in diagnostics),
+        dom_gate_pairs_seen=sum(item.dom_gate_pairs_seen for item in diagnostics),
+        dom_gate_mask_failures=sum(item.dom_gate_mask_failures for item in diagnostics),
+        dom_gate_scalar_failures=sum(item.dom_gate_scalar_failures for item in diagnostics),
+        dom_gate_branch_failures=sum(item.dom_gate_branch_failures for item in diagnostics),
+        dom_gate_deadline_failures=sum(item.dom_gate_deadline_failures for item in diagnostics),
+        labels_dominated_same_node=sum(item.labels_dominated_same_node for item in diagnostics),
+        labels_dominated_physical=sum(item.labels_dominated_physical for item in diagnostics),
         dom_prefilter_pairs=sum(item.dom_prefilter_pairs for item in diagnostics),
         dom_prefilter_mask_fail=sum(item.dom_prefilter_mask_fail for item in diagnostics),
         dom_prefilter_branch_fail=sum(item.dom_prefilter_branch_fail for item in diagnostics),
@@ -2130,8 +2156,18 @@ def _merge_compact_worker_results(
             item.forward_physical_location_dominance_rejections for item in diagnostics
         ),
         forward_return_time_credit_checks=sum(item.forward_return_time_credit_checks for item in diagnostics),
+        forward_return_time_credit_checks_skipped=sum(
+            item.forward_return_time_credit_checks_skipped for item in diagnostics
+        ),
         forward_branch_language_failures=sum(item.forward_branch_language_failures for item in diagnostics),
         forward_mask_scalar_prefilter_failures=sum(item.forward_mask_scalar_prefilter_failures for item in diagnostics),
+        dom_gate_pairs_seen=sum(item.dom_gate_pairs_seen for item in diagnostics),
+        dom_gate_mask_failures=sum(item.dom_gate_mask_failures for item in diagnostics),
+        dom_gate_scalar_failures=sum(item.dom_gate_scalar_failures for item in diagnostics),
+        dom_gate_branch_failures=sum(item.dom_gate_branch_failures for item in diagnostics),
+        dom_gate_deadline_failures=sum(item.dom_gate_deadline_failures for item in diagnostics),
+        labels_dominated_same_node=sum(item.labels_dominated_same_node for item in diagnostics),
+        labels_dominated_physical=sum(item.labels_dominated_physical for item in diagnostics),
         dom_prefilter_pairs=sum(item.dom_prefilter_pairs for item in diagnostics),
         dom_prefilter_mask_fail=sum(item.dom_prefilter_mask_fail for item in diagnostics),
         dom_prefilter_branch_fail=sum(item.dom_prefilter_branch_fail for item in diagnostics),
@@ -2250,8 +2286,16 @@ def _price_route_forward_only(
             "forward_physical_location_dominance_tests": deadline_counters.forward_physical_location_dominance_tests,
             "forward_physical_location_dominance_rejections": deadline_counters.forward_physical_location_dominance_rejections,
             "forward_return_time_credit_checks": deadline_counters.forward_return_time_credit_checks,
+            "forward_return_time_credit_checks_skipped": deadline_counters.forward_return_time_credit_checks_skipped,
             "forward_branch_language_failures": deadline_counters.forward_branch_language_failures,
             "forward_mask_scalar_prefilter_failures": deadline_counters.forward_mask_scalar_prefilter_failures,
+            "dom_gate_pairs_seen": deadline_counters.dom_gate_pairs_seen,
+            "dom_gate_mask_failures": deadline_counters.dom_gate_mask_failures,
+            "dom_gate_scalar_failures": deadline_counters.dom_gate_scalar_failures,
+            "dom_gate_branch_failures": deadline_counters.dom_gate_branch_failures,
+            "dom_gate_deadline_failures": deadline_counters.dom_gate_deadline_failures,
+            "labels_dominated_same_node": deadline_counters.labels_dominated_same_node,
+            "labels_dominated_physical": deadline_counters.labels_dominated_physical,
             "dom_prefilter_pairs": deadline_counters.dom_prefilter_pairs,
             "dom_prefilter_mask_fail": deadline_counters.dom_prefilter_mask_fail,
             "dom_prefilter_branch_fail": deadline_counters.dom_prefilter_branch_fail,
@@ -5758,8 +5802,16 @@ def _pricing_result(
     forward_physical_location_dominance_tests: int = 0,
     forward_physical_location_dominance_rejections: int = 0,
     forward_return_time_credit_checks: int = 0,
+    forward_return_time_credit_checks_skipped: int = 0,
     forward_branch_language_failures: int = 0,
     forward_mask_scalar_prefilter_failures: int = 0,
+    dom_gate_pairs_seen: int = 0,
+    dom_gate_mask_failures: int = 0,
+    dom_gate_scalar_failures: int = 0,
+    dom_gate_branch_failures: int = 0,
+    dom_gate_deadline_failures: int = 0,
+    labels_dominated_same_node: int = 0,
+    labels_dominated_physical: int = 0,
     dom_prefilter_pairs: int = 0,
     dom_prefilter_mask_fail: int = 0,
     dom_prefilter_branch_fail: int = 0,
@@ -6015,8 +6067,16 @@ def _pricing_result(
         forward_physical_location_dominance_tests=forward_physical_location_dominance_tests,
         forward_physical_location_dominance_rejections=forward_physical_location_dominance_rejections,
         forward_return_time_credit_checks=forward_return_time_credit_checks,
+        forward_return_time_credit_checks_skipped=forward_return_time_credit_checks_skipped,
         forward_branch_language_failures=forward_branch_language_failures,
         forward_mask_scalar_prefilter_failures=forward_mask_scalar_prefilter_failures,
+        dom_gate_pairs_seen=dom_gate_pairs_seen,
+        dom_gate_mask_failures=dom_gate_mask_failures,
+        dom_gate_scalar_failures=dom_gate_scalar_failures,
+        dom_gate_branch_failures=dom_gate_branch_failures,
+        dom_gate_deadline_failures=dom_gate_deadline_failures,
+        labels_dominated_same_node=labels_dominated_same_node,
+        labels_dominated_physical=labels_dominated_physical,
         dom_prefilter_pairs=dom_prefilter_pairs,
         dom_prefilter_mask_fail=dom_prefilter_mask_fail,
         dom_prefilter_branch_fail=dom_prefilter_branch_fail,
@@ -6364,76 +6424,96 @@ def _paper_dominates(
 ) -> bool:
     if deadline_counters is not None:
         deadline_counters.forward_dominance_tests += 1
+        deadline_counters.dom_gate_pairs_seen += 1
         deadline_counters.dom_prefilter_pairs += 1
     comparable, return_credit = _block_comparable_return_credit(a, b, graph)
     if not comparable:
         if deadline_counters is not None:
             deadline_counters.forward_mask_scalar_prefilter_failures += 1
+            deadline_counters.dom_gate_scalar_failures += 1
             deadline_counters.dom_prefilter_return_credit_fail += 1
+            deadline_counters.forward_return_time_credit_checks_skipped += 1
         return False
     same_original_node = _same_original_node(a, b, graph)
-    if deadline_counters is not None:
-        deadline_counters.forward_return_time_credit_checks += 1
-        if same_original_node:
-            deadline_counters.forward_same_node_dominance_tests += 1
-        else:
-            deadline_counters.forward_physical_location_dominance_tests += 1
-            deadline_counters.physical_location_full_tests += 1
     if not a.represented.issubset(b.represented):
         if deadline_counters is not None:
             deadline_counters.forward_mask_scalar_prefilter_failures += 1
+            deadline_counters.dom_gate_mask_failures += 1
             deadline_counters.dom_prefilter_mask_fail += 1
+            deadline_counters.forward_return_time_credit_checks_skipped += 1
         return False
     if not a.truck_visited.issubset(b.truck_visited):
         if deadline_counters is not None:
             deadline_counters.forward_mask_scalar_prefilter_failures += 1
+            deadline_counters.dom_gate_mask_failures += 1
             deadline_counters.dom_prefilter_mask_fail += 1
+            deadline_counters.forward_return_time_credit_checks_skipped += 1
         return False
     if not a.represented and a.represented != b.represented:
         if deadline_counters is not None:
             deadline_counters.forward_mask_scalar_prefilter_failures += 1
+            deadline_counters.dom_gate_mask_failures += 1
             deadline_counters.dom_prefilter_mask_fail += 1
+            deadline_counters.forward_return_time_credit_checks_skipped += 1
+        return False
+    if _branch_state(a, restrictions, arc_customer_sets) != _branch_state(b, restrictions, arc_customer_sets):
+        if deadline_counters is not None:
+            deadline_counters.forward_branch_language_failures += 1
+            deadline_counters.dom_gate_branch_failures += 1
+            deadline_counters.dom_prefilter_branch_fail += 1
+            deadline_counters.forward_return_time_credit_checks_skipped += 1
         return False
     if deadline_counters is not None:
         a_mask = _cached_deadline_reachable_mask(a, graph, objective, deadline_counters)
         b_mask = _cached_deadline_reachable_mask(b, graph, objective, deadline_counters)
         if b_mask & ~a_mask:
             deadline_counters.deadline_dominance_prefilter_skips += 1
+            deadline_counters.dom_gate_deadline_failures += 1
             deadline_counters.dom_prefilter_mask_fail += 1
+            deadline_counters.forward_return_time_credit_checks_skipped += 1
             return False
     if a.truck_load > b.truck_load or a.block_count > b.block_count:
         if deadline_counters is not None:
             deadline_counters.forward_mask_scalar_prefilter_failures += 1
+            deadline_counters.dom_gate_scalar_failures += 1
             if a.truck_load > b.truck_load:
                 deadline_counters.dom_prefilter_payload_fail += 1
             else:
                 deadline_counters.dom_prefilter_block_fail += 1
-        return False
-    if _branch_state(a, restrictions, arc_customer_sets) != _branch_state(b, restrictions, arc_customer_sets):
-        if deadline_counters is not None:
-            deadline_counters.forward_branch_language_failures += 1
-            deadline_counters.dom_prefilter_branch_fail += 1
+            deadline_counters.forward_return_time_credit_checks_skipped += 1
         return False
     if same_original_node:
         if a.physical_time > b.physical_time:
             if deadline_counters is not None:
                 deadline_counters.forward_mask_scalar_prefilter_failures += 1
+                deadline_counters.dom_gate_scalar_failures += 1
                 deadline_counters.dom_prefilter_return_credit_fail += 1
+                deadline_counters.forward_return_time_credit_checks_skipped += 1
             return False
     else:
         if a.active_pad_arrival > b.active_pad_arrival or a.active_wait > b.active_wait:
             if deadline_counters is not None:
                 deadline_counters.forward_mask_scalar_prefilter_failures += 1
+                deadline_counters.dom_gate_scalar_failures += 1
                 deadline_counters.dom_prefilter_block_fail += 1
+                deadline_counters.forward_return_time_credit_checks_skipped += 1
             return False
+    if deadline_counters is not None:
+        deadline_counters.forward_return_time_credit_checks += 1
     adjusted_cost = a.reduced_cost - _sr_extra_penalty_bound(a, b, duals)
     if adjusted_cost > b.reduced_cost + objective.coeffs.return_time * return_credit:
         if deadline_counters is not None:
             deadline_counters.forward_mask_scalar_prefilter_failures += 1
+            deadline_counters.dom_gate_scalar_failures += 1
             deadline_counters.dom_prefilter_return_credit_fail += 1
         return False
     if deadline_counters is not None:
         deadline_counters.dom_full_tests += 1
+        if same_original_node:
+            deadline_counters.forward_same_node_dominance_tests += 1
+        else:
+            deadline_counters.forward_physical_location_dominance_tests += 1
+            deadline_counters.physical_location_full_tests += 1
     dominated = (
         a.represented != b.represented
         or a.truck_visited != b.truck_visited
@@ -6447,6 +6527,9 @@ def _paper_dominates(
     if dominated and deadline_counters is not None and not same_original_node:
         deadline_counters.forward_physical_location_dominance_rejections += 1
         deadline_counters.physical_location_rejections += 1
+        deadline_counters.labels_dominated_physical += 1
+    if dominated and deadline_counters is not None and same_original_node:
+        deadline_counters.labels_dominated_same_node += 1
     if dominated and deadline_counters is not None:
         deadline_counters.dom_full_rejections += 1
     return dominated

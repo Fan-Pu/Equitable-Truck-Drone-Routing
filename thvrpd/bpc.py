@@ -153,6 +153,10 @@ class BPCStats:
     sr_active_count_root: int = 0
     sr_active_count_postroot: int = 0
     sr_cut_activity_updates: int = 0
+    sr_cut_dual_activity_updates: int = 0
+    sr_cut_coefficient_nonzeros_observed: int = 0
+    sr_cut_coefficient_density_max: float = 0.0
+    sr_cut_metadata_update_time: float = 0.0
     sr_cut_repricing_after_removal: int = 0
     sr_cut_lower_bound_change_count: int = 0
     sr_cut_lower_bound_change_sum: float = 0.0
@@ -163,6 +167,7 @@ class BPCStats:
     sr_removal_trigger_active_coeff_failures: int = 0
     sr_removal_trigger_activity_failures: int = 0
     sr_removal_candidates: int = 0
+    sr_removal_candidate_marks: int = 0
     sr_removal_score_max: float = 0.0
     sr_removal_rmp_growth_max: float = 0.0
     sr_removal_rmp_build_growth_max: float = 0.0
@@ -364,8 +369,16 @@ class BPCStats:
     pricing_forward_physical_location_dominance_tests: int = 0
     pricing_forward_physical_location_dominance_rejections: int = 0
     pricing_forward_return_time_credit_checks: int = 0
+    pricing_forward_return_time_credit_checks_skipped: int = 0
     pricing_forward_branch_language_failures: int = 0
     pricing_forward_mask_scalar_prefilter_failures: int = 0
+    pricing_dom_gate_pairs_seen: int = 0
+    pricing_dom_gate_mask_failures: int = 0
+    pricing_dom_gate_scalar_failures: int = 0
+    pricing_dom_gate_branch_failures: int = 0
+    pricing_dom_gate_deadline_failures: int = 0
+    pricing_labels_dominated_same_node: int = 0
+    pricing_labels_dominated_physical: int = 0
     pricing_dom_prefilter_pairs: int = 0
     pricing_dom_prefilter_mask_fail: int = 0
     pricing_dom_prefilter_branch_fail: int = 0
@@ -467,6 +480,15 @@ class BPCStats:
     heuristic_hard_pool_solves: int = 0
     heuristic_hard_pool_time: float = 0.0
     heuristic_hard_pool_feasible_solves: int = 0
+    heuristic_support_pool_calls: int = 0
+    heuristic_support_pool_time: float = 0.0
+    heuristic_support_pool_feasible: int = 0
+    heuristic_support_pool_incumbent_updates: int = 0
+    heuristic_full_pool_calls: int = 0
+    heuristic_full_pool_time: float = 0.0
+    heuristic_full_pool_feasible: int = 0
+    heuristic_full_pool_incumbent_updates: int = 0
+    heuristic_node_pool_to_support_ratio_max: float = 0.0
     heuristic_soft_pool_solves: int = 0
     heuristic_soft_pool_time: float = 0.0
     heuristic_soft_pool_feasible_solves: int = 0
@@ -474,6 +496,8 @@ class BPCStats:
     heuristic_repair_columns_generated: int = 0
     postroot_heuristic_calls: int = 0
     postroot_heuristic_hard_pool_solves: int = 0
+    postroot_heuristic_support_pool_calls: int = 0
+    postroot_heuristic_full_pool_calls: int = 0
     postroot_heuristic_soft_pool_solves: int = 0
     postroot_repair_calls: int = 0
     postroot_repair_columns_generated: int = 0
@@ -541,6 +565,16 @@ class BPCStats:
     child_certification_slice_limited_calls: int = 0
     child_certification_resumed_calls: int = 0
     child_certification_state_discards: int = 0
+    child_certification_epochs_started: int = 0
+    child_certification_epochs_completed: int = 0
+    child_certification_state_saved: int = 0
+    child_certification_state_resumed: int = 0
+    child_certification_state_discarded_by_dual: int = 0
+    child_certification_state_discarded_by_sr: int = 0
+    child_certification_state_discarded_by_residual: int = 0
+    child_certification_state_discarded_by_branch: int = 0
+    child_certification_state_discarded_by_fixed_routes: int = 0
+    child_certification_state_discarded_by_active_columns: int = 0
     child_certification_exhausted_tasks: int = 0
     child_certification_unresolved_tasks: int = 0
     child_closure_batch_min: int = 0
@@ -1468,11 +1502,21 @@ def _solve_node(
                 cert_signature = _child_certification_signature(node, result.duals)
                 if node.child_certification_signature == cert_signature:
                     stats.child_certification_resumed_calls += 1
+                    stats.child_certification_state_resumed += 1
                 elif node.child_certification_signature is not None:
                     stats.child_certification_state_discards += 1
+                    _record_child_certification_epoch_discard(
+                        stats,
+                        node.child_certification_signature,
+                        cert_signature,
+                    )
                     node.child_certification_exhausted_task_count = 0
                     node.child_certification_unresolved_task_count = 0
+                    stats.child_certification_epochs_started += 1
+                else:
+                    stats.child_certification_epochs_started += 1
                 node.child_certification_signature = cert_signature
+                stats.child_certification_state_saved += 1
         standard_batch_size = (
             solver_config.closure_batch_size
             if certification_attempt
@@ -1684,6 +1728,7 @@ def _solve_node(
                     node.child_certification_exhausted_task_count = 0
                     node.child_certification_unresolved_task_count = 0
                     stats.child_certification_state_discards += 1
+                    stats.child_certification_state_discarded_by_active_columns += 1
                 if priced.diagnostics.termination_reason == "time_limit_with_columns":
                     stats.certification_time_limit_with_columns += 1
             _sync_route_stats(stats, routes, global_pool_paths, signature_cache)
@@ -1772,6 +1817,7 @@ def _solve_node(
                 node.child_certification_exhausted_task_count = exhausted_tasks
                 node.child_certification_unresolved_task_count = 0
                 stats.child_certification_exhausted_tasks += exhausted_tasks
+                stats.child_certification_epochs_completed += 1
         sr_start = time.time()
         violated_activities = rmp.violated_sr_cut_activities(result.z_values, solver_config.cut_tolerance)
         violated = set(violated_activities)
@@ -2050,7 +2096,7 @@ def _remove_inactive_sr_cuts_after_closure(
     solver_config: SolverConfig,
     stats: BPCStats,
 ) -> bool:
-    _update_active_sr_cut_metadata(rmp, result.z_values, node, solver_config.cut_tolerance, stats)
+    _update_active_sr_cut_metadata(rmp, result.z_values, node, solver_config.cut_tolerance, stats, result.duals)
     if (
         not solver_config.enable_sr_aging
         or not solver_config.enable_postroot_sr_cut_removal
@@ -2085,6 +2131,9 @@ def _remove_inactive_sr_cuts_after_closure(
         and node.sr_cut_meta[triplet].removal_count < solver_config.sr_max_removals_per_node
     ]
     stats.sr_removal_candidates += len(inactive_candidates)
+    for triplet in inactive_candidates:
+        node.sr_cut_meta[triplet].removal_candidate_count += 1
+    stats.sr_removal_candidate_marks += len(inactive_candidates)
     if not inactive_candidates:
         return False
     scored_removable = []
@@ -2234,19 +2283,34 @@ def _update_active_sr_cut_metadata(
     node: NodeState,
     cut_tolerance: float,
     stats: BPCStats,
+    duals: PricingDuals,
 ) -> None:
     for triplet in sorted(node.active_sr):
+        row_start = time.time()
         activity = rmp.sr_cut_activity(z_values, triplet)
         meta = node.sr_cut_meta.setdefault(triplet, SRCutMetadata())
         meta.age += 1
         meta.last_activity = activity
+        row_nnz = sum(1 for path in rmp.z if rmp._sr_coeff(path, triplet))
+        row_density = row_nnz / max(len(rmp.z), 1)
+        meta.nonzero_count = row_nnz
+        meta.coefficient_density = row_density
+        stats.sr_cut_coefficient_nonzeros_observed += row_nnz
+        stats.sr_cut_coefficient_density_max = max(stats.sr_cut_coefficient_density_max, row_density)
+        if abs(duals.nu.get(triplet, 0.0)) > cut_tolerance:
+            meta.last_positive_dual_iteration = meta.age
+            stats.sr_cut_dual_activity_updates += 1
         if activity >= 1.0 - cut_tolerance:
             meta.inactive_count = 0
             meta.last_violation = max(activity - 1.0, 0.0)
+            meta.activity_count += 1
         else:
             meta.inactive_count += 1
         stats.sr_cuts_aged += 1
         stats.sr_cut_activity_updates += 1
+        elapsed = time.time() - row_start
+        meta.update_time_contribution += elapsed
+        stats.sr_cut_metadata_update_time += elapsed
 
 
 def _remaining_root_repair_budget(solver_config: SolverConfig, stats: BPCStats) -> float:
@@ -2409,10 +2473,20 @@ def _record_pricing_diagnostic_dict(
         record.get("forward_physical_location_dominance_rejections", 0) or 0
     )
     stats.pricing_forward_return_time_credit_checks += int(record.get("forward_return_time_credit_checks", 0) or 0)
+    stats.pricing_forward_return_time_credit_checks_skipped += int(
+        record.get("forward_return_time_credit_checks_skipped", 0) or 0
+    )
     stats.pricing_forward_branch_language_failures += int(record.get("forward_branch_language_failures", 0) or 0)
     stats.pricing_forward_mask_scalar_prefilter_failures += int(
         record.get("forward_mask_scalar_prefilter_failures", 0) or 0
     )
+    stats.pricing_dom_gate_pairs_seen += int(record.get("dom_gate_pairs_seen", 0) or 0)
+    stats.pricing_dom_gate_mask_failures += int(record.get("dom_gate_mask_failures", 0) or 0)
+    stats.pricing_dom_gate_scalar_failures += int(record.get("dom_gate_scalar_failures", 0) or 0)
+    stats.pricing_dom_gate_branch_failures += int(record.get("dom_gate_branch_failures", 0) or 0)
+    stats.pricing_dom_gate_deadline_failures += int(record.get("dom_gate_deadline_failures", 0) or 0)
+    stats.pricing_labels_dominated_same_node += int(record.get("labels_dominated_same_node", 0) or 0)
+    stats.pricing_labels_dominated_physical += int(record.get("labels_dominated_physical", 0) or 0)
     stats.pricing_dom_prefilter_pairs += int(record.get("dom_prefilter_pairs", 0) or 0)
     stats.pricing_dom_prefilter_mask_fail += int(record.get("dom_prefilter_mask_fail", 0) or 0)
     stats.pricing_dom_prefilter_branch_fail += int(record.get("dom_prefilter_branch_fail", 0) or 0)
@@ -2422,7 +2496,6 @@ def _record_pricing_diagnostic_dict(
     stats.pricing_dom_full_tests += int(record.get("dom_full_tests", 0) or 0)
     stats.pricing_dom_full_rejections += int(record.get("dom_full_rejections", 0) or 0)
     stats.pricing_physical_location_full_tests += int(record.get("physical_location_full_tests", 0) or 0)
-    stats.pricing_physical_location_rejections += int(record.get("physical_location_rejections", 0) or 0)
     stats.pricing_physical_location_rejections += int(record.get("physical_location_rejections", 0) or 0)
     stats.pricing_max_queue_size = max(stats.pricing_max_queue_size, int(record["max_queue_size"]))
     elapsed_seconds = float(record.get("elapsed_seconds", 0.0) or 0.0)
@@ -2676,19 +2749,41 @@ def _record_heuristic_diagnostics(stats: BPCStats, diagnostic) -> None:
     stats.heuristic_hard_pool_solves += diagnostic.hard_pool_solves
     stats.heuristic_hard_pool_time += diagnostic.hard_pool_time
     stats.heuristic_hard_pool_feasible_solves += diagnostic.hard_pool_feasible_solves
+    stats.heuristic_support_pool_calls += diagnostic.support_pool_calls
+    stats.heuristic_support_pool_time += diagnostic.support_pool_time
+    stats.heuristic_support_pool_feasible += diagnostic.support_pool_feasible
+    stats.heuristic_support_pool_incumbent_updates += diagnostic.support_pool_incumbent_updates
+    stats.heuristic_full_pool_calls += diagnostic.full_pool_calls
+    stats.heuristic_full_pool_time += diagnostic.full_pool_time
+    stats.heuristic_full_pool_feasible += diagnostic.full_pool_feasible
+    stats.heuristic_full_pool_incumbent_updates += diagnostic.full_pool_incumbent_updates
     stats.heuristic_soft_pool_solves += diagnostic.soft_pool_solves
     stats.heuristic_soft_pool_time += diagnostic.soft_pool_time
     stats.heuristic_soft_pool_feasible_solves += diagnostic.soft_pool_feasible_solves
     stats.heuristic_repair_customers += diagnostic.repair_customers
     stats.heuristic_repair_columns_generated += diagnostic.repair_columns_generated
-    stats.heuristic_max_node_pool_routes = max(stats.heuristic_max_node_pool_routes, diagnostic.node_pool_routes)
-    stats.heuristic_max_support_routes = max(stats.heuristic_max_support_routes, diagnostic.support_routes)
+    stats.heuristic_max_node_pool_routes = max(
+        stats.heuristic_max_node_pool_routes,
+        diagnostic.max_node_pool_routes,
+        diagnostic.node_pool_routes,
+    )
+    stats.heuristic_max_support_routes = max(
+        stats.heuristic_max_support_routes,
+        diagnostic.max_support_routes,
+        diagnostic.support_routes,
+    )
+    stats.heuristic_node_pool_to_support_ratio_max = max(
+        stats.heuristic_node_pool_to_support_ratio_max,
+        diagnostic.node_pool_to_support_ratio,
+    )
     stats.repair_budget_hit += diagnostic.repair_budget_hit
     stats.heuristic_budget_hit += diagnostic.heuristic_budget_hit
 
 
 def _record_postroot_heuristic_diagnostics(stats: BPCStats, diagnostic) -> None:
     stats.postroot_heuristic_hard_pool_solves += diagnostic.hard_pool_solves
+    stats.postroot_heuristic_support_pool_calls += diagnostic.support_pool_calls
+    stats.postroot_heuristic_full_pool_calls += diagnostic.full_pool_calls
     stats.postroot_heuristic_soft_pool_solves += diagnostic.soft_pool_solves
     stats.postroot_repair_columns_generated += diagnostic.repair_columns_generated
     stats.postroot_heuristic_budget_hits += diagnostic.heuristic_budget_hit
@@ -2799,20 +2894,45 @@ def _child_certification_signature(node: NodeState, duals: PricingDuals) -> tupl
         return round(value / dual_tol_key)
 
     return (
-        tuple(sorted(node.residual_customers)),
-        tuple(route.path for route in node.fixed_routes),
-        node.fixed_cost,
-        node.fleet_limit,
-        node.active_sr_version,
-        tuple(sorted(node.active_sr)),
-        tuple(sorted(node.restrictions.__dict__.items(), key=lambda item: item[0])),
-        tuple(sorted(node.column_paths)),
-        tuple(sorted(node.inactive_column_paths)),
-        0,
-        tuple(sorted((customer, q(value)) for customer, value in duals.mu.items())),
-        q(duals.kappa),
-        tuple(sorted((triplet, q(value)) for triplet, value in duals.nu.items())),
+        ("residual", tuple(sorted(node.residual_customers))),
+        ("fixed_routes", tuple(route.path for route in node.fixed_routes)),
+        ("fixed_cost", node.fixed_cost),
+        ("fleet_limit", node.fleet_limit),
+        ("active_sr_version", node.active_sr_version),
+        ("active_sr", tuple(sorted(node.active_sr))),
+        ("branch", tuple(sorted(node.restrictions.__dict__.items(), key=lambda item: item[0]))),
+        ("active_columns", tuple(sorted(node.column_paths))),
+        ("inactive_columns", tuple(sorted(node.inactive_column_paths))),
+        ("objective_scale_version", 0),
+        ("dual_mu", tuple(sorted((customer, q(value)) for customer, value in duals.mu.items()))),
+        ("dual_kappa", q(duals.kappa)),
+        ("dual_nu", tuple(sorted((triplet, q(value)) for triplet, value in duals.nu.items()))),
     )
+
+
+def _record_child_certification_epoch_discard(
+    stats: BPCStats,
+    old_signature: tuple,
+    new_signature: tuple,
+) -> None:
+    old = dict(old_signature)
+    new = dict(new_signature)
+    if old.get("dual_mu") != new.get("dual_mu") or old.get("dual_kappa") != new.get("dual_kappa") or old.get("dual_nu") != new.get("dual_nu"):
+        stats.child_certification_state_discarded_by_dual += 1
+    if old.get("active_sr_version") != new.get("active_sr_version") or old.get("active_sr") != new.get("active_sr"):
+        stats.child_certification_state_discarded_by_sr += 1
+    if old.get("residual") != new.get("residual"):
+        stats.child_certification_state_discarded_by_residual += 1
+    if old.get("branch") != new.get("branch"):
+        stats.child_certification_state_discarded_by_branch += 1
+    if (
+        old.get("fixed_routes") != new.get("fixed_routes")
+        or old.get("fixed_cost") != new.get("fixed_cost")
+        or old.get("fleet_limit") != new.get("fleet_limit")
+    ):
+        stats.child_certification_state_discarded_by_fixed_routes += 1
+    if old.get("active_columns") != new.get("active_columns") or old.get("inactive_columns") != new.get("inactive_columns"):
+        stats.child_certification_state_discarded_by_active_columns += 1
 
 
 def _record_branch_decision(stats: BPCStats, branch_type: str) -> None:
@@ -3817,6 +3937,12 @@ def _branch(
             inactive_count=meta.inactive_count,
             last_activity=meta.last_activity,
             last_violation=meta.last_violation,
+            last_positive_dual_iteration=meta.last_positive_dual_iteration,
+            activity_count=meta.activity_count,
+            nonzero_count=meta.nonzero_count,
+            coefficient_density=meta.coefficient_density,
+            update_time_contribution=meta.update_time_contribution,
+            removal_candidate_count=meta.removal_candidate_count,
             removal_count=meta.removal_count,
             reactivation_count=meta.reactivation_count,
         )

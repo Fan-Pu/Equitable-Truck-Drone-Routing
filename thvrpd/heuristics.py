@@ -20,9 +20,20 @@ from .transform import TransformedGraph
 class RoutePoolHeuristicDiagnostics:
     node_pool_routes: int = 0
     support_routes: int = 0
+    max_node_pool_routes: int = 0
+    max_support_routes: int = 0
+    node_pool_to_support_ratio: float = 0.0
     hard_pool_solves: int = 0
     hard_pool_time: float = 0.0
     hard_pool_feasible_solves: int = 0
+    support_pool_calls: int = 0
+    support_pool_time: float = 0.0
+    support_pool_feasible: int = 0
+    support_pool_incumbent_updates: int = 0
+    full_pool_calls: int = 0
+    full_pool_time: float = 0.0
+    full_pool_feasible: int = 0
+    full_pool_incumbent_updates: int = 0
     soft_pool_solves: int = 0
     soft_pool_time: float = 0.0
     soft_pool_feasible_solves: int = 0
@@ -71,14 +82,34 @@ def run_route_pool_heuristic(
     repair_budget_hit = 0
     heuristic_budget_hit = 0
     repair_time_seconds = 0.0
+    support_pool_calls = 0
+    support_pool_time = 0.0
+    support_pool_feasible = 0
+    support_pool_incumbent_updates = 0
+    full_pool_calls = 0
+    full_pool_time = 0.0
+    full_pool_feasible = 0
+    full_pool_incumbent_updates = 0
 
     def diagnostics() -> RoutePoolHeuristicDiagnostics:
+        pool_ratio = len(pool_paths) / max(len(support_paths), 1)
         return RoutePoolHeuristicDiagnostics(
             node_pool_routes=len(pool_paths),
             support_routes=len(support_paths),
+            max_node_pool_routes=len(pool_paths),
+            max_support_routes=len(support_paths),
+            node_pool_to_support_ratio=pool_ratio,
             hard_pool_solves=hard_pool_solves,
             hard_pool_time=hard_pool_time,
             hard_pool_feasible_solves=hard_pool_feasible_solves,
+            support_pool_calls=support_pool_calls,
+            support_pool_time=support_pool_time,
+            support_pool_feasible=support_pool_feasible,
+            support_pool_incumbent_updates=support_pool_incumbent_updates,
+            full_pool_calls=full_pool_calls,
+            full_pool_time=full_pool_time,
+            full_pool_feasible=full_pool_feasible,
+            full_pool_incumbent_updates=full_pool_incumbent_updates,
             soft_pool_solves=soft_pool_solves,
             soft_pool_time=soft_pool_time,
             soft_pool_feasible_solves=soft_pool_feasible_solves,
@@ -91,25 +122,34 @@ def run_route_pool_heuristic(
 
     hard_start = time.time()
     value, selected = _solve_hard_pool_ip(node, routes, support_paths, z_values, solver_config, deadline)
-    hard_pool_time += time.time() - hard_start
+    elapsed = time.time() - hard_start
+    hard_pool_time += elapsed
+    support_pool_time += elapsed
     hard_pool_solves += 1
+    support_pool_calls += 1
     if value is not None:
         hard_pool_feasible_solves += 1
+        support_pool_feasible += 1
     hard_solution = (
         RoutePoolHeuristicResult(value, tuple(routes[path] for path in selected), frozenset(), diagnostics=diagnostics())
         if value is not None
         else RoutePoolHeuristicResult(None, tuple(), frozenset(), diagnostics=diagnostics())
     )
     if value is not None and value < incumbent_value:
+        support_pool_incumbent_updates += 1
         return RoutePoolHeuristicResult(value, tuple(routes[path] for path in selected), frozenset(), diagnostics=diagnostics())
 
     if pool_paths != support_paths:
         full_hard_start = time.time()
         full_value, full_selected = _solve_hard_pool_ip(node, routes, pool_paths, z_values, solver_config, deadline)
-        hard_pool_time += time.time() - full_hard_start
+        elapsed = time.time() - full_hard_start
+        hard_pool_time += elapsed
+        full_pool_time += elapsed
         hard_pool_solves += 1
+        full_pool_calls += 1
         if full_value is not None:
             hard_pool_feasible_solves += 1
+            full_pool_feasible += 1
             if hard_solution.value is None or full_value < hard_solution.value:
                 hard_solution = RoutePoolHeuristicResult(
                     full_value,
@@ -118,6 +158,7 @@ def run_route_pool_heuristic(
                     diagnostics=diagnostics(),
                 )
             if full_value < incumbent_value:
+                full_pool_incumbent_updates += 1
                 return RoutePoolHeuristicResult(
                     full_value,
                     tuple(routes[path] for path in full_selected),
@@ -240,10 +281,16 @@ def run_route_pool_heuristic(
         support_paths = _support_route_set(node, routes, pool_paths, z_values, solver_config)
         hard_start = time.time()
         value, selected = _solve_hard_pool_ip(node, routes, support_paths, z_values, solver_config, deadline)
-        hard_pool_time += time.time() - hard_start
+        elapsed = time.time() - hard_start
+        hard_pool_time += elapsed
+        support_pool_time += elapsed
         hard_pool_solves += 1
+        support_pool_calls += 1
         if value is not None:
             hard_pool_feasible_solves += 1
+            support_pool_feasible += 1
+            if value < incumbent_value:
+                support_pool_incumbent_updates += 1
             return RoutePoolHeuristicResult(
                 value,
                 tuple(routes[path] for path in selected),

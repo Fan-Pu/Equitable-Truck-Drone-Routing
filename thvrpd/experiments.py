@@ -327,7 +327,7 @@ def _run_parent(args: argparse.Namespace) -> None:
                 "promised_drone_insert_top_k_pads": args.promised_drone_insert_top_k_pads,
                 "promised_drone_exchange_top_k_pairs": args.promised_drone_exchange_top_k_pairs,
                 "promised_drone_min_improvement": args.promised_drone_min_improvement,
-                "no_drone_incumbent_trigger": not args.disable_no_drone_incumbent_trigger,
+                "no_drone_incumbent_trigger": False,
                 "compact_after_no_drone_incumbent": args.compact_after_no_drone_incumbent,
                 "root_max_side_pool_per_call": args.root_max_side_pool_per_call,
                 "side_pool_max_size": args.side_pool_max_size,
@@ -725,7 +725,7 @@ def _case_spec(
             "promised_drone_insert_top_k_pads": args.promised_drone_insert_top_k_pads,
             "promised_drone_exchange_top_k_pairs": args.promised_drone_exchange_top_k_pairs,
             "promised_drone_min_improvement": args.promised_drone_min_improvement,
-            "no_drone_incumbent_trigger": not args.disable_no_drone_incumbent_trigger,
+            "no_drone_incumbent_trigger": False,
             "compact_after_no_drone_incumbent": args.compact_after_no_drone_incumbent,
             "join_eval_budget": 0,
             "pricing_certification_slice_seconds": 0.0,
@@ -867,6 +867,10 @@ def _summary_row(record: dict[str, Any]) -> dict[str, Any]:
         "sr_removal_nodes": stats.get("sr_removal_nodes"),
         "sr_cuts_reactivated": stats.get("sr_cuts_reactivated"),
         "sr_cut_activity_updates": stats.get("sr_cut_activity_updates"),
+        "sr_cut_dual_activity_updates": stats.get("sr_cut_dual_activity_updates"),
+        "sr_cut_coefficient_nonzeros_observed": stats.get("sr_cut_coefficient_nonzeros_observed"),
+        "sr_cut_coefficient_density_max": stats.get("sr_cut_coefficient_density_max"),
+        "sr_cut_metadata_update_time": stats.get("sr_cut_metadata_update_time"),
         "sr_cut_repricing_after_removal": stats.get("sr_cut_repricing_after_removal"),
         "sr_cut_lower_bound_change_count": stats.get("sr_cut_lower_bound_change_count"),
         "sr_cut_lower_bound_change_sum": stats.get("sr_cut_lower_bound_change_sum"),
@@ -903,8 +907,18 @@ def _summary_row(record: dict[str, Any]) -> dict[str, Any]:
             "pricing_forward_physical_location_dominance_rejections"
         ),
         "pricing_forward_return_time_credit_checks": stats.get("pricing_forward_return_time_credit_checks"),
+        "pricing_forward_return_time_credit_checks_skipped": stats.get(
+            "pricing_forward_return_time_credit_checks_skipped"
+        ),
         "pricing_forward_branch_language_failures": stats.get("pricing_forward_branch_language_failures"),
         "pricing_forward_mask_scalar_prefilter_failures": stats.get("pricing_forward_mask_scalar_prefilter_failures"),
+        "pricing_dom_gate_pairs_seen": stats.get("pricing_dom_gate_pairs_seen"),
+        "pricing_dom_gate_mask_failures": stats.get("pricing_dom_gate_mask_failures"),
+        "pricing_dom_gate_scalar_failures": stats.get("pricing_dom_gate_scalar_failures"),
+        "pricing_dom_gate_branch_failures": stats.get("pricing_dom_gate_branch_failures"),
+        "pricing_dom_gate_deadline_failures": stats.get("pricing_dom_gate_deadline_failures"),
+        "pricing_labels_dominated_same_node": stats.get("pricing_labels_dominated_same_node"),
+        "pricing_labels_dominated_physical": stats.get("pricing_labels_dominated_physical"),
         "pricing_deadline_reachability_removed": stats.get("pricing_deadline_reachability_removed"),
         "pricing_reward_set_size_before_deadline": stats.get("pricing_reward_set_size_before_deadline"),
         "pricing_reward_set_size_after_deadline": stats.get("pricing_reward_set_size_after_deadline"),
@@ -1216,6 +1230,22 @@ def _summary_row(record: dict[str, Any]) -> dict[str, Any]:
         "child_certification_slice_limited_calls": stats.get("child_certification_slice_limited_calls"),
         "child_certification_resumed_calls": stats.get("child_certification_resumed_calls"),
         "child_certification_state_discards": stats.get("child_certification_state_discards"),
+        "child_certification_epochs_started": stats.get("child_certification_epochs_started"),
+        "child_certification_epochs_completed": stats.get("child_certification_epochs_completed"),
+        "child_certification_state_saved": stats.get("child_certification_state_saved"),
+        "child_certification_state_resumed": stats.get("child_certification_state_resumed"),
+        "child_certification_state_discarded_by_dual": stats.get("child_certification_state_discarded_by_dual"),
+        "child_certification_state_discarded_by_sr": stats.get("child_certification_state_discarded_by_sr"),
+        "child_certification_state_discarded_by_residual": stats.get(
+            "child_certification_state_discarded_by_residual"
+        ),
+        "child_certification_state_discarded_by_branch": stats.get("child_certification_state_discarded_by_branch"),
+        "child_certification_state_discarded_by_fixed_routes": stats.get(
+            "child_certification_state_discarded_by_fixed_routes"
+        ),
+        "child_certification_state_discarded_by_active_columns": stats.get(
+            "child_certification_state_discarded_by_active_columns"
+        ),
         "child_certification_exhausted_tasks": stats.get("child_certification_exhausted_tasks"),
         "child_certification_unresolved_tasks": stats.get("child_certification_unresolved_tasks"),
         "child_closure_batch_min": stats.get("child_closure_batch_min"),
@@ -1262,6 +1292,7 @@ def _summary_row(record: dict[str, Any]) -> dict[str, Any]:
         "sr_removal_trigger_active_coeff_failures": stats.get("sr_removal_trigger_active_coeff_failures"),
         "sr_removal_trigger_activity_failures": stats.get("sr_removal_trigger_activity_failures"),
         "sr_removal_candidates": stats.get("sr_removal_candidates"),
+        "sr_removal_candidate_marks": stats.get("sr_removal_candidate_marks"),
         "sr_removal_score_max": stats.get("sr_removal_score_max"),
         "sr_removal_rmp_growth_max": stats.get("sr_removal_rmp_growth_max"),
         "sr_removal_rmp_build_growth_max": stats.get("sr_removal_rmp_build_growth_max"),
@@ -1327,6 +1358,15 @@ def _summary_row(record: dict[str, Any]) -> dict[str, Any]:
         "heuristic_hard_pool_solves": stats.get("heuristic_hard_pool_solves"),
         "heuristic_hard_pool_time": stats.get("heuristic_hard_pool_time"),
         "heuristic_hard_pool_feasible_solves": stats.get("heuristic_hard_pool_feasible_solves"),
+        "heuristic_support_pool_calls": stats.get("heuristic_support_pool_calls"),
+        "heuristic_support_pool_time": stats.get("heuristic_support_pool_time"),
+        "heuristic_support_pool_feasible": stats.get("heuristic_support_pool_feasible"),
+        "heuristic_support_pool_incumbent_updates": stats.get("heuristic_support_pool_incumbent_updates"),
+        "heuristic_full_pool_calls": stats.get("heuristic_full_pool_calls"),
+        "heuristic_full_pool_time": stats.get("heuristic_full_pool_time"),
+        "heuristic_full_pool_feasible": stats.get("heuristic_full_pool_feasible"),
+        "heuristic_full_pool_incumbent_updates": stats.get("heuristic_full_pool_incumbent_updates"),
+        "heuristic_node_pool_to_support_ratio_max": stats.get("heuristic_node_pool_to_support_ratio_max"),
         "heuristic_soft_pool_solves": stats.get("heuristic_soft_pool_solves"),
         "heuristic_soft_pool_time": stats.get("heuristic_soft_pool_time"),
         "heuristic_soft_pool_feasible_solves": stats.get("heuristic_soft_pool_feasible_solves"),
@@ -1334,6 +1374,8 @@ def _summary_row(record: dict[str, Any]) -> dict[str, Any]:
         "heuristic_repair_columns_generated": stats.get("heuristic_repair_columns_generated"),
         "postroot_heuristic_calls": stats.get("postroot_heuristic_calls"),
         "postroot_heuristic_hard_pool_solves": stats.get("postroot_heuristic_hard_pool_solves"),
+        "postroot_heuristic_support_pool_calls": stats.get("postroot_heuristic_support_pool_calls"),
+        "postroot_heuristic_full_pool_calls": stats.get("postroot_heuristic_full_pool_calls"),
         "postroot_heuristic_soft_pool_solves": stats.get("postroot_heuristic_soft_pool_solves"),
         "postroot_repair_calls": stats.get("postroot_repair_calls"),
         "postroot_repair_columns_generated": stats.get("postroot_repair_columns_generated"),
@@ -1452,11 +1494,33 @@ def _read_pricing_diagnostics(case_dir: Path) -> dict[str, Any]:
         "pricing_forward_return_time_credit_checks": sum(
             int(record.get("forward_return_time_credit_checks", 0) or 0) for record in records
         ),
+        "pricing_forward_return_time_credit_checks_skipped": sum(
+            int(record.get("forward_return_time_credit_checks_skipped", 0) or 0) for record in records
+        ),
         "pricing_forward_branch_language_failures": sum(
             int(record.get("forward_branch_language_failures", 0) or 0) for record in records
         ),
         "pricing_forward_mask_scalar_prefilter_failures": sum(
             int(record.get("forward_mask_scalar_prefilter_failures", 0) or 0) for record in records
+        ),
+        "pricing_dom_gate_pairs_seen": sum(int(record.get("dom_gate_pairs_seen", 0) or 0) for record in records),
+        "pricing_dom_gate_mask_failures": sum(
+            int(record.get("dom_gate_mask_failures", 0) or 0) for record in records
+        ),
+        "pricing_dom_gate_scalar_failures": sum(
+            int(record.get("dom_gate_scalar_failures", 0) or 0) for record in records
+        ),
+        "pricing_dom_gate_branch_failures": sum(
+            int(record.get("dom_gate_branch_failures", 0) or 0) for record in records
+        ),
+        "pricing_dom_gate_deadline_failures": sum(
+            int(record.get("dom_gate_deadline_failures", 0) or 0) for record in records
+        ),
+        "pricing_labels_dominated_same_node": sum(
+            int(record.get("labels_dominated_same_node", 0) or 0) for record in records
+        ),
+        "pricing_labels_dominated_physical": sum(
+            int(record.get("labels_dominated_physical", 0) or 0) for record in records
         ),
         "pricing_dom_prefilter_pairs": sum(int(record.get("dom_prefilter_pairs", 0) or 0) for record in records),
         "pricing_dom_prefilter_mask_fail": sum(int(record.get("dom_prefilter_mask_fail", 0) or 0) for record in records),
@@ -1722,8 +1786,16 @@ def _merge_timeout_stats(progress_stats: dict[str, Any], pricing_summary: dict[s
         "pricing_forward_physical_location_dominance_tests",
         "pricing_forward_physical_location_dominance_rejections",
         "pricing_forward_return_time_credit_checks",
+        "pricing_forward_return_time_credit_checks_skipped",
         "pricing_forward_branch_language_failures",
         "pricing_forward_mask_scalar_prefilter_failures",
+        "pricing_dom_gate_pairs_seen",
+        "pricing_dom_gate_mask_failures",
+        "pricing_dom_gate_scalar_failures",
+        "pricing_dom_gate_branch_failures",
+        "pricing_dom_gate_deadline_failures",
+        "pricing_labels_dominated_same_node",
+        "pricing_labels_dominated_physical",
         "pricing_dom_prefilter_pairs",
         "pricing_dom_prefilter_mask_fail",
         "pricing_dom_prefilter_branch_fail",

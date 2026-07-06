@@ -293,7 +293,7 @@ def main() -> None:
         promised_drone_insert_top_k_pads=args.promised_drone_insert_top_k_pads,
         promised_drone_exchange_top_k_pairs=args.promised_drone_exchange_top_k_pairs,
         promised_drone_min_improvement=args.promised_drone_min_improvement,
-        no_drone_incumbent_trigger=not args.disable_no_drone_incumbent_trigger,
+        no_drone_incumbent_trigger=False,
         compact_after_no_drone_incumbent=args.compact_after_no_drone_incumbent,
         join_eval_budget=0,
         pricing_certification_slice_seconds=0.0,
@@ -469,11 +469,33 @@ def _read_pricing_diagnostics(output_dir: Path) -> dict[str, Any]:
         "pricing_forward_return_time_credit_checks": sum(
             int(record.get("forward_return_time_credit_checks", 0) or 0) for record in records
         ),
+        "pricing_forward_return_time_credit_checks_skipped": sum(
+            int(record.get("forward_return_time_credit_checks_skipped", 0) or 0) for record in records
+        ),
         "pricing_forward_branch_language_failures": sum(
             int(record.get("forward_branch_language_failures", 0) or 0) for record in records
         ),
         "pricing_forward_mask_scalar_prefilter_failures": sum(
             int(record.get("forward_mask_scalar_prefilter_failures", 0) or 0) for record in records
+        ),
+        "pricing_dom_gate_pairs_seen": sum(int(record.get("dom_gate_pairs_seen", 0) or 0) for record in records),
+        "pricing_dom_gate_mask_failures": sum(
+            int(record.get("dom_gate_mask_failures", 0) or 0) for record in records
+        ),
+        "pricing_dom_gate_scalar_failures": sum(
+            int(record.get("dom_gate_scalar_failures", 0) or 0) for record in records
+        ),
+        "pricing_dom_gate_branch_failures": sum(
+            int(record.get("dom_gate_branch_failures", 0) or 0) for record in records
+        ),
+        "pricing_dom_gate_deadline_failures": sum(
+            int(record.get("dom_gate_deadline_failures", 0) or 0) for record in records
+        ),
+        "pricing_labels_dominated_same_node": sum(
+            int(record.get("labels_dominated_same_node", 0) or 0) for record in records
+        ),
+        "pricing_labels_dominated_physical": sum(
+            int(record.get("labels_dominated_physical", 0) or 0) for record in records
         ),
         "pricing_dom_prefilter_pairs": sum(int(record.get("dom_prefilter_pairs", 0) or 0) for record in records),
         "pricing_dom_prefilter_mask_fail": sum(int(record.get("dom_prefilter_mask_fail", 0) or 0) for record in records),
@@ -705,8 +727,16 @@ def _merge_timeout_stats(stats: dict[str, Any], pricing_summary: dict[str, Any])
         "pricing_forward_physical_location_dominance_tests",
         "pricing_forward_physical_location_dominance_rejections",
         "pricing_forward_return_time_credit_checks",
+        "pricing_forward_return_time_credit_checks_skipped",
         "pricing_forward_branch_language_failures",
         "pricing_forward_mask_scalar_prefilter_failures",
+        "pricing_dom_gate_pairs_seen",
+        "pricing_dom_gate_mask_failures",
+        "pricing_dom_gate_scalar_failures",
+        "pricing_dom_gate_branch_failures",
+        "pricing_dom_gate_deadline_failures",
+        "pricing_labels_dominated_same_node",
+        "pricing_labels_dominated_physical",
         "pricing_dom_prefilter_pairs",
         "pricing_dom_prefilter_mask_fail",
         "pricing_dom_prefilter_branch_fail",

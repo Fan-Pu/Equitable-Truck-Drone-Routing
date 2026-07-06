@@ -33,6 +33,7 @@ from thvrpd.bpc import (
     _diversify_constructive_drone_routes,
     _extract_root_routes,
     _child_certification_signature,
+    _record_child_certification_epoch_discard,
     _ensure_child_closure_batch_state,
     _observe_child_certification_yield,
     _rehydrate_negative_inactive_columns,
@@ -1202,6 +1203,7 @@ def test_solver_config_yield_alignment_defaults_and_validation() -> None:
     assert config.use_row_local_sr_coeff_cache is True
     assert config.use_dominance_prefilter_keys is True
     assert config.use_promised_drone_construction is False
+    assert config.no_drone_incumbent_trigger is False
     assert config.compact_after_no_drone_incumbent == "small_budget"
     assert config.logging_mode == "audit"
     assert config.progress_snapshot_period == 1
@@ -1639,11 +1641,60 @@ def test_same_node_dominance_uses_return_time_credit() -> None:
     arc_customer_sets = {arc: graph.arc_customer_set(arc) for arc in graph.arcs}
     counters = _DeadlinePricingCounters(shortest=_shortest_truck_times(graph))
     assert _paper_dominates(earlier, later, graph, objective, duals, BranchRestrictions(), arc_customer_sets, counters)
+    assert counters.dom_gate_pairs_seen == 1
     assert counters.forward_same_node_dominance_tests == 1
     assert counters.forward_return_time_credit_checks == 1
+    assert counters.forward_return_time_credit_checks_skipped == 0
     assert counters.dom_prefilter_pairs == 1
     assert counters.dom_full_tests == 1
     assert counters.dom_full_rejections == 1
+    assert counters.labels_dominated_same_node == 1
+    assert counters.labels_dominated_physical == 0
+
+
+def test_dominance_gate_skip_does_not_delete_label() -> None:
+    instance, _, objective, graph = _setup()
+    duals = PricingDuals(mu={c: 0.0 for c in instance.customers}, kappa=0.0, nu={})
+    c1 = _Label(
+        path=("Source", "C1"),
+        represented=frozenset({"C1"}),
+        truck_visited=frozenset({"Source", "C1"}),
+        truck_load=instance.demand["C1"],
+        active_pad=None,
+        active_pad_arrival=0.0,
+        active_wait=0.0,
+        block_count=0,
+        physical_time=5.0,
+        service_times=(("C1", 5.0),),
+        sr_counts=tuple(),
+        reduced_cost=0.0,
+        used_arcs=frozenset({("Source", "C1")}),
+    )
+    c2 = _Label(
+        path=("Source", "C2"),
+        represented=frozenset({"C2"}),
+        truck_visited=frozenset({"Source", "C2"}),
+        truck_load=instance.demand["C2"],
+        active_pad=None,
+        active_pad_arrival=0.0,
+        active_wait=0.0,
+        block_count=0,
+        physical_time=5.0,
+        service_times=(("C2", 5.0),),
+        sr_counts=tuple(),
+        reduced_cost=0.0,
+        used_arcs=frozenset({("Source", "C2")}),
+    )
+    counters = _DeadlinePricingCounters(shortest=_shortest_truck_times(graph))
+
+    assert not _paper_dominates(c1, c2, graph, objective, duals, BranchRestrictions(), _arc_customer_sets(graph), counters)
+    assert counters.dom_gate_pairs_seen == 1
+    assert counters.dom_gate_scalar_failures == 1
+    assert counters.forward_return_time_credit_checks_skipped == 1
+    assert counters.dom_full_tests == 0
+    assert counters.dom_full_rejections == 0
+    assert counters.labels_dominated_same_node == 0
+    assert counters.labels_dominated_physical == 0
 
 
 def test_physical_location_dominance_reports_return_credit_rejection() -> None:
@@ -1684,11 +1735,15 @@ def test_physical_location_dominance_reports_return_credit_rejection() -> None:
     arc_customer_sets = {arc: graph.arc_customer_set(arc) for arc in graph.arcs}
     counters = _DeadlinePricingCounters(shortest=_shortest_truck_times(graph))
     assert _paper_dominates(earlier, later, graph, objective, duals, BranchRestrictions(), arc_customer_sets, counters)
+    assert counters.dom_gate_pairs_seen == 1
     assert counters.forward_physical_location_dominance_tests == 1
     assert counters.forward_physical_location_dominance_rejections == 1
     assert counters.forward_return_time_credit_checks == 1
+    assert counters.forward_return_time_credit_checks_skipped == 0
     assert counters.physical_location_full_tests == 1
     assert counters.physical_location_rejections == 1
+    assert counters.labels_dominated_same_node == 0
+    assert counters.labels_dominated_physical == 1
 
 
 def test_same_regular_node_dominance_ignores_stale_active_pad_state() -> None:
@@ -2245,6 +2300,13 @@ def test_inactive_postroot_sr_cut_removal_requires_reprice_and_can_reactivate() 
     assert stats.sr_cuts_removed == 1
     assert stats.sr_removal_nodes == 1
     assert stats.sr_cut_repricing_after_removal == 1
+    assert stats.sr_removal_candidate_marks == 1
+    assert stats.sr_cut_coefficient_nonzeros_observed >= 0
+    assert stats.sr_cut_coefficient_density_max >= 0.0
+    assert stats.sr_cut_metadata_update_time >= 0.0
+    assert node.sr_cut_meta[triplet].removal_candidate_count == 1
+    assert node.sr_cut_meta[triplet].nonzero_count >= 0
+    assert node.sr_cut_meta[triplet].coefficient_density >= 0.0
 
     new_count = _activate_sr_cuts(node, {triplet: 1.2}, stats)
     assert new_count == 0
@@ -2463,6 +2525,63 @@ def test_child_certification_signature_changes_when_visible_route_set_changes() 
     signature = _child_certification_signature(node, duals)
     node.column_paths.add(("Source", "C2", "Sink"))
     assert _child_certification_signature(node, duals) != signature
+
+
+def test_child_certification_epoch_discard_records_structured_cause() -> None:
+    instance, _, objective, graph = _setup()
+    fixed_c2 = route_from_path(20, ("Source", "C2", "Sink"), graph, objective)
+    fixed_c3 = route_from_path(21, ("Source", "C3", "Sink"), graph, objective)
+    node = NodeState(
+        id=13,
+        depth=1,
+        restrictions=BranchRestrictions().with_truck_service("C1"),
+        fixed_routes=(fixed_c2,),
+        residual_customers=frozenset({"C1", "C3"}),
+        fleet_limit=instance.num_trucks - 1,
+        fixed_cost=0.1,
+        column_paths={("Source", "C1", "Sink")},
+        active_sr={tuple(instance.customers)},
+        active_sr_version=1,
+    )
+    duals = PricingDuals(
+        mu={customer: float(index + 1) for index, customer in enumerate(instance.customers)},
+        kappa=-0.25,
+        nu={tuple(instance.customers): -0.5},
+    )
+    base = _child_certification_signature(node, duals)
+
+    stats = BPCStats()
+    _record_child_certification_epoch_discard(stats, base, _child_certification_signature(node, replace(duals, kappa=-0.3)))
+    assert stats.child_certification_state_discarded_by_dual == 1
+
+    stats = BPCStats()
+    node.active_sr_version += 1
+    _record_child_certification_epoch_discard(stats, base, _child_certification_signature(node, duals))
+    assert stats.child_certification_state_discarded_by_sr == 1
+    node.active_sr_version -= 1
+
+    stats = BPCStats()
+    node.residual_customers = frozenset({"C1"})
+    _record_child_certification_epoch_discard(stats, base, _child_certification_signature(node, duals))
+    assert stats.child_certification_state_discarded_by_residual == 1
+    node.residual_customers = frozenset({"C1", "C3"})
+
+    stats = BPCStats()
+    node.restrictions = node.restrictions.with_drone_service("C3")
+    _record_child_certification_epoch_discard(stats, base, _child_certification_signature(node, duals))
+    assert stats.child_certification_state_discarded_by_branch == 1
+    node.restrictions = BranchRestrictions().with_truck_service("C1")
+
+    stats = BPCStats()
+    node.fixed_routes = node.fixed_routes + (fixed_c3,)
+    _record_child_certification_epoch_discard(stats, base, _child_certification_signature(node, duals))
+    assert stats.child_certification_state_discarded_by_fixed_routes == 1
+    node.fixed_routes = (fixed_c2,)
+
+    stats = BPCStats()
+    node.column_paths.add(("Source", "C3", "Sink"))
+    _record_child_certification_epoch_discard(stats, base, _child_certification_signature(node, duals))
+    assert stats.child_certification_state_discarded_by_active_columns == 1
 
 
 def test_child_certification_yield_tracking_does_not_adapt_batch_limit() -> None:
@@ -3471,6 +3590,10 @@ def test_compact_root_extraction_returns_canonical_route_columns() -> None:
     instance, weights, objective, graph = _setup()
     solution = solve_compact_solution(instance, weights, time_limit=1800.0, require_optimal=True)
     assert solution.route_paths
+    assert solution.objective_bound_full is not None
+    assert solution.mip_gap is not None
+    assert solution.status_code == GRB.OPTIMAL
+    assert solution.node_count is not None
     assert solution.timing.model_build_time > 0.0
     assert solution.timing.solve_time >= 0.0
     assert solution.timing.route_decode_time >= 0.0
@@ -3517,8 +3640,58 @@ def test_route_pool_diving_returns_hard_feasible_incumbent() -> None:
     assert covered == frozenset(instance.customers)
     assert result.diagnostics.hard_pool_solves == 1
     assert result.diagnostics.hard_pool_feasible_solves == 1
+    assert result.diagnostics.support_pool_calls == 1
+    assert result.diagnostics.support_pool_feasible == 1
+    assert result.diagnostics.support_pool_incumbent_updates == 1
+    assert result.diagnostics.full_pool_calls == 0
     assert result.diagnostics.soft_pool_solves == 0
     assert result.diagnostics.support_routes > 0
+
+
+def test_full_node_admissible_hard_pool_solve_is_tracked_as_primal_only() -> None:
+    instance, _, objective, graph = _setup()
+    routes = {}
+    for customer in instance.customers:
+        path = ("Source", customer, "Sink")
+        routes[path] = route_from_path(len(routes), path, graph, objective)
+    combo_path = ("Source", "C1", "C2", "C3", "Sink")
+    routes[combo_path] = route_from_path(len(routes), combo_path, graph, objective)
+    node = NodeState(
+        id=12,
+        depth=0,
+        restrictions=BranchRestrictions(),
+        fixed_routes=tuple(),
+        residual_customers=frozenset(instance.customers),
+        fleet_limit=instance.num_trucks,
+        fixed_cost=0.0,
+        column_paths=set(routes),
+        active_sr=set(),
+    )
+
+    result = run_route_pool_heuristic(
+        graph,
+        objective,
+        node,
+        routes,
+        set(routes),
+        {},
+        SolverConfig(support_best_per_customer=1),
+        len(routes),
+        0.0,
+    )
+
+    assert result.value is not None
+    assert all(route.served.issubset(node.residual_customers) for route in result.selected_routes)
+    assert result.value == pytest.approx(sum(route.cost for route in result.selected_routes))
+    assert result.diagnostics.support_pool_calls == 1
+    assert result.diagnostics.full_pool_calls == 1
+    assert result.diagnostics.support_pool_feasible == 1
+    assert result.diagnostics.full_pool_feasible == 1
+    assert result.diagnostics.support_pool_incumbent_updates == 0
+    assert result.diagnostics.full_pool_incumbent_updates == 0
+    assert result.diagnostics.hard_pool_solves == 2
+    assert result.diagnostics.max_node_pool_routes == len(routes)
+    assert result.diagnostics.node_pool_to_support_ratio > 1.0
 
 
 def test_repair_pricing_adds_multiple_generated_routes_before_hard_resolve() -> None:
@@ -3552,6 +3725,8 @@ def test_repair_pricing_adds_multiple_generated_routes_before_hard_resolve() -> 
     assert {diagnostic["mode"] for diagnostic in result.pricing_diagnostics} == {"repair"}
     assert sum(diagnostic["elapsed_seconds"] for diagnostic in result.pricing_diagnostics) >= 0.0
     assert result.diagnostics.hard_pool_solves == 2
+    assert result.diagnostics.support_pool_calls == 2
+    assert result.diagnostics.full_pool_calls == 0
     assert result.diagnostics.soft_pool_solves == 1
     assert result.diagnostics.soft_pool_feasible_solves == 1
     assert result.diagnostics.repair_customers > 0

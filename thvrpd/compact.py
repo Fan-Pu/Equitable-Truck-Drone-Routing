@@ -26,6 +26,10 @@ class CompactSolution:
     route_paths: tuple[tuple[str, ...], ...]
     timing: CompactTiming
     status: str = "unknown"
+    objective_bound_full: float | None = None
+    mip_gap: float | None = None
+    status_code: int | None = None
+    node_count: float | None = None
 
 
 def solve_compact_miqp(
@@ -186,17 +190,48 @@ def solve_compact_solution(
     solve_start = time.time()
     model.optimize()
     solve_time = time.time() - solve_start
+    objective_bound = model.ObjBound
+    mip_gap = model.MIPGap if model.SolCount > 0 else None
+    status_code = int(model.Status)
+    node_count = model.NodeCount
     if require_optimal and model.Status != GRB.OPTIMAL:
         raise RuntimeError(f"compact model status {model.Status}")
     if model.SolCount == 0:
-        return CompactSolution(None, tuple(), CompactTiming(build_time, solve_time, 0.0), _compact_status_name(model.Status))
+        return CompactSolution(
+            None,
+            tuple(),
+            CompactTiming(build_time, solve_time, 0.0),
+            _compact_status_name(model.Status),
+            objective_bound,
+            mip_gap,
+            status_code,
+            node_count,
+        )
     if wall_deadline is not None and time.time() >= wall_deadline:
-        return CompactSolution(None, tuple(), CompactTiming(build_time, solve_time, 0.0), "budget_exhausted_solve")
+        return CompactSolution(
+            None,
+            tuple(),
+            CompactTiming(build_time, solve_time, 0.0),
+            "budget_exhausted_solve",
+            objective_bound,
+            mip_gap,
+            status_code,
+            node_count,
+        )
     decode_start = time.time()
     route_paths = _extract_route_paths(instance, x, y, used, trucks, drones)
     decode_time = time.time() - decode_start
     status = "success" if route_paths else _compact_status_name(model.Status)
-    return CompactSolution(model.ObjVal, route_paths, CompactTiming(build_time, solve_time, decode_time), status)
+    return CompactSolution(
+        model.ObjVal,
+        route_paths,
+        CompactTiming(build_time, solve_time, decode_time),
+        status,
+        objective_bound,
+        mip_gap,
+        status_code,
+        node_count,
+    )
 
 
 def _compact_status_name(status: int) -> str:

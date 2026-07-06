@@ -31,6 +31,12 @@ class SRCutMetadata:
     inactive_count: int = 0
     last_activity: float = 0.0
     last_violation: float = 0.0
+    last_positive_dual_iteration: int = -1
+    activity_count: int = 0
+    nonzero_count: int = 0
+    coefficient_density: float = 0.0
+    update_time_contribution: float = 0.0
+    removal_candidate_count: int = 0
     removal_count: int = 0
     reactivation_count: int = 0
 
@@ -118,6 +124,12 @@ class NodeState:
                     inactive_count=meta.inactive_count,
                     last_activity=meta.last_activity,
                     last_violation=meta.last_violation,
+                    last_positive_dual_iteration=meta.last_positive_dual_iteration,
+                    activity_count=meta.activity_count,
+                    nonzero_count=meta.nonzero_count,
+                    coefficient_density=meta.coefficient_density,
+                    update_time_contribution=meta.update_time_contribution,
+                    removal_candidate_count=meta.removal_candidate_count,
                     removal_count=meta.removal_count,
                     reactivation_count=meta.reactivation_count,
                 )
