@@ -1,0 +1,3 @@
+D:\ProgramData\anaconda3\python.exe -m thvrpd.experiments --worker --case-file numerical_experiments\run_20260702_phasei_seed3\small_full_PS_seed_3\case_config.json
+D:\ProgramData\anaconda3\python.exe -m thvrpd.experiments --worker --case-file numerical_experiments\run_20260702_phasei_seed3\medium_full_PS_seed_3\case_config.json
+D:\ProgramData\anaconda3\python.exe -m thvrpd.experiments --worker --case-file numerical_experiments\run_20260702_phasei_seed3\large_full_PS_seed_3\case_config.json

@@ -1,0 +1,3 @@
+D:\ProgramData\anaconda3\python.exe -m thvrpd.experiments --worker --case-file numerical_experiments\run_after_backward_join_v3\small_full_PS_seed_1\case_config.json
+D:\ProgramData\anaconda3\python.exe -m thvrpd.experiments --worker --case-file numerical_experiments\run_after_backward_join_v3\medium_full_PS_seed_1\case_config.json
+D:\ProgramData\anaconda3\python.exe -m thvrpd.experiments --worker --case-file numerical_experiments\run_after_backward_join_v3\large_full_PS_seed_1\case_config.json

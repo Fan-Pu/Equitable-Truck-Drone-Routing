@@ -1,0 +1,33 @@
+{
+  "case_id": "medium_full_PS_seed_1",
+  "scale": "medium",
+  "variant": "full",
+  "distribution": "PS",
+  "seed": 1,
+  "status": "time_limited_external",
+  "solver_status": "time_limited_external",
+  "runtime_seconds": 900.0493364334106,
+  "case_time_limit_seconds": 900.0,
+  "instance_config": {
+    "seed": 1,
+    "num_trucks": 5,
+    "num_customers": 15,
+    "distribution": "PS",
+    "drones_per_truck": 4,
+    "num_hubs": 2
+  },
+  "solver_config": {
+    "threads": 1,
+    "time_limit": 900.0,
+    "root_extraction_time_limit": 5.0,
+    "enable_pricing_pruning": true,
+    "gurobi_log_dir": "numerical_experiments\\run_20260701_ps\\medium_full_PS_seed_1\\gurobi_logs"
+  },
+  "error": "worker exceeded external timeout of 900.0 seconds",
+  "stdout_log": "numerical_experiments\\run_20260701_ps\\medium_full_PS_seed_1\\stdout.log",
+  "stderr_log": "numerical_experiments\\run_20260701_ps\\medium_full_PS_seed_1\\stderr.log",
+  "gurobi_log_files": [
+    "numerical_experiments\\run_20260701_ps\\medium_full_PS_seed_1\\gurobi_logs\\rmp_node_1_cols_17_sr_0.log",
+    "numerical_experiments\\run_20260701_ps\\medium_full_PS_seed_1\\gurobi_logs\\root_compact.log"
+  ]
+}

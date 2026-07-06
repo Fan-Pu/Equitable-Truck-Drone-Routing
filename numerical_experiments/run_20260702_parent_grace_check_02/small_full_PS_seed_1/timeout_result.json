@@ -1,0 +1,197 @@
+{
+  "case_id": "small_full_PS_seed_1",
+  "scale": "small",
+  "variant": "full",
+  "distribution": "PS",
+  "seed": 1,
+  "status": "time_limited_internal",
+  "solver_status": "time_limited_internal",
+  "runtime_seconds": 1.6996898651123047,
+  "case_time_limit_seconds": 0.2,
+  "instance_config": {
+    "seed": 1,
+    "num_trucks": 2,
+    "num_customers": 5,
+    "distribution": "PS",
+    "drones_per_truck": 4,
+    "num_hubs": 2,
+    "area_side": 14.0,
+    "truck_arc_probability": 0.2,
+    "hub_arc_probability": 0.5,
+    "truck_speed": 40.0,
+    "drone_speed": 40.0,
+    "truck_payload": 50.0,
+    "drone_payload": 2.3,
+    "drone_endurance": 30.0,
+    "truck_cost": 20.0,
+    "drone_cost": 6.0,
+    "low_demand_customer_ratio": 0.5,
+    "low_demand_weight_mean": 1.0,
+    "low_demand_weight_std": 5.0,
+    "low_demand_weight_min": 0.5,
+    "high_demand_weight_mean": 10.0,
+    "high_demand_weight_std": 5.0,
+    "high_demand_weight_min": 6.0
+  },
+  "solver_config": {
+    "threads": 1,
+    "time_limit": 0.2,
+    "pricing_tolerance": 1e-07,
+    "cut_tolerance": 1e-07,
+    "integrality_tolerance": 1e-06,
+    "root_extraction_time_limit": 5.0,
+    "route_pool_time_limit": 2.0,
+    "support_threshold": 0.05,
+    "support_best_per_customer": 3,
+    "dive_reward": 1e-06,
+    "repair_reward": 1.0,
+    "seed_reward": 10.0,
+    "phase_i_max_rounds": 20,
+    "pricing_batch_size": 16,
+    "farkas_batch_size": 16,
+    "seed_batch_size": 16,
+    "repair_batch_size": 16,
+    "enable_pricing_pruning": true,
+    "gurobi_log_dir": "numerical_experiments\\run_20260702_parent_grace_check_02\\small_full_PS_seed_1\\gurobi_logs"
+  },
+  "gurobi_version": "11.0.1",
+  "locations": {
+    "C1": [
+      7.165502745803594,
+      13.306491748563094
+    ],
+    "C2": [
+      2.018234578074872,
+      13.281092259921413
+    ],
+    "C3": [
+      4.365640328146796,
+      5.926570285616059
+    ],
+    "C4": [
+      11.587836313486184,
+      5.728787909168258
+    ],
+    "C5": [
+      7.694311627422833,
+      0.38582758540295714
+    ],
+    "Source": [
+      0.0,
+      0.0
+    ],
+    "Sink": [
+      0.0,
+      0.0
+    ],
+    "H1": [
+      4.591868661939233,
+      13.293792004242253
+    ],
+    "H2": [
+      7.882596089685271,
+      4.013728593395758
+    ]
+  },
+  "demand": {
+    "C1": 1.14,
+    "C2": 6.32,
+    "C3": 3.73,
+    "C4": 9.19,
+    "C5": 7.59,
+    "Source": 0.0,
+    "Sink": 0.0,
+    "H1": 0.0,
+    "H2": 0.0
+  },
+  "memory": {
+    "python_current_allocated_mb": 0.7439231872558594,
+    "python_peak_allocated_mb": 0.8912811279296875
+  },
+  "lower_bound_shifted": 0.0,
+  "normalization_bounds": {
+    "arrival_lb": {
+      "C1": 30.688989125492714,
+      "C2": 22.948990256994428,
+      "C3": 15.438315920644284,
+      "C4": 25.97493633398166,
+      "C5": 12.120208819238684
+    },
+    "service_ub": {
+      "C1": 225.5558870189256,
+      "C2": 233.29588588742388,
+      "C3": 240.80656022377403,
+      "C4": 230.26993981043665,
+      "C5": 244.12466732517962
+    },
+    "delay_lb": 0.0,
+    "delay_ub": 228572.2871483232,
+    "return_lb": 24.240417638477368,
+    "return_ub": 512.4897522888366,
+    "cost_lb": 20.0,
+    "cost_ub": 70.0,
+    "route_time_ub": 256.2448761444183,
+    "min_trucks": 1,
+    "max_used_trucks": 2,
+    "min_drone_flights": 0
+  },
+  "objective_coefficients": {
+    "delay": 1.7499934265453423e-06,
+    "return_time": 0.0006144401614286547,
+    "cost": 0.006,
+    "shift": -0.13489428612688403
+  },
+  "bpc_progress": null,
+  "pricing_diagnostics_summary": {},
+  "bpc_stats": {
+    "status": "time_limit",
+    "initialization_time": 0.006005287170410156,
+    "root_extraction_time": 1.6645677089691162,
+    "root_model_build_time": 0.8734374046325684,
+    "root_model_solve_time": 0.7871241569519043,
+    "root_route_decode_time": 0.00099945068359375,
+    "rmp_time": 0.0,
+    "phase_i_time": 0.0,
+    "standard_pricing_time": 0.0,
+    "farkas_pricing_time": 0.0,
+    "sr_separation_time": 0.0,
+    "heuristic_time": 0.0,
+    "initial_routes": 5,
+    "root_extracted_routes": 1,
+    "total_routes": 6,
+    "global_pool_routes": 6,
+    "transformed_nodes": 11,
+    "transformed_arcs": 46,
+    "duplicate_nodes": 2,
+    "duplicate_arcs": 11,
+    "rmp_solves": 0,
+    "phase_i_solves": 0,
+    "phase_i_columns_added": 0,
+    "phase_i_uncovered_customers": 0,
+    "standard_pricing_calls": 0,
+    "farkas_pricing_calls": 0,
+    "columns_added_standard": 0,
+    "columns_added_farkas": 0,
+    "duplicate_columns_rejected": 0,
+    "sr_cuts_added": 0,
+    "duplicate_merge_events": 0,
+    "pricing_labels_generated": 0,
+    "pricing_labels_dominated": 0,
+    "pricing_labels_pruned": 0,
+    "pricing_complete_routes_generated": 0,
+    "pricing_max_queue_size": 0,
+    "pricing_diagnostics": [],
+    "heuristic_calls": 0,
+    "heuristic_columns_generated": 0,
+    "heuristic_incumbent_updates": 0,
+    "branching_nodes": 0,
+    "child_nodes_created": 0,
+    "max_node_columns": 0,
+    "max_active_sr": 0,
+    "open_nodes_at_termination": 1
+  },
+  "gurobi_log_files": [
+    "numerical_experiments\\run_20260702_parent_grace_check_02\\small_full_PS_seed_1\\gurobi_logs\\root_compact.log"
+  ],
+  "error": "BPC time limit reached before a feasible incumbent was found"
+}

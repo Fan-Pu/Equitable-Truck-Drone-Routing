@@ -1,0 +1,1 @@
+{"best_reduced_cost": null, "call_index": 1, "complete_routes_generated": 0, "elapsed_seconds": 0.00484156608581543, "exact_completion": false, "farkas_bound_pruned": 0, "labels_dominated": 0, "labels_generated": 1, "labels_pruned": 0, "max_queue_size": 1, "mode": "seed_interrupted", "returned_routes": 0, "standard_bound_pruned": 0}

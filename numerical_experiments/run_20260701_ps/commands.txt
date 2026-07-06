@@ -1,0 +1,10 @@
+D:\ProgramData\anaconda3\python.exe -m thvrpd.experiments --worker --case-file numerical_experiments\run_20260701_ps\small_full_PS_seed_1\case_config.json
+D:\ProgramData\anaconda3\python.exe -m thvrpd.experiments --worker --case-file numerical_experiments\run_20260701_ps\small_no_pricing_pruning_PS_seed_1\case_config.json
+D:\ProgramData\anaconda3\python.exe -m thvrpd.experiments --worker --case-file numerical_experiments\run_20260701_ps\small_no_root_extraction_PS_seed_1\case_config.json
+D:\ProgramData\anaconda3\python.exe -m thvrpd.experiments --worker --case-file numerical_experiments\run_20260701_ps\small_full_PS_seed_2\case_config.json
+D:\ProgramData\anaconda3\python.exe -m thvrpd.experiments --worker --case-file numerical_experiments\run_20260701_ps\small_no_pricing_pruning_PS_seed_2\case_config.json
+D:\ProgramData\anaconda3\python.exe -m thvrpd.experiments --worker --case-file numerical_experiments\run_20260701_ps\small_no_root_extraction_PS_seed_2\case_config.json
+D:\ProgramData\anaconda3\python.exe -m thvrpd.experiments --worker --case-file numerical_experiments\run_20260701_ps\medium_full_PS_seed_1\case_config.json
+D:\ProgramData\anaconda3\python.exe -m thvrpd.experiments --worker --case-file numerical_experiments\run_20260701_ps\medium_full_PS_seed_2\case_config.json
+D:\ProgramData\anaconda3\python.exe -m thvrpd.experiments --worker --case-file numerical_experiments\run_20260701_ps\large_full_PS_seed_1\case_config.json
+D:\ProgramData\anaconda3\python.exe -m thvrpd.experiments --worker --case-file numerical_experiments\run_20260701_ps\large_full_PS_seed_2\case_config.json

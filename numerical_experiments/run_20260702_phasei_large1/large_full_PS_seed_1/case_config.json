@@ -1,0 +1,31 @@
+{
+  "case_id": "large_full_PS_seed_1",
+  "scale": "large",
+  "variant": "full",
+  "distribution": "PS",
+  "seed": 1,
+  "weights": [
+    0.4,
+    0.3,
+    0.3
+  ],
+  "case_time_limit_seconds": 900.0,
+  "gurobi_python_path": "D:\\gurobi1201\\win64\\python311\\lib",
+  "total_drones": 32,
+  "instance_config": {
+    "seed": 1,
+    "num_trucks": 8,
+    "num_customers": 25,
+    "distribution": "PS",
+    "drones_per_truck": 4,
+    "num_hubs": 2
+  },
+  "solver_config": {
+    "threads": 1,
+    "time_limit": 900.0,
+    "root_extraction_time_limit": 5.0,
+    "enable_pricing_pruning": true,
+    "gurobi_log_dir": "numerical_experiments\\run_20260702_phasei_large1\\large_full_PS_seed_1\\gurobi_logs"
+  },
+  "case_dir": "numerical_experiments\\run_20260702_phasei_large1\\large_full_PS_seed_1"
+}

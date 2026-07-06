@@ -1,0 +1,3 @@
+D:\ProgramData\anaconda3\python.exe -m thvrpd.experiments --worker --case-file D:\GitHub\Equitable-Truck-Drone-Routing\numerical_experiments\run_20260702_postpatch_batch4_seed1\small_full_PS_seed_1\case_config.json
+D:\ProgramData\anaconda3\python.exe -m thvrpd.experiments --worker --case-file D:\GitHub\Equitable-Truck-Drone-Routing\numerical_experiments\run_20260702_postpatch_batch4_seed1\medium_full_PS_seed_1\case_config.json
+D:\ProgramData\anaconda3\python.exe -m thvrpd.experiments --worker --case-file D:\GitHub\Equitable-Truck-Drone-Routing\numerical_experiments\run_20260702_postpatch_batch4_seed1\large_full_PS_seed_1\case_config.json

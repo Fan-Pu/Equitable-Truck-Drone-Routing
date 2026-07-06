@@ -1,6 +1,0 @@
-f_cost: 100
-f_time: 558.520612428652
-n_truck: 5
-n_stop: 2.8
-hub H1: 6
-hub H2: 0

@@ -1,0 +1,109 @@
+{
+  "paper_source": "C:/Users/77270/.codex/attachments/0de8e89b-cd5f-456e-aa55-4694657fa536/pasted-text.txt",
+  "audit_date": "2026-07-03",
+  "strictness": "paper-exact",
+  "components": [
+    {
+      "id": "instance_network",
+      "status": "implemented",
+      "paper_design": "Source and sink depot copies, disjoint customers and pads, truck arcs, drone sortie arcs, one-way outbound/reverse drone times, and round-trip waiting times.",
+      "code_evidence": ["thvrpd/instance.py", "thvrpd/transform.py", "tests/test_instance_objective_transform.py"],
+      "fixes_made": []
+    },
+    {
+      "id": "objective_normalization",
+      "status": "implemented",
+      "paper_design": "Weighted normalized delay, return time, and operating cost objective with full-graph earliest-service benchmarks and shifted route costs.",
+      "code_evidence": ["thvrpd/objective.py", "thvrpd/routes.py", "tests/test_instance_objective_transform.py"],
+      "fixes_made": []
+    },
+    {
+      "id": "compact_miqp",
+      "status": "implemented",
+      "paper_design": "Compact MIQP used for small-instance validation against branch-price-and-cut.",
+      "code_evidence": ["thvrpd/compact.py", "thvrpd/validate.py", "tests/test_pricing_rmp_bpc.py"],
+      "fixes_made": []
+    },
+    {
+      "id": "route_space_rmp",
+      "status": "implemented",
+      "paper_design": "Residual-customer RMP with residual fleet limit, fixed-route state, active SR cuts, shifted route costs, and paper dual sign convention.",
+      "code_evidence": ["thvrpd/rmp.py", "thvrpd/bpc.py", "tests/test_pricing_rmp_bpc.py"],
+      "fixes_made": []
+    },
+    {
+      "id": "transformed_pricing_network",
+      "status": "implemented",
+      "paper_design": "Hub-specific duplicated customer nodes, canonical drone-block ordering, cost-preserving route encoding and decoding.",
+      "code_evidence": ["thvrpd/transform.py", "thvrpd/routes.py", "tests/test_instance_objective_transform.py"],
+      "fixes_made": []
+    },
+    {
+      "id": "bpc_node_loop",
+      "status": "implemented",
+      "paper_design": "Solve RMP, use Farkas pricing when infeasible, standard pricing when feasible, separate SR cuts only after pricing closure, then branch.",
+      "code_evidence": ["thvrpd/bpc.py", "thvrpd/phasei.py", "tests/test_pricing_rmp_bpc.py"],
+      "fixes_made": []
+    },
+    {
+      "id": "branching",
+      "status": "implemented",
+      "paper_design": "Customer-pair, service-mode, launch-pad, transformed-arc, duplicate-column merge, and route-variable branching with residual-state update.",
+      "code_evidence": ["thvrpd/branching.py", "thvrpd/bpc.py", "tests/test_pricing_rmp_bpc.py"],
+      "fixes_made": []
+    },
+    {
+      "id": "forward_pricing",
+      "status": "implemented",
+      "paper_design": "Forward label-setting with customer representation elementarity, physical-node elementarity, payload, active pad/waiting resources, SR counters, branch automata, and standard/Farkas reduced-cost recursions.",
+      "code_evidence": ["thvrpd/pricing.py", "tests/test_pricing_rmp_bpc.py"],
+      "fixes_made": ["Typed branch-state automaton object added and tested as the dominance invariant."]
+    },
+    {
+      "id": "bidirectional_pricing_and_joining",
+      "status": "implemented",
+      "paper_design": "Backward suffix labels over inbound arcs, same-node joining, full-route decoding, direct standard/Farkas reduced-cost verification, and threaded exact expansion/join evaluation.",
+      "code_evidence": ["thvrpd/pricing.py", "thvrpd/config.py", "thvrpd/solve.py", "thvrpd/experiments.py", "tests/test_pricing_rmp_bpc.py"],
+      "fixes_made": ["Termination reason and certification mode added to diagnostics.", "Conservative non-identical backward suffix dominance policy made explicit and tested."]
+    },
+    {
+      "id": "backward_dominance_acceleration",
+      "status": "implemented",
+      "paper_design": "Paper gives backward-side dominance conditions; conservative exact implementations discard a backward suffix only when prefix-compatibility inclusion and reduced-cost dominance are certified.",
+      "code_evidence": ["thvrpd/pricing.py", "tests/test_pricing_rmp_bpc.py"],
+      "fixes_made": [
+        "Backward labels now carry suffix timing profiles, service-mode resources, SR counts, branch-state metadata, leading block interface, physical-node sets, and payload.",
+        "Non-identical backward suffix dominance is implemented for standard and Farkas pricing; labels are retained when dominance cannot be certified exactly.",
+        "Diagnostics now report backward_dominance_tests and backward_labels_dominated."
+      ]
+    },
+    {
+      "id": "farkas_pricing",
+      "status": "implemented",
+      "paper_design": "Farkas pricing for infeasible RMP nodes with Farkas reduced-cost recursion, Farkas-valid dominance, and Farkas reward-bound pruning.",
+      "code_evidence": ["thvrpd/rmp.py", "thvrpd/pricing.py", "tests/test_pricing_rmp_bpc.py"],
+      "fixes_made": []
+    },
+    {
+      "id": "sr_cuts",
+      "status": "implemented",
+      "paper_design": "Subset-row cuts over residual customer triplets separated after pricing closure and carried into pricing via SR counters.",
+      "code_evidence": ["thvrpd/bpc.py", "thvrpd/rmp.py", "thvrpd/pricing.py", "tests/test_pricing_rmp_bpc.py"],
+      "fixes_made": []
+    },
+    {
+      "id": "acceleration_components",
+      "status": "implemented",
+      "paper_design": "Paper-defined Phase-I seeding, productive/certification pricing modes, dual-guided label ordering, duplicate/cost-dominated column filtering, canonical block ordering, and route-pool diving/repair.",
+      "code_evidence": ["thvrpd/phasei.py", "thvrpd/pricing.py", "thvrpd/columns.py", "thvrpd/heuristics.py", "tests/test_pricing_rmp_bpc.py"],
+      "fixes_made": []
+    },
+    {
+      "id": "diagnostics_and_outputs",
+      "status": "implemented",
+      "paper_design": "Structured run records with pricing engine, label counts, join counts, best reduced cost, exact-completion state, and unresolved pricing status.",
+      "code_evidence": ["thvrpd/bpc.py", "thvrpd/solve.py", "thvrpd/experiments.py", "numerical_test_report.md", "tests/test_pricing_rmp_bpc.py"],
+      "fixes_made": ["Added termination_reason, certification_mode, backward_dominance_tests, backward_labels_dominated, and aggregate summary propagation."]
+    }
+  ]
+}

@@ -1,0 +1,450 @@
+{
+  "case_id": "small_full_PS_seed_1",
+  "scale": "small",
+  "variant": "full",
+  "distribution": "PS",
+  "seed": 1,
+  "status": "optimal",
+  "solver_status": "optimal",
+  "runtime_seconds": 1.475283145904541,
+  "case_time_limit_seconds": 900.0,
+  "instance_generation_time_seconds": 0.029996633529663086,
+  "bpc_wall_time_seconds": 1.444286584854126,
+  "service_metrics_time_seconds": 0.0009999275207519531,
+  "instance_config": {
+    "seed": 1,
+    "num_trucks": 2,
+    "num_customers": 5,
+    "distribution": "PS",
+    "drones_per_truck": 4,
+    "num_hubs": 2,
+    "area_side": 14.0,
+    "truck_arc_probability": 0.2,
+    "hub_arc_probability": 0.5,
+    "truck_speed": 40.0,
+    "drone_speed": 40.0,
+    "truck_payload": 50.0,
+    "drone_payload": 2.3,
+    "drone_endurance": 30.0,
+    "truck_cost": 20.0,
+    "drone_cost": 6.0,
+    "low_demand_customer_ratio": 0.5,
+    "low_demand_weight_mean": 1.0,
+    "low_demand_weight_std": 5.0,
+    "low_demand_weight_min": 0.5,
+    "high_demand_weight_mean": 10.0,
+    "high_demand_weight_std": 5.0,
+    "high_demand_weight_min": 6.0
+  },
+  "solver_config": {
+    "threads": 1,
+    "time_limit": 900.0,
+    "pricing_tolerance": 1e-07,
+    "cut_tolerance": 1e-07,
+    "integrality_tolerance": 1e-06,
+    "root_extraction_time_limit": 5.0,
+    "route_pool_time_limit": 2.0,
+    "support_threshold": 0.05,
+    "support_best_per_customer": 3,
+    "dive_reward": 1e-06,
+    "repair_reward": 1.0,
+    "seed_reward": 10.0,
+    "phase_i_max_rounds": 20,
+    "pricing_batch_size": 16,
+    "farkas_batch_size": 16,
+    "seed_batch_size": 16,
+    "repair_batch_size": 16,
+    "enable_pricing_pruning": true,
+    "gurobi_log_dir": "numerical_experiments\\run_20260703_revised_fresh_seed1\\small_full_PS_seed_1\\gurobi_logs"
+  },
+  "gurobi_version": "11.0.1",
+  "locations": {
+    "C1": [
+      7.165502745803594,
+      13.306491748563094
+    ],
+    "C2": [
+      2.018234578074872,
+      13.281092259921413
+    ],
+    "C3": [
+      4.365640328146796,
+      5.926570285616059
+    ],
+    "C4": [
+      11.587836313486184,
+      5.728787909168258
+    ],
+    "C5": [
+      7.694311627422833,
+      0.38582758540295714
+    ],
+    "Source": [
+      0.0,
+      0.0
+    ],
+    "Sink": [
+      0.0,
+      0.0
+    ],
+    "H1": [
+      4.591868661939233,
+      13.293792004242253
+    ],
+    "H2": [
+      7.882596089685271,
+      4.013728593395758
+    ]
+  },
+  "demand": {
+    "C1": 1.14,
+    "C2": 6.32,
+    "C3": 3.73,
+    "C4": 9.19,
+    "C5": 7.59,
+    "Source": 0.0,
+    "Sink": 0.0,
+    "H1": 0.0,
+    "H2": 0.0
+  },
+  "memory": {
+    "python_current_allocated_mb": 0.8250522613525391,
+    "python_peak_allocated_mb": 0.9957666397094727
+  },
+  "total_drones": 8,
+  "objective_shifted": 0.1859442958583672,
+  "objective_full": 0.05105000973148316,
+  "runtime": 1.444286584854126,
+  "nodes_processed": 1,
+  "lower_bound_shifted": 0.1859442958583672,
+  "lower_bound_full": 0.05105000973148316,
+  "upper_bound_shifted": 0.1859442958583672,
+  "upper_bound_full": 0.05105000973148316,
+  "gap": 0.0,
+  "gap_full": 0.0,
+  "gap_shifted": 0.0,
+  "normalization_bounds": {
+    "arrival_lb": {
+      "C1": 30.688989125492714,
+      "C2": 22.948990256994428,
+      "C3": 15.438315920644284,
+      "C4": 25.97493633398166,
+      "C5": 12.120208819238684
+    },
+    "service_ub": {
+      "C1": 225.5558870189256,
+      "C2": 233.29588588742388,
+      "C3": 240.80656022377403,
+      "C4": 230.26993981043665,
+      "C5": 244.12466732517962
+    },
+    "delay_lb": 0.0,
+    "delay_ub": 228572.2871483232,
+    "return_lb": 24.240417638477368,
+    "return_ub": 512.4897522888366,
+    "cost_lb": 20.0,
+    "cost_ub": 70.0,
+    "route_time_ub": 256.2448761444183,
+    "min_trucks": 1,
+    "max_used_trucks": 2,
+    "min_drone_flights": 0
+  },
+  "objective_coefficients": {
+    "delay": 1.7499934265453423e-06,
+    "return_time": 0.0006144401614286547,
+    "cost": 0.006,
+    "shift": -0.13489428612688403
+  },
+  "objective_components": {
+    "raw": {
+      "delay_square_sum": 6038.88333925442,
+      "return_time_sum": 90.124788689334,
+      "operating_cost": 20.0
+    },
+    "normalized": {
+      "delay": 0.026420015368423554,
+      "return_time": 0.13494001194704577,
+      "cost": 0.0
+    },
+    "weighted_normalized": {
+      "delay": 0.010568006147369422,
+      "return_time": 0.04048200358411373,
+      "cost": 0.0
+    },
+    "shifted_route_sum_components": {
+      "delay": 0.010568006147369422,
+      "return_time": 0.05537628971099777,
+      "cost": 0.12,
+      "shift": -0.13489428612688403,
+      "route_sum_without_shift": 0.1859442958583672,
+      "full_with_shift": 0.05105000973148316
+    }
+  },
+  "customer_service_times": {
+    "C1": 30.707991741550032,
+    "C2": 38.466993226105636,
+    "C3": 15.438315920644284,
+    "C4": 64.14985235535234,
+    "C5": 78.00457987009531
+  },
+  "return_times": [
+    90.124788689334
+  ],
+  "drone_sorties": [],
+  "routes": [
+    {
+      "id": 5,
+      "path": [
+        "Source",
+        "C3",
+        "H1",
+        "C1",
+        "C2",
+        "C4",
+        "H2",
+        "C5",
+        "Sink"
+      ],
+      "truck_path": [
+        "Source",
+        "C3",
+        "H1",
+        "C1",
+        "C2",
+        "C4",
+        "H2",
+        "C5",
+        "Sink"
+      ],
+      "drone_blocks": {},
+      "served": [
+        "C1",
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "truck_served": [
+        "C1",
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "service_times": {
+        "C3": 15.438315920644284,
+        "C1": 30.707991741550032,
+        "C2": 38.466993226105636,
+        "C4": 64.14985235535234,
+        "C5": 78.00457987009531
+      },
+      "return_time": 90.124788689334,
+      "drone_sorties": 0,
+      "delay_square_sum": 6038.88333925442,
+      "operating_cost": 20.0,
+      "shifted_delay_contribution": 0.010568006147369422,
+      "shifted_return_contribution": 0.05537628971099777,
+      "shifted_cost_contribution": 0.12,
+      "shifted_cost": 0.1859442958583672
+    }
+  ],
+  "bpc_stats": {
+    "status": "optimal",
+    "initialization_time": 0.005999326705932617,
+    "root_extraction_time": 1.0891377925872803,
+    "root_model_build_time": 0.79058837890625,
+    "root_model_solve_time": 0.2955484390258789,
+    "root_route_decode_time": 0.00099945068359375,
+    "rmp_time": 0.02139878273010254,
+    "phase_i_time": 0.0,
+    "standard_pricing_time": 0.17502641677856445,
+    "farkas_pricing_time": 0.0,
+    "sr_separation_time": 0.0009987354278564453,
+    "heuristic_time": 0.0,
+    "farkas_certificate_rhs": null,
+    "farkas_certificate_max_column_activity": null,
+    "initial_routes": 5,
+    "root_extracted_routes": 1,
+    "total_routes": 55,
+    "global_pool_routes": 55,
+    "transformed_nodes": 11,
+    "transformed_arcs": 46,
+    "duplicate_nodes": 2,
+    "duplicate_arcs": 11,
+    "rmp_solves": 5,
+    "phase_i_solves": 0,
+    "phase_i_columns_added": 0,
+    "phase_i_uncovered_customers": 0,
+    "seed_pricing_calls": 0,
+    "standard_pricing_calls": 5,
+    "farkas_pricing_calls": 0,
+    "repair_pricing_calls": 0,
+    "columns_added_standard": 49,
+    "columns_added_farkas": 0,
+    "duplicate_columns_rejected": 0,
+    "sr_cuts_added": 0,
+    "duplicate_merge_events": 0,
+    "pricing_labels_generated": 786,
+    "pricing_labels_dominated": 274,
+    "pricing_labels_purged": 1,
+    "pricing_stale_labels_skipped": 0,
+    "pricing_labels_pruned": 28,
+    "pricing_standard_bound_pruned": 28,
+    "pricing_farkas_bound_pruned": 0,
+    "pricing_complete_routes_generated": 212,
+    "pricing_max_queue_size": 37,
+    "pricing_diagnostics_elapsed_seconds": 0.1740267276763916,
+    "pricing_max_call_elapsed_seconds": 0.04050898551940918,
+    "seed_pricing_time": 0.0,
+    "repair_pricing_time": 0.0,
+    "pricing_diagnostics": [
+      {
+        "call_index": 1,
+        "mode": "standard",
+        "labels_generated": 108,
+        "labels_dominated": 17,
+        "labels_pruned": 1,
+        "max_queue_size": 37,
+        "complete_routes_generated": 25,
+        "returned_routes": 16,
+        "best_reduced_cost": -0.2867519920638809,
+        "exact_completion": false,
+        "labels_purged": 1,
+        "stale_labels_skipped": 0,
+        "standard_bound_pruned": 1,
+        "farkas_bound_pruned": 0,
+        "elapsed_seconds": 0.028003931045532227
+      },
+      {
+        "call_index": 2,
+        "mode": "standard",
+        "labels_generated": 137,
+        "labels_dominated": 51,
+        "labels_pruned": 7,
+        "max_queue_size": 13,
+        "complete_routes_generated": 37,
+        "returned_routes": 15,
+        "best_reduced_cost": -0.02687777351190209,
+        "exact_completion": true,
+        "labels_purged": 0,
+        "stale_labels_skipped": 0,
+        "standard_bound_pruned": 7,
+        "farkas_bound_pruned": 0,
+        "elapsed_seconds": 0.03550839424133301
+      },
+      {
+        "call_index": 3,
+        "mode": "standard",
+        "labels_generated": 186,
+        "labels_dominated": 74,
+        "labels_pruned": 5,
+        "max_queue_size": 16,
+        "complete_routes_generated": 51,
+        "returned_routes": 3,
+        "best_reduced_cost": -0.0012392679394039735,
+        "exact_completion": true,
+        "labels_purged": 0,
+        "stale_labels_skipped": 0,
+        "standard_bound_pruned": 5,
+        "farkas_bound_pruned": 0,
+        "elapsed_seconds": 0.04050898551940918
+      },
+      {
+        "call_index": 4,
+        "mode": "standard",
+        "labels_generated": 161,
+        "labels_dominated": 57,
+        "labels_pruned": 9,
+        "max_queue_size": 14,
+        "complete_routes_generated": 45,
+        "returned_routes": 15,
+        "best_reduced_cost": -0.010830843087423256,
+        "exact_completion": true,
+        "labels_purged": 0,
+        "stale_labels_skipped": 0,
+        "standard_bound_pruned": 9,
+        "farkas_bound_pruned": 0,
+        "elapsed_seconds": 0.03400397300720215
+      },
+      {
+        "call_index": 5,
+        "mode": "standard",
+        "labels_generated": 194,
+        "labels_dominated": 75,
+        "labels_pruned": 6,
+        "max_queue_size": 17,
+        "complete_routes_generated": 54,
+        "returned_routes": 0,
+        "best_reduced_cost": -1.3877787807814457e-17,
+        "exact_completion": true,
+        "labels_purged": 0,
+        "stale_labels_skipped": 0,
+        "standard_bound_pruned": 6,
+        "farkas_bound_pruned": 0,
+        "elapsed_seconds": 0.03600144386291504
+      }
+    ],
+    "heuristic_calls": 0,
+    "heuristic_columns_generated": 0,
+    "heuristic_incumbent_updates": 0,
+    "heuristic_hard_pool_solves": 0,
+    "heuristic_hard_pool_time": 0.0,
+    "heuristic_hard_pool_feasible_solves": 0,
+    "heuristic_soft_pool_solves": 0,
+    "heuristic_soft_pool_time": 0.0,
+    "heuristic_soft_pool_feasible_solves": 0,
+    "heuristic_repair_customers": 0,
+    "heuristic_repair_columns_generated": 0,
+    "heuristic_max_node_pool_routes": 0,
+    "heuristic_max_support_routes": 0,
+    "branching_nodes": 0,
+    "customer_pair_branches": 0,
+    "service_mode_branches": 0,
+    "launch_pad_branches": 0,
+    "transformed_arc_branches": 0,
+    "route_variable_branches": 0,
+    "child_nodes_created": 0,
+    "max_node_columns": 55,
+    "max_active_sr": 0,
+    "open_nodes_at_termination": 0
+  },
+  "service_metrics": {
+    "service_feasible": true,
+    "coverage_counts": {
+      "C1": 1,
+      "C2": 1,
+      "C3": 1,
+      "C4": 1,
+      "C5": 1
+    },
+    "selected_trucks": 1,
+    "available_trucks": 2,
+    "drone_sorties": 0,
+    "available_drones_total": 8,
+    "truck_served_customers": 5,
+    "drone_served_customers": 0,
+    "payloads": [
+      27.97
+    ],
+    "max_payload": 27.97,
+    "payload_feasible": true,
+    "total_customer_demand": 27.97,
+    "available_truck_payload_total": 100.0,
+    "mean_delay": 23.919258531479166,
+    "max_delay": 65.88437105085663,
+    "delay_square_sum": 6038.883339254419,
+    "waiting_blocks": 0,
+    "total_wait_time": 0,
+    "mean_wait_time": 0.0,
+    "max_wait_time": 0.0
+  },
+  "gurobi_log_files": [
+    "numerical_experiments\\run_20260703_revised_fresh_seed1\\small_full_PS_seed_1\\gurobi_logs\\rmp_node_1_cols_22_sr_0.log",
+    "numerical_experiments\\run_20260703_revised_fresh_seed1\\small_full_PS_seed_1\\gurobi_logs\\rmp_node_1_cols_37_sr_0.log",
+    "numerical_experiments\\run_20260703_revised_fresh_seed1\\small_full_PS_seed_1\\gurobi_logs\\rmp_node_1_cols_40_sr_0.log",
+    "numerical_experiments\\run_20260703_revised_fresh_seed1\\small_full_PS_seed_1\\gurobi_logs\\rmp_node_1_cols_55_sr_0.log",
+    "numerical_experiments\\run_20260703_revised_fresh_seed1\\small_full_PS_seed_1\\gurobi_logs\\rmp_node_1_cols_6_sr_0.log",
+    "numerical_experiments\\run_20260703_revised_fresh_seed1\\small_full_PS_seed_1\\gurobi_logs\\root_compact.log"
+  ],
+  "output_write_time_seconds": 0.003999233245849609
+}

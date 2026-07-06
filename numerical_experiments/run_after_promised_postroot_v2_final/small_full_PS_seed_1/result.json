@@ -1,0 +1,2647 @@
+{
+  "case_id": "small_full_PS_seed_1",
+  "scale": "small",
+  "variant": "full",
+  "distribution": "PS",
+  "seed": 1,
+  "status": "optimal",
+  "solver_status": "optimal",
+  "runtime_seconds": 2.0603771209716797,
+  "case_time_limit_seconds": 300.0,
+  "instance_generation_time_seconds": 0.024830102920532227,
+  "bpc_wall_time_seconds": 2.025005578994751,
+  "service_metrics_time_seconds": 0.010541439056396484,
+  "instance_config": {
+    "seed": 1,
+    "num_trucks": 2,
+    "num_customers": 5,
+    "distribution": "PS",
+    "drones_per_truck": 4,
+    "num_hubs": 2,
+    "area_side": 14.0,
+    "truck_arc_probability": 0.2,
+    "hub_arc_probability": 0.5,
+    "truck_speed": 40.0,
+    "drone_speed": 40.0,
+    "truck_payload": 50.0,
+    "drone_payload": 2.3,
+    "drone_endurance": 30.0,
+    "truck_cost": 20.0,
+    "drone_cost": 6.0,
+    "low_demand_customer_ratio": 0.5,
+    "low_demand_weight_mean": 1.0,
+    "low_demand_weight_std": 5.0,
+    "low_demand_weight_min": 0.5,
+    "high_demand_weight_mean": 10.0,
+    "high_demand_weight_std": 5.0,
+    "high_demand_weight_min": 6.0,
+    "service_deadline_mode": "random_absolute",
+    "service_deadline_fraction": 0.6,
+    "service_deadline_manual_bounds": null,
+    "service_deadline_offset_min": 45.0,
+    "service_deadline_offset_max": 120.0,
+    "service_deadline_witness_slack": 5.0,
+    "service_deadline_random_seed": null,
+    "service_deadline_witness_method": "constructive_then_compact",
+    "service_deadline_witness_time_limit": 30.0
+  },
+  "solver_config": {
+    "threads": 1,
+    "time_limit": 300.0,
+    "pricing_tolerance": 1e-07,
+    "cut_tolerance": 1e-07,
+    "integrality_tolerance": 1e-06,
+    "root_extraction_time_limit": 5.0,
+    "route_pool_time_limit": 2.0,
+    "support_threshold": 0.05,
+    "support_best_per_customer": 3,
+    "dive_reward": 1e-06,
+    "repair_reward": 1.0,
+    "seed_reward": 10.0,
+    "phase_i_max_rounds": 20,
+    "pricing_batch_size": 64,
+    "min_pricing_batch_size": 32,
+    "max_root_pricing_batch_size": 256,
+    "nonroot_pricing_batch_size": 16,
+    "certification_pass_interval": 5,
+    "batch_insertion_time_threshold": 0.25,
+    "batch_hysteresis_window": 5,
+    "batch_hysteresis_consecutive": 2,
+    "batch_low_insert_ratio": 0.05,
+    "batch_high_insert_ratio": 0.2,
+    "pricing_yield_window": 5,
+    "pricing_yield_low": 0.25,
+    "pricing_yield_high": 1.0,
+    "productive_pricing_slice_seconds": 30.0,
+    "productive_slice_min_seconds": 5.0,
+    "productive_slice_max_seconds": 30.0,
+    "productive_yield_window": 5,
+    "productive_yield_low_threshold": 0.5,
+    "productive_yield_high_threshold": 2.0,
+    "closure_attempt_batch_period": 4,
+    "closure_attempt_time_period": 120.0,
+    "closure_certification_time_budget": null,
+    "closure_batch_size": 32,
+    "use_dual_stabilized_productive_search": false,
+    "dual_stabilization_weight": 0.3,
+    "prefix_task_depth": 1,
+    "productive_candidate_multiplier": 1.5,
+    "source_neighbor_task_size": 1,
+    "pricing_diversity_batch_fraction": 0.5,
+    "first_incumbent_route_pool_time_limit": 10.0,
+    "post_incumbent_primal_budget_factor": 0.25,
+    "root_constructive_time_limit": 5.0,
+    "enable_constructive_root_incumbent": true,
+    "root_compact_after_constructive": "skip",
+    "root_compact_time_limit_after_constructive": 1.0,
+    "root_compact_time_limit_without_constructive": 5.0,
+    "enable_sr_aging": true,
+    "enable_postroot_sr_cut_removal": true,
+    "sr_inactive_age_threshold": 1,
+    "sr_removal_batch_size": 32,
+    "sr_max_removals_per_node": 32,
+    "sr_reactivation_allowed": true,
+    "postroot_sr_cut_removal_batch_size": 32,
+    "join_eval_budget": 0,
+    "pricing_certification_slice_seconds": 0.0,
+    "enable_join_lower_envelope": false,
+    "join_generator_split_threshold": 50000,
+    "join_generator_pair_batch_size": 10000,
+    "enable_bucket_join_envelope": false,
+    "enable_join_profile_cache": false,
+    "small_join_pair_threshold": 5000,
+    "small_join_cumulative_threshold": 250000,
+    "max_join_bypass_calls": 1000,
+    "small_dom_bucket_threshold": 100,
+    "small_dom_cumulative_threshold": 500000,
+    "max_dom_bypass_calls": 2000,
+    "root_max_side_pool_per_call": 128,
+    "side_pool_max_size": 20000,
+    "side_pool_per_customer_keep": 20,
+    "join_payload_bin_width": 1.0,
+    "repair_time_fraction_of_pricing": 0.05,
+    "repair_time_hard_cap_root": 30.0,
+    "repair_stall_limit": 3,
+    "preclosure_pricing_call_interval": 5,
+    "preclosure_pool_growth_limit": 100,
+    "farkas_batch_size": 16,
+    "seed_batch_size": 16,
+    "repair_batch_size": 16,
+    "enable_pricing_pruning": true,
+    "enable_bidirectional_pricing": false,
+    "pricing_parallel_workers": 4,
+    "pricing_worker_backend": "process",
+    "prefix_task_depth_root": 1,
+    "prefix_task_depth_child": 2,
+    "prefix_task_min_branching_for_depth2": 4,
+    "logging_mode": "light",
+    "progress_snapshot_period": 1,
+    "pricing_jsonl_enabled": true,
+    "gurobi_log_dir": "numerical_experiments\\run_after_promised_postroot_v2_final\\small_full_PS_seed_1\\gurobi_logs"
+  },
+  "gurobi_version": "11.0.1",
+  "locations": {
+    "C1": [
+      7.165502745803594,
+      13.306491748563094
+    ],
+    "C2": [
+      2.018234578074872,
+      13.281092259921413
+    ],
+    "C3": [
+      4.365640328146796,
+      5.926570285616059
+    ],
+    "C4": [
+      11.587836313486184,
+      5.728787909168258
+    ],
+    "C5": [
+      7.694311627422833,
+      0.38582758540295714
+    ],
+    "Source": [
+      0.0,
+      0.0
+    ],
+    "Sink": [
+      0.0,
+      0.0
+    ],
+    "H1": [
+      4.591868661939233,
+      13.293792004242253
+    ],
+    "H2": [
+      7.882596089685271,
+      4.013728593395758
+    ]
+  },
+  "demand": {
+    "C1": 1.14,
+    "C2": 6.32,
+    "C3": 3.73,
+    "C4": 9.19,
+    "C5": 7.59,
+    "Source": 0.0,
+    "Sink": 0.0,
+    "H1": 0.0,
+    "H2": 0.0
+  },
+  "memory": {
+    "python_current_allocated_mb": 1.5462045669555664,
+    "python_peak_allocated_mb": 1.9972648620605469
+  },
+  "total_drones": 8,
+  "objective_shifted": 0.2175837385461371,
+  "objective_full": 0.08268945241925307,
+  "runtime": 2.0239970684051514,
+  "nodes_processed": 1,
+  "lower_bound_shifted": 0.2175837385461371,
+  "lower_bound_full": 0.08268945241925307,
+  "upper_bound_shifted": 0.2175837385461371,
+  "upper_bound_full": 0.08268945241925307,
+  "gap": 0.0,
+  "gap_full": 0.0,
+  "gap_shifted": 0.0,
+  "normalization_bounds": {
+    "arrival_lb": {
+      "C1": 30.688989125492714,
+      "C2": 22.948990256994428,
+      "C3": 15.438315920644284,
+      "C4": 25.97493633398166,
+      "C5": 12.120208819238684
+    },
+    "service_ub": {
+      "C1": 93.80531459221864,
+      "C2": 116.23737206321587,
+      "C3": 109.66232707027827,
+      "C4": 79.05350304617309,
+      "C5": 115.88732594233008
+    },
+    "data_service_ub": {
+      "C1": 225.5558870189256,
+      "C2": 233.29588588742388,
+      "C3": 240.80656022377403,
+      "C4": 230.26993981043665,
+      "C5": 244.12466732517962
+    },
+    "service_deadline": {
+      "C1": 93.80531459221864,
+      "C2": 116.23737206321587,
+      "C3": 109.66232707027827,
+      "C4": 79.05350304617309,
+      "C5": 115.88732594233008
+    },
+    "service_deadline_req_ub": {
+      "C1": 93.80531459221864,
+      "C2": 116.23737206321587,
+      "C3": 109.66232707027827,
+      "C4": 79.05350304617309,
+      "C5": 115.88732594233008
+    },
+    "service_deadline_offset": {
+      "C1": 60.63727654726841,
+      "C2": 93.28838180622145,
+      "C3": 94.22401114963398,
+      "C4": 53.07856671219143,
+      "C5": 103.7671171230914
+    },
+    "service_deadline_candidate": {
+      "C1": 91.32626567276112,
+      "C2": 116.23737206321587,
+      "C3": 109.66232707027827,
+      "C4": 79.05350304617309,
+      "C5": 115.88732594233008
+    },
+    "service_deadline_witness_floor": {
+      "C1": 93.80531459221864,
+      "C2": 44.97722140503831,
+      "C3": 30.424329818472394,
+      "C4": 70.660080534285,
+      "C5": 17.120208819238684
+    },
+    "service_deadline_witness_service_time": {
+      "C5": 12.120208819238684,
+      "C3": 25.424329818472394,
+      "C2": 39.97722140503831,
+      "C4": 65.660080534285,
+      "C1": 88.80531459221864
+    },
+    "service_deadline_witness_lift": {
+      "C1": 2.4790489194575116,
+      "C2": 0.0,
+      "C3": 0.0,
+      "C4": 0.0,
+      "C5": 0.0
+    },
+    "service_deadline_mode": "random_absolute",
+    "service_deadline_fraction": 0.6,
+    "service_deadline_offset_min": 45.0,
+    "service_deadline_offset_max": 120.0,
+    "service_deadline_witness_slack": 5.0,
+    "service_deadline_random_seed": 1,
+    "service_deadline_setup_time": 0.009145736694335938,
+    "service_deadline_witness_time": 0.008145809173583984,
+    "service_deadline_witness_status": "success",
+    "service_deadline_witness_method": "constructive_then_compact",
+    "service_deadline_witness_constructive_time": 0.008145809173583984,
+    "service_deadline_witness_compact_time": 0.0,
+    "service_deadline_witness_failed_customers": [],
+    "service_deadline_active_count": 5,
+    "min_service_deadline_slack": 53.07856671219143,
+    "num_witness_lifts": 1,
+    "max_witness_lift": 2.4790489194575116,
+    "mean_witness_lift": 2.4790489194575116,
+    "delay_lb": 0.0,
+    "delay_ub": 35149.505837829296,
+    "return_lb": 24.240417638477368,
+    "return_ub": 512.4897522888366,
+    "cost_lb": 20.0,
+    "cost_ub": 70.0,
+    "route_time_ub": 256.2448761444183,
+    "min_trucks": 1,
+    "max_used_trucks": 2,
+    "min_drone_flights": 0
+  },
+  "objective_coefficients": {
+    "delay": 1.1379960840573301e-05,
+    "return_time": 0.0006144401614286547,
+    "cost": 0.006,
+    "shift": -0.13489428612688403
+  },
+  "objective_components": {
+    "raw": {
+      "delay_square_sum": 3169.7508760418395,
+      "return_time_sum": 100.11080258716211,
+      "operating_cost": 20.0
+    },
+    "normalized": {
+      "delay": 0.09017910210932262,
+      "return_time": 0.15539270525174678,
+      "cost": 0.0
+    },
+    "weighted_normalized": {
+      "delay": 0.03607164084372905,
+      "return_time": 0.04661781157552403,
+      "cost": 0.0
+    },
+    "shifted_route_sum_components": {
+      "delay": 0.03607164084372905,
+      "return_time": 0.06151209770240807,
+      "cost": 0.12,
+      "shift": -0.13489428612688403,
+      "route_sum_without_shift": 0.2175837385461371,
+      "full_with_shift": 0.08268945241925307
+    }
+  },
+  "customer_service_times": {
+    "C1": 40.69400563937815,
+    "C2": 48.45300712393375,
+    "C3": 25.424329818472394,
+    "C4": 74.13586625318045,
+    "C5": 12.120208819238684
+  },
+  "return_times": [
+    100.11080258716211
+  ],
+  "drone_sorties": [],
+  "routes": [
+    {
+      "id": 36,
+      "path": [
+        "Source",
+        "C5",
+        "C3",
+        "H1",
+        "C1",
+        "C2",
+        "C4",
+        "Sink"
+      ],
+      "truck_path": [
+        "Source",
+        "C5",
+        "C3",
+        "H1",
+        "C1",
+        "C2",
+        "C4",
+        "Sink"
+      ],
+      "drone_blocks": {},
+      "served": [
+        "C1",
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "truck_served": [
+        "C1",
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "service_times": {
+        "C5": 12.120208819238684,
+        "C3": 25.424329818472394,
+        "C1": 40.69400563937815,
+        "C2": 48.45300712393375,
+        "C4": 74.13586625318045
+      },
+      "return_time": 100.11080258716211,
+      "drone_sorties": 0,
+      "delay_square_sum": 3169.7508760418395,
+      "operating_cost": 20.0,
+      "shifted_delay_contribution": 0.03607164084372905,
+      "shifted_return_contribution": 0.06151209770240807,
+      "shifted_cost_contribution": 0.12,
+      "shifted_cost": 0.2175837385461371
+    }
+  ],
+  "bpc_stats": {
+    "status": "optimal",
+    "initialization_time": 0.01946544647216797,
+    "root_constructive_time": 0.005322933197021484,
+    "root_constructive_status": "success",
+    "root_constructive_routes": 2,
+    "root_constructive_incumbent_found": true,
+    "root_extraction_time": 0.0,
+    "root_model_build_time": 0.0,
+    "root_model_solve_time": 0.0,
+    "root_route_decode_time": 0.0,
+    "root_compact_status": "skipped",
+    "root_compact_attempted": false,
+    "root_compact_warm_start_only": true,
+    "root_compact_accepted_columns": 0,
+    "root_compact_skipped_reason": "constructive_incumbent",
+    "root_compact_budget_seconds": 0.0,
+    "rmp_time": 0.029483556747436523,
+    "root_rmp_time": 0.029483556747436523,
+    "postroot_rmp_time": 0.0,
+    "phase_i_time": 0.0,
+    "standard_pricing_time": 0.2469947338104248,
+    "root_standard_pricing_time": 0.2469947338104248,
+    "postroot_standard_pricing_time": 0.0,
+    "farkas_pricing_time": 0.0,
+    "root_farkas_pricing_time": 0.0,
+    "postroot_farkas_pricing_time": 0.0,
+    "sr_separation_time": 0.002802610397338867,
+    "root_sr_separation_time": 0.002802610397338867,
+    "postroot_sr_separation_time": 0.0,
+    "heuristic_time": 0.005501508712768555,
+    "root_heuristic_time": 0.005501508712768555,
+    "postroot_heuristic_time": 0.0,
+    "farkas_certificate_rhs": null,
+    "farkas_certificate_max_column_activity": null,
+    "initial_routes": 5,
+    "root_extracted_routes": 0,
+    "total_routes": 79,
+    "global_pool_routes": 79,
+    "transformed_nodes": 11,
+    "transformed_arcs": 46,
+    "duplicate_nodes": 2,
+    "duplicate_arcs": 11,
+    "rmp_solves": 4,
+    "phase_i_solves": 0,
+    "phase_i_columns_added": 0,
+    "phase_i_uncovered_customers": 0,
+    "seed_pricing_calls": 0,
+    "standard_pricing_calls": 4,
+    "farkas_pricing_calls": 0,
+    "repair_pricing_calls": 0,
+    "columns_added_standard": 72,
+    "columns_added_farkas": 0,
+    "duplicate_columns_rejected": 0,
+    "duplicate_equivalent_columns_rejected": 0,
+    "cost_dominated_columns_rejected": 0,
+    "cost_dominated_columns_removed": 0,
+    "sr_cuts_added": 0,
+    "sr_cuts_added_root": 0,
+    "sr_cuts_added_postroot": 0,
+    "sr_cuts_aged": 0,
+    "sr_cuts_removed": 0,
+    "sr_removal_nodes": 0,
+    "sr_cuts_reactivated": 0,
+    "sr_active_count_root": 0,
+    "sr_active_count_postroot": 0,
+    "sr_cut_activity_updates": 0,
+    "sr_cut_repricing_after_removal": 0,
+    "sr_cut_lower_bound_change_count": 0,
+    "sr_cut_lower_bound_change_sum": 0.0,
+    "sr_cut_lower_bound_change_max_abs": 0.0,
+    "duplicate_merge_events": 0,
+    "pricing_labels_generated": 1513,
+    "pricing_labels_dominated": 322,
+    "pricing_labels_purged": 3,
+    "pricing_stale_labels_skipped": 0,
+    "pricing_labels_pruned": 107,
+    "pricing_standard_bound_pruned": 107,
+    "pricing_farkas_bound_pruned": 0,
+    "pricing_complete_routes_generated": 324,
+    "pricing_max_queue_size": 31,
+    "pricing_extensions_attempted": 1487,
+    "pricing_extensions_rejected_by_deadline": 2,
+    "pricing_deadline_reachability_removed": 187,
+    "pricing_reward_set_size_before_deadline": 1596,
+    "pricing_reward_set_size_after_deadline": 1409,
+    "pricing_deadline_reward_bound_calls": 726,
+    "pricing_deadline_dominance_prefilter_skips": 0,
+    "pricing_routes_rejected_by_deadline_in_master": 0,
+    "late_rmp_routes_rejected": 0,
+    "pricing_diagnostics_elapsed_seconds": 0.23202991485595703,
+    "pricing_max_call_elapsed_seconds": 0.11998820304870605,
+    "pricing_forward_labels_generated": 1513,
+    "pricing_backward_labels_generated": 0,
+    "pricing_backward_dominance_tests": 0,
+    "pricing_backward_labels_dominated": 0,
+    "pricing_backward_cost_function_build_time": 0.0,
+    "pricing_backward_cost_function_eval_time": 0.0,
+    "pricing_join_sr_correction_time": 0.0,
+    "pricing_join_active_block_time": 0.0,
+    "pricing_joined_reduced_cost_evaluations": 0,
+    "pricing_join_pairs_key_compatible": 0,
+    "pricing_join_pairs_after_bitset_filters": 0,
+    "pricing_join_lower_envelope_rejects": 0,
+    "pricing_join_bucket_lower_envelope_rejects": 0,
+    "pricing_join_subbucket_lower_envelope_rejects": 0,
+    "pricing_join_pair_lower_envelope_rejects": 0,
+    "pricing_join_queue_pushes": 0,
+    "pricing_join_queue_pops": 0,
+    "pricing_join_generator_queue_pushes": 0,
+    "pricing_join_generator_queue_pops": 0,
+    "pricing_join_generator_splits": 0,
+    "pricing_join_materialized_pairs": 0,
+    "pricing_join_exact_rc_evals": 0,
+    "pricing_join_exact_rc_time": 0.0,
+    "pricing_interface_cache_hits": 0,
+    "pricing_interface_cache_misses": 0,
+    "pricing_suffix_profile_cache_hits": 0,
+    "pricing_suffix_profile_cache_misses": 0,
+    "pricing_interface_profile_cache_hits": 0,
+    "pricing_interface_profile_cache_misses": 0,
+    "pricing_negative_routes_verified": 106,
+    "pricing_negative_routes_inserted": 72,
+    "pricing_backward_dominance_cost_tests": 0,
+    "pricing_backward_dominance_cost_rejected": 0,
+    "pricing_backward_exclusive_resource_violations": 0,
+    "pricing_join_pairs_tested": 0,
+    "pricing_joined_routes_accepted": 0,
+    "pricing_forward_labeling_time": 0.1227102279663086,
+    "pricing_backward_labeling_time": 0.0,
+    "pricing_join_time": 0.0,
+    "pricing_parallel_calls": 4,
+    "pricing_parallel_workers_max": 4,
+    "pricing_process_cpu_time": 0.1875,
+    "pricing_cpu_core_equivalent_max": 0.9115479457226482,
+    "pricing_cpu_core_equivalent_weighted": 0.8080854579307113,
+    "pricing_worker_cpu_time": 0.0625,
+    "pricing_main_process_cpu_time": 0.125,
+    "pricing_main_merge_time": 0.10638236999511719,
+    "pricing_pool_startup_time": 0.7862348556518555,
+    "pricing_pool_startup_count": 1,
+    "pricing_pool_reused_calls": 4,
+    "pricing_pool_shutdown_time": 0.11893033981323242,
+    "pricing_task_submission_time": 0.004532814025878906,
+    "pricing_worker_payload_count": 28,
+    "pricing_worker_response_count": 28,
+    "pricing_candidate_paths_before_merge": 106,
+    "pricing_candidate_paths_after_merge": 106,
+    "pricing_decoded_routes_in_main": 106,
+    "pricing_verified_routes_in_main": 106,
+    "pricing_batch_target_max": 64,
+    "pricing_returned_batch_size_max": 64,
+    "pricing_first_hit_enabled_calls": 0,
+    "pricing_stale_response_rejections": 0,
+    "pricing_worker_backend_thread_calls": 0,
+    "pricing_worker_backend_process_calls": 4,
+    "pricing_source_neighbor_count_max": 7,
+    "pricing_source_neighbor_task_count_max": 7,
+    "pricing_source_neighbor_task_size_max": 1,
+    "pricing_local_worker_candidate_quota_max": 14,
+    "pricing_diversity_quota_max": 32,
+    "pricing_diversity_selected_routes": 72,
+    "pricing_diversity_selected_customers_max": 5,
+    "pricing_productive_slice_deadline_calls": 3,
+    "pricing_productive_slice_time": 90.0,
+    "pricing_productive_time_limit_with_columns": 0,
+    "pricing_productive_time_limit_no_columns": 0,
+    "adaptive_slice_seconds_min": 30.0,
+    "adaptive_slice_seconds_max": 30.0,
+    "adaptive_slice_seconds_last": 30.0,
+    "adaptive_slice_increases": 0,
+    "adaptive_slice_decreases": 0,
+    "productive_yield_window_rate": 517.329671889654,
+    "productive_batches_since_last_cert": 0,
+    "productive_time_since_last_cert": 0.0,
+    "certification_time_limit_with_columns": 0,
+    "certification_time_limit_no_columns": 0,
+    "prefix_task_depth": 1,
+    "stabilized_dual_enabled": false,
+    "stabilized_candidates_returned": 0,
+    "true_dual_rejected_candidates": 0,
+    "max_abs_worker_true_rc_discrepancy": 5.551115123125783e-17,
+    "post_incumbent_heuristic_budget": 0.0,
+    "post_incumbent_repair_budget": 0.0,
+    "pricing_first_hit_exits": 0,
+    "pricing_interrupted_worker_calls": 0,
+    "pricing_certification_worker_calls": 19,
+    "pricing_productive_worker_calls": 9,
+    "pricing_signature_cache_hits": 0,
+    "pricing_signature_cache_misses": 212,
+    "pricing_core_signature_cache_hits": 0,
+    "pricing_core_signature_cache_misses": 106,
+    "pricing_active_signature_cache_hits": 0,
+    "pricing_active_signature_cache_misses": 212,
+    "pricing_sr_coeff_cache_hits": 81,
+    "pricing_sr_coeff_cache_misses": 25,
+    "pricing_active_sr_key_cache_hits": 81,
+    "pricing_active_sr_key_cache_misses": 25,
+    "pricing_active_sr_coeffs_computed": 0,
+    "pricing_triplet_masks_built": 0,
+    "pricing_dominance_prefilter_pairs": 0,
+    "pricing_dominance_prefilter_rejected": 0,
+    "pricing_dominance_bucket_pairs_considered": 0,
+    "pricing_dominance_bucket_pairs_rejected": 0,
+    "pricing_dominance_bucket_candidate_pairs": 0,
+    "pricing_dominance_compatible_keys_generated": 0,
+    "pricing_dominance_compatible_key_lookups": 0,
+    "pricing_dominance_bucket_scans_avoided": 0,
+    "pricing_dominance_key_generation_time": 0.0,
+    "pricing_backward_full_dominance_tests": 0,
+    "pricing_join_prefilter_pairs": 0,
+    "pricing_join_prefilter_rejected": 0,
+    "pricing_join_bucket_pairs_considered": 0,
+    "pricing_join_bucket_pairs_rejected": 0,
+    "pricing_join_bucket_candidate_pairs": 0,
+    "pricing_join_compatible_keys_generated": 0,
+    "pricing_join_compatible_key_lookups": 0,
+    "pricing_join_bucket_scans_avoided": 0,
+    "pricing_join_key_generation_time": 0.0,
+    "pricing_join_key_cache_hits": 0,
+    "pricing_join_key_cache_misses": 0,
+    "pricing_join_graph_build_time": 0.0,
+    "pricing_join_subbucket_pairs_considered": 0,
+    "pricing_join_subbucket_pairs_rejected": 0,
+    "pricing_join_small_bypass_calls": 0,
+    "pricing_join_local_bypass_calls": 0,
+    "pricing_join_cumulative_bypass_calls": 0,
+    "pricing_join_indexed_activation_count": 0,
+    "pricing_join_work_estimate": 0,
+    "pricing_join_candidate_pairs_accepted": 0,
+    "pricing_join_label_pairs_materialized": 0,
+    "pricing_join_full_decodes": 0,
+    "pricing_lazy_rejected_before_decode": 0,
+    "pricing_fully_decoded_routes": 0,
+    "pricing_duplicate_equivalent_rejected": 0,
+    "pricing_cost_dominated_rejected": 0,
+    "pricing_signature_build_time": 0.0061533451080322266,
+    "pricing_sr_coeff_build_time": 0.0,
+    "pricing_duplicate_lookup_time": 0.01975274085998535,
+    "pricing_route_decode_time": 0.0455470085144043,
+    "pricing_reduced_cost_verification_time": 0.0050165653228759766,
+    "pricing_dominance_key_cache_hits": 0,
+    "pricing_dominance_key_cache_misses": 0,
+    "pricing_dominance_small_bypass_calls": 0,
+    "pricing_dominance_bypass_calls": 0,
+    "pricing_dominance_indexed_activation_count": 0,
+    "pricing_dominance_work_estimate": 0,
+    "pricing_sticky_indexed_join_activations": 0,
+    "pricing_sticky_indexed_dominance_activations": 0,
+    "pricing_join_stage_reject_key": 0,
+    "pricing_join_stage_reject_branch": 0,
+    "pricing_join_stage_reject_customer": 0,
+    "pricing_join_stage_reject_truck_node": 0,
+    "pricing_join_stage_reject_payload": 0,
+    "pricing_join_stage_reject_block": 0,
+    "pricing_join_stage_reject_reduced_cost": 0,
+    "pricing_dominance_stage_reject_key": 0,
+    "pricing_dominance_stage_reject_branch": 0,
+    "pricing_dominance_stage_reject_customer": 0,
+    "pricing_dominance_stage_reject_truck_node": 0,
+    "pricing_dominance_stage_reject_payload": 0,
+    "pricing_dominance_stage_reject_block": 0,
+    "pricing_dominance_stage_reject_time": 0,
+    "pricing_dominance_stage_reject_cost": 0,
+    "pricing_productive_mode_calls": 3,
+    "pricing_closure_mode_calls": 1,
+    "pricing_yield_ratio": 517.329671889654,
+    "closure_attempts": 1,
+    "closure_attempts_returned_columns": 0,
+    "closure_attempts_exhausted": 1,
+    "closure_attempts_time_limited": 0,
+    "pricing_side_pool_routes_returned": 0,
+    "pricing_side_pool_reduced_cost_min": null,
+    "pricing_side_pool_candidates_seen": 0,
+    "pricing_side_pool_routes_retained": 0,
+    "pricing_side_pool_routes_rejected_by_budget": 0,
+    "seed_pricing_time": 0.0,
+    "repair_pricing_time": 0.0,
+    "pricing_diagnostics": [
+      {
+        "call_index": 1,
+        "mode": "standard",
+        "labels_generated": 447,
+        "labels_dominated": 23,
+        "labels_pruned": 4,
+        "max_queue_size": 31,
+        "complete_routes_generated": 137,
+        "returned_routes": 64,
+        "best_reduced_cost": -0.4381056115773697,
+        "exact_completion": false,
+        "termination_reason": "productive_batch_found",
+        "certification_mode": "not_certified_productive",
+        "labels_purged": 0,
+        "stale_labels_skipped": 0,
+        "standard_bound_pruned": 4,
+        "farkas_bound_pruned": 0,
+        "elapsed_seconds": 0.11998820304870605,
+        "pricing_engine": "source_neighbor_parallel_forward",
+        "forward_labels_generated": 447,
+        "backward_labels_generated": 0,
+        "backward_dominance_tests": 0,
+        "backward_labels_dominated": 0,
+        "backward_cost_function_build_time_seconds": 0.0,
+        "backward_cost_function_eval_time_seconds": 0.0,
+        "join_sr_correction_time_seconds": 0.0,
+        "join_active_block_time_seconds": 0.0,
+        "joined_reduced_cost_evaluations": 0,
+        "backward_dominance_cost_tests": 0,
+        "backward_dominance_cost_rejected": 0,
+        "backward_exclusive_resource_violations": 0,
+        "join_pairs_tested": 0,
+        "joined_routes_accepted": 0,
+        "forward_labeling_time_seconds": 0.03912663459777832,
+        "backward_labeling_time_seconds": 0.0,
+        "join_time_seconds": 0.0,
+        "parallel_labeling_used": true,
+        "parallel_workers": 4,
+        "parallel_calls": 1,
+        "signature_cache_hits": 0,
+        "signature_cache_misses": 196,
+        "core_signature_cache_hits": 0,
+        "core_signature_cache_misses": 98,
+        "active_signature_cache_hits": 0,
+        "active_signature_cache_misses": 196,
+        "sr_coeff_cache_hits": 78,
+        "sr_coeff_cache_misses": 20,
+        "active_sr_key_cache_hits": 78,
+        "active_sr_key_cache_misses": 20,
+        "active_sr_coeffs_computed": 0,
+        "triplet_masks_built": 0,
+        "dominance_prefilter_pairs": 0,
+        "dominance_prefilter_rejected": 0,
+        "dominance_bucket_pairs_considered": 0,
+        "dominance_bucket_pairs_rejected": 0,
+        "dominance_bucket_candidate_pairs": 0,
+        "dominance_compatible_keys_generated": 0,
+        "dominance_compatible_key_lookups": 0,
+        "dominance_bucket_scans_avoided": 0,
+        "dominance_key_generation_time_seconds": 0.0,
+        "backward_full_dominance_tests": 0,
+        "join_prefilter_pairs": 0,
+        "join_prefilter_rejected": 0,
+        "join_bucket_pairs_considered": 0,
+        "join_bucket_pairs_rejected": 0,
+        "join_bucket_candidate_pairs": 0,
+        "join_compatible_keys_generated": 0,
+        "join_compatible_key_lookups": 0,
+        "join_bucket_scans_avoided": 0,
+        "join_key_generation_time_seconds": 0.0,
+        "join_key_cache_hits": 0,
+        "join_key_cache_misses": 0,
+        "join_graph_build_time_seconds": 0.0,
+        "join_subbucket_pairs_considered": 0,
+        "join_subbucket_pairs_rejected": 0,
+        "join_small_bypass_calls": 0,
+        "join_local_bypass_calls": 0,
+        "join_cumulative_bypass_calls": 0,
+        "join_indexed_activation_count": 0,
+        "join_work_estimate": 0,
+        "join_candidate_pairs_accepted": 0,
+        "join_activation_mode": "none",
+        "join_label_pairs_materialized": 0,
+        "join_full_decodes": 0,
+        "lazy_rejected_before_decode": 0,
+        "fully_decoded_routes": 0,
+        "duplicate_equivalent_rejected": 0,
+        "cost_dominated_rejected": 0,
+        "signature_build_time_seconds": 0.005115032196044922,
+        "sr_coeff_build_time_seconds": 0.0,
+        "duplicate_lookup_time_seconds": 0.018197059631347656,
+        "route_decode_time_seconds": 0.04452085494995117,
+        "reduced_cost_verification_time_seconds": 0.004498481750488281,
+        "dominance_key_cache_hits": 0,
+        "dominance_key_cache_misses": 0,
+        "dominance_small_bypass_calls": 0,
+        "dominance_bypass_calls": 0,
+        "dominance_indexed_activation_count": 0,
+        "dominance_work_estimate": 0,
+        "dominance_activation_mode": "none",
+        "sticky_indexed_join_activations": 0,
+        "sticky_indexed_dominance_activations": 0,
+        "join_stage_reject_key": 0,
+        "join_stage_reject_branch": 0,
+        "join_stage_reject_customer": 0,
+        "join_stage_reject_truck_node": 0,
+        "join_stage_reject_payload": 0,
+        "join_stage_reject_block": 0,
+        "join_stage_reject_reduced_cost": 0,
+        "dominance_stage_reject_key": 0,
+        "dominance_stage_reject_branch": 0,
+        "dominance_stage_reject_customer": 0,
+        "dominance_stage_reject_truck_node": 0,
+        "dominance_stage_reject_payload": 0,
+        "dominance_stage_reject_block": 0,
+        "dominance_stage_reject_time": 0,
+        "dominance_stage_reject_cost": 0,
+        "pricing_mode": "productive",
+        "pricing_yield_ratio": 0.0,
+        "side_pool_routes_returned": 0,
+        "side_pool_reduced_cost_min": null,
+        "side_pool_candidates_seen": 0,
+        "side_pool_routes_retained": 0,
+        "side_pool_routes_rejected_by_budget": 0,
+        "join_pairs_key_compatible": 0,
+        "join_pairs_after_bitset_filters": 0,
+        "join_lower_envelope_rejects": 0,
+        "join_bucket_lower_envelope_rejects": 0,
+        "join_subbucket_lower_envelope_rejects": 0,
+        "join_pair_lower_envelope_rejects": 0,
+        "join_queue_pushes": 0,
+        "join_queue_pops": 0,
+        "join_generator_queue_pushes": 0,
+        "join_generator_queue_pops": 0,
+        "join_generator_splits": 0,
+        "join_materialized_pairs": 0,
+        "join_exact_rc_evals": 0,
+        "join_exact_rc_time_seconds": 0.0,
+        "interface_cache_hits": 0,
+        "interface_cache_misses": 0,
+        "suffix_profile_cache_hits": 0,
+        "suffix_profile_cache_misses": 0,
+        "interface_profile_cache_hits": 0,
+        "interface_profile_cache_misses": 0,
+        "pricing_status": "NEGATIVE_BATCH",
+        "productive_calls": 1,
+        "certification_calls": 0,
+        "negative_routes_verified": 98,
+        "negative_routes_inserted": 64,
+        "pricing_worker_backend": "process",
+        "process_cpu_time_seconds": 0.109375,
+        "cpu_core_equivalent": 0.9115479457226482,
+        "worker_id": null,
+        "source_neighbor_count": 7,
+        "source_neighbor_block_sizes": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "first_hit_worker_id": null,
+        "first_hit_exits": 0,
+        "interrupted_worker_calls": 0,
+        "certification_worker_calls": 0,
+        "productive_worker_calls": 7,
+        "per_worker_elapsed_seconds": [
+          [
+            0,
+            0.0050046443939208984
+          ],
+          [
+            1,
+            0.0045049190521240234
+          ],
+          [
+            2,
+            0.0040743350982666016
+          ],
+          [
+            3,
+            0.003069639205932617
+          ],
+          [
+            4,
+            0.008933067321777344
+          ],
+          [
+            5,
+            0.007021427154541016
+          ],
+          [
+            6,
+            0.00651860237121582
+          ]
+        ],
+        "per_worker_cpu_time_seconds": [
+          [
+            0,
+            0.0
+          ],
+          [
+            1,
+            0.0
+          ],
+          [
+            2,
+            0.015625
+          ],
+          [
+            3,
+            0.0
+          ],
+          [
+            4,
+            0.015625
+          ],
+          [
+            5,
+            0.0
+          ],
+          [
+            6,
+            0.0
+          ]
+        ],
+        "per_worker_labels_generated": [
+          [
+            0,
+            41
+          ],
+          [
+            1,
+            51
+          ],
+          [
+            2,
+            54
+          ],
+          [
+            3,
+            53
+          ],
+          [
+            4,
+            103
+          ],
+          [
+            5,
+            67
+          ],
+          [
+            6,
+            78
+          ]
+        ],
+        "per_worker_labels_dominated": [
+          [
+            0,
+            2
+          ],
+          [
+            1,
+            4
+          ],
+          [
+            2,
+            1
+          ],
+          [
+            3,
+            6
+          ],
+          [
+            4,
+            3
+          ],
+          [
+            5,
+            0
+          ],
+          [
+            6,
+            7
+          ]
+        ],
+        "per_worker_labels_pruned": [
+          [
+            0,
+            0
+          ],
+          [
+            1,
+            0
+          ],
+          [
+            2,
+            0
+          ],
+          [
+            3,
+            0
+          ],
+          [
+            4,
+            2
+          ],
+          [
+            5,
+            1
+          ],
+          [
+            6,
+            1
+          ]
+        ],
+        "per_worker_completed_labels": [
+          [
+            0,
+            14
+          ],
+          [
+            1,
+            17
+          ],
+          [
+            2,
+            15
+          ],
+          [
+            3,
+            15
+          ],
+          [
+            4,
+            33
+          ],
+          [
+            5,
+            17
+          ],
+          [
+            6,
+            26
+          ]
+        ],
+        "per_worker_verified_negative_routes": [
+          [
+            0,
+            14
+          ],
+          [
+            1,
+            14
+          ],
+          [
+            2,
+            14
+          ],
+          [
+            3,
+            14
+          ],
+          [
+            4,
+            14
+          ],
+          [
+            5,
+            14
+          ],
+          [
+            6,
+            14
+          ]
+        ],
+        "pricing_pool_startup_time_seconds": 0.7862348556518555,
+        "pricing_pool_startup_count": 1,
+        "pricing_pool_reused_calls": 1,
+        "pricing_pool_shutdown_time_seconds": 0.0,
+        "pricing_task_submission_time_seconds": 0.0035216808319091797,
+        "pricing_worker_payload_count": 7,
+        "pricing_worker_response_count": 7,
+        "pricing_candidate_paths_before_merge": 98,
+        "pricing_candidate_paths_after_merge": 98,
+        "pricing_decoded_routes_in_main": 98,
+        "pricing_verified_routes_in_main": 98,
+        "pricing_batch_target": 64,
+        "pricing_returned_batch_size": 64,
+        "pricing_first_hit_enabled": false,
+        "pricing_stale_response_rejections": 0,
+        "pricing_worker_cpu_time_seconds": 0.03125,
+        "pricing_main_process_cpu_time_seconds": 0.078125,
+        "pricing_main_merge_time_seconds": 0.0739438533782959,
+        "productive_slice_seconds": 30.0,
+        "productive_slice_deadline_used": true,
+        "productive_time_limit_with_columns": 0,
+        "productive_time_limit_no_columns": 0,
+        "adaptive_slice_seconds": 30.0,
+        "productive_yield_window_rate": 0.0,
+        "stabilized_dual_enabled": false,
+        "stabilized_candidates_returned": 0,
+        "true_dual_rejected_candidates": 0,
+        "mean_worker_rc_minus_true_rc": 0.0,
+        "max_abs_worker_true_rc_discrepancy": 5.551115123125783e-17,
+        "prefix_task_depth": 1,
+        "source_neighbor_task_count": 7,
+        "source_neighbor_task_sizes": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "local_worker_candidate_quota": 14,
+        "diversity_quota": 32,
+        "diversity_selected_routes": 64,
+        "diversity_selected_customers": 5,
+        "verified_candidates_by_source_neighbor": [
+          [
+            "C1",
+            14
+          ],
+          [
+            "C2",
+            14
+          ],
+          [
+            "C3",
+            14
+          ],
+          [
+            "C4",
+            14
+          ],
+          [
+            "C5",
+            14
+          ],
+          [
+            "H1",
+            14
+          ],
+          [
+            "H2",
+            14
+          ]
+        ],
+        "selected_candidates_by_source_neighbor": [
+          [
+            "C1",
+            11
+          ],
+          [
+            "C2",
+            11
+          ],
+          [
+            "C3",
+            10
+          ],
+          [
+            "C4",
+            10
+          ],
+          [
+            "C5",
+            6
+          ],
+          [
+            "H1",
+            6
+          ],
+          [
+            "H2",
+            10
+          ]
+        ],
+        "extensions_attempted": 442,
+        "extensions_rejected_by_deadline": 2,
+        "deadline_reachability_removed": 89,
+        "reward_set_size_before_deadline": 469,
+        "reward_set_size_after_deadline": 380,
+        "deadline_reward_bound_calls": 279,
+        "deadline_dominance_prefilter_skips": 0,
+        "routes_rejected_by_deadline_in_master": 0
+      },
+      {
+        "call_index": 2,
+        "mode": "standard",
+        "labels_generated": 334,
+        "labels_dominated": 99,
+        "labels_pruned": 31,
+        "max_queue_size": 9,
+        "complete_routes_generated": 63,
+        "returned_routes": 8,
+        "best_reduced_cost": -0.018271885404525845,
+        "exact_completion": false,
+        "termination_reason": "productive_batch_found",
+        "certification_mode": "not_certified_productive",
+        "labels_purged": 1,
+        "stale_labels_skipped": 0,
+        "standard_bound_pruned": 31,
+        "farkas_bound_pruned": 0,
+        "elapsed_seconds": 0.03780531883239746,
+        "pricing_engine": "source_neighbor_parallel_forward",
+        "forward_labels_generated": 334,
+        "backward_labels_generated": 0,
+        "backward_dominance_tests": 0,
+        "backward_labels_dominated": 0,
+        "backward_cost_function_build_time_seconds": 0.0,
+        "backward_cost_function_eval_time_seconds": 0.0,
+        "join_sr_correction_time_seconds": 0.0,
+        "join_active_block_time_seconds": 0.0,
+        "joined_reduced_cost_evaluations": 0,
+        "backward_dominance_cost_tests": 0,
+        "backward_dominance_cost_rejected": 0,
+        "backward_exclusive_resource_violations": 0,
+        "join_pairs_tested": 0,
+        "joined_routes_accepted": 0,
+        "forward_labeling_time_seconds": 0.0288238525390625,
+        "backward_labeling_time_seconds": 0.0,
+        "join_time_seconds": 0.0,
+        "parallel_labeling_used": true,
+        "parallel_workers": 4,
+        "parallel_calls": 1,
+        "signature_cache_hits": 0,
+        "signature_cache_misses": 16,
+        "core_signature_cache_hits": 0,
+        "core_signature_cache_misses": 8,
+        "active_signature_cache_hits": 0,
+        "active_signature_cache_misses": 16,
+        "sr_coeff_cache_hits": 3,
+        "sr_coeff_cache_misses": 5,
+        "active_sr_key_cache_hits": 3,
+        "active_sr_key_cache_misses": 5,
+        "active_sr_coeffs_computed": 0,
+        "triplet_masks_built": 0,
+        "dominance_prefilter_pairs": 0,
+        "dominance_prefilter_rejected": 0,
+        "dominance_bucket_pairs_considered": 0,
+        "dominance_bucket_pairs_rejected": 0,
+        "dominance_bucket_candidate_pairs": 0,
+        "dominance_compatible_keys_generated": 0,
+        "dominance_compatible_key_lookups": 0,
+        "dominance_bucket_scans_avoided": 0,
+        "dominance_key_generation_time_seconds": 0.0,
+        "backward_full_dominance_tests": 0,
+        "join_prefilter_pairs": 0,
+        "join_prefilter_rejected": 0,
+        "join_bucket_pairs_considered": 0,
+        "join_bucket_pairs_rejected": 0,
+        "join_bucket_candidate_pairs": 0,
+        "join_compatible_keys_generated": 0,
+        "join_compatible_key_lookups": 0,
+        "join_bucket_scans_avoided": 0,
+        "join_key_generation_time_seconds": 0.0,
+        "join_key_cache_hits": 0,
+        "join_key_cache_misses": 0,
+        "join_graph_build_time_seconds": 0.0,
+        "join_subbucket_pairs_considered": 0,
+        "join_subbucket_pairs_rejected": 0,
+        "join_small_bypass_calls": 0,
+        "join_local_bypass_calls": 0,
+        "join_cumulative_bypass_calls": 0,
+        "join_indexed_activation_count": 0,
+        "join_work_estimate": 0,
+        "join_candidate_pairs_accepted": 0,
+        "join_activation_mode": "none",
+        "join_label_pairs_materialized": 0,
+        "join_full_decodes": 0,
+        "lazy_rejected_before_decode": 0,
+        "fully_decoded_routes": 0,
+        "duplicate_equivalent_rejected": 0,
+        "cost_dominated_rejected": 0,
+        "signature_build_time_seconds": 0.0010383129119873047,
+        "sr_coeff_build_time_seconds": 0.0,
+        "duplicate_lookup_time_seconds": 0.0015556812286376953,
+        "route_decode_time_seconds": 0.001026153564453125,
+        "reduced_cost_verification_time_seconds": 0.0005180835723876953,
+        "dominance_key_cache_hits": 0,
+        "dominance_key_cache_misses": 0,
+        "dominance_small_bypass_calls": 0,
+        "dominance_bypass_calls": 0,
+        "dominance_indexed_activation_count": 0,
+        "dominance_work_estimate": 0,
+        "dominance_activation_mode": "none",
+        "sticky_indexed_join_activations": 0,
+        "sticky_indexed_dominance_activations": 0,
+        "join_stage_reject_key": 0,
+        "join_stage_reject_branch": 0,
+        "join_stage_reject_customer": 0,
+        "join_stage_reject_truck_node": 0,
+        "join_stage_reject_payload": 0,
+        "join_stage_reject_block": 0,
+        "join_stage_reject_reduced_cost": 0,
+        "dominance_stage_reject_key": 0,
+        "dominance_stage_reject_branch": 0,
+        "dominance_stage_reject_customer": 0,
+        "dominance_stage_reject_truck_node": 0,
+        "dominance_stage_reject_payload": 0,
+        "dominance_stage_reject_block": 0,
+        "dominance_stage_reject_time": 0,
+        "dominance_stage_reject_cost": 0,
+        "pricing_mode": "productive",
+        "pricing_yield_ratio": 787.1287695996201,
+        "side_pool_routes_returned": 0,
+        "side_pool_reduced_cost_min": null,
+        "side_pool_candidates_seen": 0,
+        "side_pool_routes_retained": 0,
+        "side_pool_routes_rejected_by_budget": 0,
+        "join_pairs_key_compatible": 0,
+        "join_pairs_after_bitset_filters": 0,
+        "join_lower_envelope_rejects": 0,
+        "join_bucket_lower_envelope_rejects": 0,
+        "join_subbucket_lower_envelope_rejects": 0,
+        "join_pair_lower_envelope_rejects": 0,
+        "join_queue_pushes": 0,
+        "join_queue_pops": 0,
+        "join_generator_queue_pushes": 0,
+        "join_generator_queue_pops": 0,
+        "join_generator_splits": 0,
+        "join_materialized_pairs": 0,
+        "join_exact_rc_evals": 0,
+        "join_exact_rc_time_seconds": 0.0,
+        "interface_cache_hits": 0,
+        "interface_cache_misses": 0,
+        "suffix_profile_cache_hits": 0,
+        "suffix_profile_cache_misses": 0,
+        "interface_profile_cache_hits": 0,
+        "interface_profile_cache_misses": 0,
+        "pricing_status": "NEGATIVE_BATCH",
+        "productive_calls": 1,
+        "certification_calls": 0,
+        "negative_routes_verified": 8,
+        "negative_routes_inserted": 8,
+        "pricing_worker_backend": "process",
+        "process_cpu_time_seconds": 0.03125,
+        "cpu_core_equivalent": 0.826603265496604,
+        "worker_id": null,
+        "source_neighbor_count": 7,
+        "source_neighbor_block_sizes": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "first_hit_worker_id": null,
+        "first_hit_exits": 0,
+        "interrupted_worker_calls": 0,
+        "certification_worker_calls": 5,
+        "productive_worker_calls": 2,
+        "per_worker_elapsed_seconds": [
+          [
+            0,
+            0.004988431930541992
+          ],
+          [
+            1,
+            0.0026133060455322266
+          ],
+          [
+            2,
+            0.004681825637817383
+          ],
+          [
+            3,
+            0.0046536922454833984
+          ],
+          [
+            4,
+            0.00463414192199707
+          ],
+          [
+            5,
+            0.002581357955932617
+          ],
+          [
+            6,
+            0.0046710968017578125
+          ]
+        ],
+        "per_worker_cpu_time_seconds": [
+          [
+            0,
+            0.015625
+          ],
+          [
+            1,
+            0.0
+          ],
+          [
+            2,
+            0.0
+          ],
+          [
+            3,
+            0.0
+          ],
+          [
+            4,
+            0.0
+          ],
+          [
+            5,
+            0.0
+          ],
+          [
+            6,
+            0.0
+          ]
+        ],
+        "per_worker_labels_generated": [
+          [
+            0,
+            30
+          ],
+          [
+            1,
+            31
+          ],
+          [
+            2,
+            42
+          ],
+          [
+            3,
+            58
+          ],
+          [
+            4,
+            74
+          ],
+          [
+            5,
+            45
+          ],
+          [
+            6,
+            54
+          ]
+        ],
+        "per_worker_labels_dominated": [
+          [
+            0,
+            6
+          ],
+          [
+            1,
+            7
+          ],
+          [
+            2,
+            11
+          ],
+          [
+            3,
+            17
+          ],
+          [
+            4,
+            27
+          ],
+          [
+            5,
+            17
+          ],
+          [
+            6,
+            14
+          ]
+        ],
+        "per_worker_labels_pruned": [
+          [
+            0,
+            6
+          ],
+          [
+            1,
+            5
+          ],
+          [
+            2,
+            6
+          ],
+          [
+            3,
+            6
+          ],
+          [
+            4,
+            0
+          ],
+          [
+            5,
+            3
+          ],
+          [
+            6,
+            5
+          ]
+        ],
+        "per_worker_completed_labels": [
+          [
+            0,
+            3
+          ],
+          [
+            1,
+            4
+          ],
+          [
+            2,
+            7
+          ],
+          [
+            3,
+            9
+          ],
+          [
+            4,
+            20
+          ],
+          [
+            5,
+            8
+          ],
+          [
+            6,
+            12
+          ]
+        ],
+        "per_worker_verified_negative_routes": [
+          [
+            0,
+            0
+          ],
+          [
+            1,
+            0
+          ],
+          [
+            2,
+            0
+          ],
+          [
+            3,
+            2
+          ],
+          [
+            4,
+            6
+          ],
+          [
+            5,
+            0
+          ],
+          [
+            6,
+            0
+          ]
+        ],
+        "pricing_pool_startup_time_seconds": 0.0,
+        "pricing_pool_startup_count": 0,
+        "pricing_pool_reused_calls": 1,
+        "pricing_pool_shutdown_time_seconds": 0.0,
+        "pricing_task_submission_time_seconds": 0.0010111331939697266,
+        "pricing_worker_payload_count": 7,
+        "pricing_worker_response_count": 7,
+        "pricing_candidate_paths_before_merge": 8,
+        "pricing_candidate_paths_after_merge": 8,
+        "pricing_decoded_routes_in_main": 8,
+        "pricing_verified_routes_in_main": 8,
+        "pricing_batch_target": 64,
+        "pricing_returned_batch_size": 8,
+        "pricing_first_hit_enabled": false,
+        "pricing_stale_response_rejections": 0,
+        "pricing_worker_cpu_time_seconds": 0.015625,
+        "pricing_main_process_cpu_time_seconds": 0.015625,
+        "pricing_main_merge_time_seconds": 0.011632442474365234,
+        "productive_slice_seconds": 30.0,
+        "productive_slice_deadline_used": true,
+        "productive_time_limit_with_columns": 0,
+        "productive_time_limit_no_columns": 0,
+        "adaptive_slice_seconds": 30.0,
+        "productive_yield_window_rate": 787.1287695996201,
+        "stabilized_dual_enabled": false,
+        "stabilized_candidates_returned": 0,
+        "true_dual_rejected_candidates": 0,
+        "mean_worker_rc_minus_true_rc": 0.0,
+        "max_abs_worker_true_rc_discrepancy": 0.0,
+        "prefix_task_depth": 1,
+        "source_neighbor_task_count": 7,
+        "source_neighbor_task_sizes": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "local_worker_candidate_quota": 14,
+        "diversity_quota": 32,
+        "diversity_selected_routes": 8,
+        "diversity_selected_customers": 4,
+        "verified_candidates_by_source_neighbor": [
+          [
+            "C4",
+            2
+          ],
+          [
+            "C5",
+            6
+          ]
+        ],
+        "selected_candidates_by_source_neighbor": [
+          [
+            "C4",
+            2
+          ],
+          [
+            "C5",
+            6
+          ]
+        ],
+        "extensions_attempted": 327,
+        "extensions_rejected_by_deadline": 0,
+        "deadline_reachability_removed": 28,
+        "reward_set_size_before_deadline": 299,
+        "reward_set_size_after_deadline": 271,
+        "deadline_reward_bound_calls": 137,
+        "deadline_dominance_prefilter_skips": 0,
+        "routes_rejected_by_deadline_in_master": 0
+      },
+      {
+        "call_index": 3,
+        "mode": "standard",
+        "labels_generated": 366,
+        "labels_dominated": 100,
+        "labels_pruned": 36,
+        "max_queue_size": 9,
+        "complete_routes_generated": 62,
+        "returned_routes": 0,
+        "best_reduced_cost": 0.0045254800747992485,
+        "exact_completion": true,
+        "termination_reason": "exact_pricing_complete",
+        "certification_mode": "source_neighbor_partitions_closed",
+        "labels_purged": 1,
+        "stale_labels_skipped": 0,
+        "standard_bound_pruned": 36,
+        "farkas_bound_pruned": 0,
+        "elapsed_seconds": 0.0354914665222168,
+        "pricing_engine": "source_neighbor_parallel_forward",
+        "forward_labels_generated": 366,
+        "backward_labels_generated": 0,
+        "backward_dominance_tests": 0,
+        "backward_labels_dominated": 0,
+        "backward_cost_function_build_time_seconds": 0.0,
+        "backward_cost_function_eval_time_seconds": 0.0,
+        "join_sr_correction_time_seconds": 0.0,
+        "join_active_block_time_seconds": 0.0,
+        "joined_reduced_cost_evaluations": 0,
+        "backward_dominance_cost_tests": 0,
+        "backward_dominance_cost_rejected": 0,
+        "backward_exclusive_resource_violations": 0,
+        "join_pairs_tested": 0,
+        "joined_routes_accepted": 0,
+        "forward_labeling_time_seconds": 0.027081012725830078,
+        "backward_labeling_time_seconds": 0.0,
+        "join_time_seconds": 0.0,
+        "parallel_labeling_used": true,
+        "parallel_workers": 4,
+        "parallel_calls": 1,
+        "signature_cache_hits": 0,
+        "signature_cache_misses": 0,
+        "core_signature_cache_hits": 0,
+        "core_signature_cache_misses": 0,
+        "active_signature_cache_hits": 0,
+        "active_signature_cache_misses": 0,
+        "sr_coeff_cache_hits": 0,
+        "sr_coeff_cache_misses": 0,
+        "active_sr_key_cache_hits": 0,
+        "active_sr_key_cache_misses": 0,
+        "active_sr_coeffs_computed": 0,
+        "triplet_masks_built": 0,
+        "dominance_prefilter_pairs": 0,
+        "dominance_prefilter_rejected": 0,
+        "dominance_bucket_pairs_considered": 0,
+        "dominance_bucket_pairs_rejected": 0,
+        "dominance_bucket_candidate_pairs": 0,
+        "dominance_compatible_keys_generated": 0,
+        "dominance_compatible_key_lookups": 0,
+        "dominance_bucket_scans_avoided": 0,
+        "dominance_key_generation_time_seconds": 0.0,
+        "backward_full_dominance_tests": 0,
+        "join_prefilter_pairs": 0,
+        "join_prefilter_rejected": 0,
+        "join_bucket_pairs_considered": 0,
+        "join_bucket_pairs_rejected": 0,
+        "join_bucket_candidate_pairs": 0,
+        "join_compatible_keys_generated": 0,
+        "join_compatible_key_lookups": 0,
+        "join_bucket_scans_avoided": 0,
+        "join_key_generation_time_seconds": 0.0,
+        "join_key_cache_hits": 0,
+        "join_key_cache_misses": 0,
+        "join_graph_build_time_seconds": 0.0,
+        "join_subbucket_pairs_considered": 0,
+        "join_subbucket_pairs_rejected": 0,
+        "join_small_bypass_calls": 0,
+        "join_local_bypass_calls": 0,
+        "join_cumulative_bypass_calls": 0,
+        "join_indexed_activation_count": 0,
+        "join_work_estimate": 0,
+        "join_candidate_pairs_accepted": 0,
+        "join_activation_mode": "none",
+        "join_label_pairs_materialized": 0,
+        "join_full_decodes": 0,
+        "lazy_rejected_before_decode": 0,
+        "fully_decoded_routes": 0,
+        "duplicate_equivalent_rejected": 0,
+        "cost_dominated_rejected": 0,
+        "signature_build_time_seconds": 0.0,
+        "sr_coeff_build_time_seconds": 0.0,
+        "duplicate_lookup_time_seconds": 0.0,
+        "route_decode_time_seconds": 0.0,
+        "reduced_cost_verification_time_seconds": 0.0,
+        "dominance_key_cache_hits": 0,
+        "dominance_key_cache_misses": 0,
+        "dominance_small_bypass_calls": 0,
+        "dominance_bypass_calls": 0,
+        "dominance_indexed_activation_count": 0,
+        "dominance_work_estimate": 0,
+        "dominance_activation_mode": "none",
+        "sticky_indexed_join_activations": 0,
+        "sticky_indexed_dominance_activations": 0,
+        "join_stage_reject_key": 0,
+        "join_stage_reject_branch": 0,
+        "join_stage_reject_customer": 0,
+        "join_stage_reject_truck_node": 0,
+        "join_stage_reject_payload": 0,
+        "join_stage_reject_block": 0,
+        "join_stage_reject_reduced_cost": 0,
+        "dominance_stage_reject_key": 0,
+        "dominance_stage_reject_branch": 0,
+        "dominance_stage_reject_customer": 0,
+        "dominance_stage_reject_truck_node": 0,
+        "dominance_stage_reject_payload": 0,
+        "dominance_stage_reject_block": 0,
+        "dominance_stage_reject_time": 0,
+        "dominance_stage_reject_cost": 0,
+        "pricing_mode": "productive",
+        "pricing_yield_ratio": 635.114780186422,
+        "side_pool_routes_returned": 0,
+        "side_pool_reduced_cost_min": null,
+        "side_pool_candidates_seen": 0,
+        "side_pool_routes_retained": 0,
+        "side_pool_routes_rejected_by_budget": 0,
+        "join_pairs_key_compatible": 0,
+        "join_pairs_after_bitset_filters": 0,
+        "join_lower_envelope_rejects": 0,
+        "join_bucket_lower_envelope_rejects": 0,
+        "join_subbucket_lower_envelope_rejects": 0,
+        "join_pair_lower_envelope_rejects": 0,
+        "join_queue_pushes": 0,
+        "join_queue_pops": 0,
+        "join_generator_queue_pushes": 0,
+        "join_generator_queue_pops": 0,
+        "join_generator_splits": 0,
+        "join_materialized_pairs": 0,
+        "join_exact_rc_evals": 0,
+        "join_exact_rc_time_seconds": 0.0,
+        "interface_cache_hits": 0,
+        "interface_cache_misses": 0,
+        "suffix_profile_cache_hits": 0,
+        "suffix_profile_cache_misses": 0,
+        "interface_profile_cache_hits": 0,
+        "interface_profile_cache_misses": 0,
+        "pricing_status": "EXHAUSTED_NO_NEGATIVE",
+        "productive_calls": 1,
+        "certification_calls": 0,
+        "negative_routes_verified": 0,
+        "negative_routes_inserted": 0,
+        "pricing_worker_backend": "process",
+        "process_cpu_time_seconds": 0.03125,
+        "cpu_core_equivalent": 0.8804933428275853,
+        "worker_id": null,
+        "source_neighbor_count": 7,
+        "source_neighbor_block_sizes": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "first_hit_worker_id": null,
+        "first_hit_exits": 0,
+        "interrupted_worker_calls": 0,
+        "certification_worker_calls": 7,
+        "productive_worker_calls": 0,
+        "per_worker_elapsed_seconds": [
+          [
+            0,
+            0.0020003318786621094
+          ],
+          [
+            1,
+            0.0020003318786621094
+          ],
+          [
+            2,
+            0.006445169448852539
+          ],
+          [
+            3,
+            0.003445148468017578
+          ],
+          [
+            4,
+            0.004445791244506836
+          ],
+          [
+            5,
+            0.0033714771270751953
+          ],
+          [
+            6,
+            0.005372762680053711
+          ]
+        ],
+        "per_worker_cpu_time_seconds": [
+          [
+            0,
+            0.015625
+          ],
+          [
+            1,
+            0.0
+          ],
+          [
+            2,
+            0.0
+          ],
+          [
+            3,
+            0.0
+          ],
+          [
+            4,
+            0.0
+          ],
+          [
+            5,
+            0.0
+          ],
+          [
+            6,
+            0.0
+          ]
+        ],
+        "per_worker_labels_generated": [
+          [
+            0,
+            32
+          ],
+          [
+            1,
+            31
+          ],
+          [
+            2,
+            48
+          ],
+          [
+            3,
+            58
+          ],
+          [
+            4,
+            84
+          ],
+          [
+            5,
+            59
+          ],
+          [
+            6,
+            54
+          ]
+        ],
+        "per_worker_labels_dominated": [
+          [
+            0,
+            6
+          ],
+          [
+            1,
+            7
+          ],
+          [
+            2,
+            10
+          ],
+          [
+            3,
+            17
+          ],
+          [
+            4,
+            27
+          ],
+          [
+            5,
+            19
+          ],
+          [
+            6,
+            14
+          ]
+        ],
+        "per_worker_labels_pruned": [
+          [
+            0,
+            6
+          ],
+          [
+            1,
+            5
+          ],
+          [
+            2,
+            7
+          ],
+          [
+            3,
+            6
+          ],
+          [
+            4,
+            2
+          ],
+          [
+            5,
+            5
+          ],
+          [
+            6,
+            5
+          ]
+        ],
+        "per_worker_completed_labels": [
+          [
+            0,
+            4
+          ],
+          [
+            1,
+            4
+          ],
+          [
+            2,
+            8
+          ],
+          [
+            3,
+            7
+          ],
+          [
+            4,
+            16
+          ],
+          [
+            5,
+            11
+          ],
+          [
+            6,
+            12
+          ]
+        ],
+        "per_worker_verified_negative_routes": [
+          [
+            0,
+            0
+          ],
+          [
+            1,
+            0
+          ],
+          [
+            2,
+            0
+          ],
+          [
+            3,
+            0
+          ],
+          [
+            4,
+            0
+          ],
+          [
+            5,
+            0
+          ],
+          [
+            6,
+            0
+          ]
+        ],
+        "pricing_pool_startup_time_seconds": 0.0,
+        "pricing_pool_startup_count": 0,
+        "pricing_pool_reused_calls": 1,
+        "pricing_pool_shutdown_time_seconds": 0.0,
+        "pricing_task_submission_time_seconds": 0.0,
+        "pricing_worker_payload_count": 7,
+        "pricing_worker_response_count": 7,
+        "pricing_candidate_paths_before_merge": 0,
+        "pricing_candidate_paths_after_merge": 0,
+        "pricing_decoded_routes_in_main": 0,
+        "pricing_verified_routes_in_main": 0,
+        "pricing_batch_target": 64,
+        "pricing_returned_batch_size": 0,
+        "pricing_first_hit_enabled": false,
+        "pricing_stale_response_rejections": 0,
+        "pricing_worker_cpu_time_seconds": 0.015625,
+        "pricing_main_process_cpu_time_seconds": 0.015625,
+        "pricing_main_merge_time_seconds": 0.009509086608886719,
+        "productive_slice_seconds": 30.0,
+        "productive_slice_deadline_used": true,
+        "productive_time_limit_with_columns": 0,
+        "productive_time_limit_no_columns": 0,
+        "adaptive_slice_seconds": 30.0,
+        "productive_yield_window_rate": 635.114780186422,
+        "stabilized_dual_enabled": false,
+        "stabilized_candidates_returned": 0,
+        "true_dual_rejected_candidates": 0,
+        "mean_worker_rc_minus_true_rc": 0.0,
+        "max_abs_worker_true_rc_discrepancy": 0.0,
+        "prefix_task_depth": 1,
+        "source_neighbor_task_count": 7,
+        "source_neighbor_task_sizes": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "local_worker_candidate_quota": 14,
+        "diversity_quota": 0,
+        "diversity_selected_routes": 0,
+        "diversity_selected_customers": 0,
+        "verified_candidates_by_source_neighbor": [],
+        "selected_candidates_by_source_neighbor": [],
+        "extensions_attempted": 359,
+        "extensions_rejected_by_deadline": 0,
+        "deadline_reachability_removed": 35,
+        "reward_set_size_before_deadline": 414,
+        "reward_set_size_after_deadline": 379,
+        "deadline_reward_bound_calls": 155,
+        "deadline_dominance_prefilter_skips": 0,
+        "routes_rejected_by_deadline_in_master": 0
+      },
+      {
+        "call_index": 4,
+        "mode": "standard",
+        "labels_generated": 366,
+        "labels_dominated": 100,
+        "labels_pruned": 36,
+        "max_queue_size": 9,
+        "complete_routes_generated": 62,
+        "returned_routes": 0,
+        "best_reduced_cost": 0.0045254800747992485,
+        "exact_completion": true,
+        "termination_reason": "exact_pricing_complete",
+        "certification_mode": "source_neighbor_partitions_closed",
+        "labels_purged": 1,
+        "stale_labels_skipped": 0,
+        "standard_bound_pruned": 36,
+        "farkas_bound_pruned": 0,
+        "elapsed_seconds": 0.03874492645263672,
+        "pricing_engine": "source_neighbor_parallel_forward",
+        "forward_labels_generated": 366,
+        "backward_labels_generated": 0,
+        "backward_dominance_tests": 0,
+        "backward_labels_dominated": 0,
+        "backward_cost_function_build_time_seconds": 0.0,
+        "backward_cost_function_eval_time_seconds": 0.0,
+        "join_sr_correction_time_seconds": 0.0,
+        "join_active_block_time_seconds": 0.0,
+        "joined_reduced_cost_evaluations": 0,
+        "backward_dominance_cost_tests": 0,
+        "backward_dominance_cost_rejected": 0,
+        "backward_exclusive_resource_violations": 0,
+        "join_pairs_tested": 0,
+        "joined_routes_accepted": 0,
+        "forward_labeling_time_seconds": 0.027678728103637695,
+        "backward_labeling_time_seconds": 0.0,
+        "join_time_seconds": 0.0,
+        "parallel_labeling_used": true,
+        "parallel_workers": 4,
+        "parallel_calls": 1,
+        "signature_cache_hits": 0,
+        "signature_cache_misses": 0,
+        "core_signature_cache_hits": 0,
+        "core_signature_cache_misses": 0,
+        "active_signature_cache_hits": 0,
+        "active_signature_cache_misses": 0,
+        "sr_coeff_cache_hits": 0,
+        "sr_coeff_cache_misses": 0,
+        "active_sr_key_cache_hits": 0,
+        "active_sr_key_cache_misses": 0,
+        "active_sr_coeffs_computed": 0,
+        "triplet_masks_built": 0,
+        "dominance_prefilter_pairs": 0,
+        "dominance_prefilter_rejected": 0,
+        "dominance_bucket_pairs_considered": 0,
+        "dominance_bucket_pairs_rejected": 0,
+        "dominance_bucket_candidate_pairs": 0,
+        "dominance_compatible_keys_generated": 0,
+        "dominance_compatible_key_lookups": 0,
+        "dominance_bucket_scans_avoided": 0,
+        "dominance_key_generation_time_seconds": 0.0,
+        "backward_full_dominance_tests": 0,
+        "join_prefilter_pairs": 0,
+        "join_prefilter_rejected": 0,
+        "join_bucket_pairs_considered": 0,
+        "join_bucket_pairs_rejected": 0,
+        "join_bucket_candidate_pairs": 0,
+        "join_compatible_keys_generated": 0,
+        "join_compatible_key_lookups": 0,
+        "join_bucket_scans_avoided": 0,
+        "join_key_generation_time_seconds": 0.0,
+        "join_key_cache_hits": 0,
+        "join_key_cache_misses": 0,
+        "join_graph_build_time_seconds": 0.0,
+        "join_subbucket_pairs_considered": 0,
+        "join_subbucket_pairs_rejected": 0,
+        "join_small_bypass_calls": 0,
+        "join_local_bypass_calls": 0,
+        "join_cumulative_bypass_calls": 0,
+        "join_indexed_activation_count": 0,
+        "join_work_estimate": 0,
+        "join_candidate_pairs_accepted": 0,
+        "join_activation_mode": "none",
+        "join_label_pairs_materialized": 0,
+        "join_full_decodes": 0,
+        "lazy_rejected_before_decode": 0,
+        "fully_decoded_routes": 0,
+        "duplicate_equivalent_rejected": 0,
+        "cost_dominated_rejected": 0,
+        "signature_build_time_seconds": 0.0,
+        "sr_coeff_build_time_seconds": 0.0,
+        "duplicate_lookup_time_seconds": 0.0,
+        "route_decode_time_seconds": 0.0,
+        "reduced_cost_verification_time_seconds": 0.0,
+        "dominance_key_cache_hits": 0,
+        "dominance_key_cache_misses": 0,
+        "dominance_small_bypass_calls": 0,
+        "dominance_bypass_calls": 0,
+        "dominance_indexed_activation_count": 0,
+        "dominance_work_estimate": 0,
+        "dominance_activation_mode": "none",
+        "sticky_indexed_join_activations": 0,
+        "sticky_indexed_dominance_activations": 0,
+        "join_stage_reject_key": 0,
+        "join_stage_reject_branch": 0,
+        "join_stage_reject_customer": 0,
+        "join_stage_reject_truck_node": 0,
+        "join_stage_reject_payload": 0,
+        "join_stage_reject_block": 0,
+        "join_stage_reject_reduced_cost": 0,
+        "dominance_stage_reject_key": 0,
+        "dominance_stage_reject_branch": 0,
+        "dominance_stage_reject_customer": 0,
+        "dominance_stage_reject_truck_node": 0,
+        "dominance_stage_reject_payload": 0,
+        "dominance_stage_reject_block": 0,
+        "dominance_stage_reject_time": 0,
+        "dominance_stage_reject_cost": 0,
+        "pricing_mode": "closure",
+        "pricing_yield_ratio": 517.329671889654,
+        "side_pool_routes_returned": 0,
+        "side_pool_reduced_cost_min": null,
+        "side_pool_candidates_seen": 0,
+        "side_pool_routes_retained": 0,
+        "side_pool_routes_rejected_by_budget": 0,
+        "join_pairs_key_compatible": 0,
+        "join_pairs_after_bitset_filters": 0,
+        "join_lower_envelope_rejects": 0,
+        "join_bucket_lower_envelope_rejects": 0,
+        "join_subbucket_lower_envelope_rejects": 0,
+        "join_pair_lower_envelope_rejects": 0,
+        "join_queue_pushes": 0,
+        "join_queue_pops": 0,
+        "join_generator_queue_pushes": 0,
+        "join_generator_queue_pops": 0,
+        "join_generator_splits": 0,
+        "join_materialized_pairs": 0,
+        "join_exact_rc_evals": 0,
+        "join_exact_rc_time_seconds": 0.0,
+        "interface_cache_hits": 0,
+        "interface_cache_misses": 0,
+        "suffix_profile_cache_hits": 0,
+        "suffix_profile_cache_misses": 0,
+        "interface_profile_cache_hits": 0,
+        "interface_profile_cache_misses": 0,
+        "pricing_status": "EXHAUSTED_NO_NEGATIVE",
+        "productive_calls": 0,
+        "certification_calls": 1,
+        "negative_routes_verified": 0,
+        "negative_routes_inserted": 0,
+        "pricing_worker_backend": "process",
+        "process_cpu_time_seconds": 0.015625,
+        "cpu_core_equivalent": 0.4032786078223841,
+        "worker_id": null,
+        "source_neighbor_count": 7,
+        "source_neighbor_block_sizes": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "first_hit_worker_id": null,
+        "first_hit_exits": 0,
+        "interrupted_worker_calls": 0,
+        "certification_worker_calls": 7,
+        "productive_worker_calls": 0,
+        "per_worker_elapsed_seconds": [
+          [
+            0,
+            0.0042536258697509766
+          ],
+          [
+            1,
+            0.002247333526611328
+          ],
+          [
+            2,
+            0.003014087677001953
+          ],
+          [
+            3,
+            0.0035393238067626953
+          ],
+          [
+            4,
+            0.004542827606201172
+          ],
+          [
+            5,
+            0.006569623947143555
+          ],
+          [
+            6,
+            0.0035119056701660156
+          ]
+        ],
+        "per_worker_cpu_time_seconds": [
+          [
+            0,
+            0.0
+          ],
+          [
+            1,
+            0.0
+          ],
+          [
+            2,
+            0.0
+          ],
+          [
+            3,
+            0.0
+          ],
+          [
+            4,
+            0.0
+          ],
+          [
+            5,
+            0.0
+          ],
+          [
+            6,
+            0.0
+          ]
+        ],
+        "per_worker_labels_generated": [
+          [
+            0,
+            32
+          ],
+          [
+            1,
+            31
+          ],
+          [
+            2,
+            48
+          ],
+          [
+            3,
+            58
+          ],
+          [
+            4,
+            84
+          ],
+          [
+            5,
+            59
+          ],
+          [
+            6,
+            54
+          ]
+        ],
+        "per_worker_labels_dominated": [
+          [
+            0,
+            6
+          ],
+          [
+            1,
+            7
+          ],
+          [
+            2,
+            10
+          ],
+          [
+            3,
+            17
+          ],
+          [
+            4,
+            27
+          ],
+          [
+            5,
+            19
+          ],
+          [
+            6,
+            14
+          ]
+        ],
+        "per_worker_labels_pruned": [
+          [
+            0,
+            6
+          ],
+          [
+            1,
+            5
+          ],
+          [
+            2,
+            7
+          ],
+          [
+            3,
+            6
+          ],
+          [
+            4,
+            2
+          ],
+          [
+            5,
+            5
+          ],
+          [
+            6,
+            5
+          ]
+        ],
+        "per_worker_completed_labels": [
+          [
+            0,
+            4
+          ],
+          [
+            1,
+            4
+          ],
+          [
+            2,
+            8
+          ],
+          [
+            3,
+            7
+          ],
+          [
+            4,
+            16
+          ],
+          [
+            5,
+            11
+          ],
+          [
+            6,
+            12
+          ]
+        ],
+        "per_worker_verified_negative_routes": [
+          [
+            0,
+            0
+          ],
+          [
+            1,
+            0
+          ],
+          [
+            2,
+            0
+          ],
+          [
+            3,
+            0
+          ],
+          [
+            4,
+            0
+          ],
+          [
+            5,
+            0
+          ],
+          [
+            6,
+            0
+          ]
+        ],
+        "pricing_pool_startup_time_seconds": 0.0,
+        "pricing_pool_startup_count": 0,
+        "pricing_pool_reused_calls": 1,
+        "pricing_pool_shutdown_time_seconds": 0.0,
+        "pricing_task_submission_time_seconds": 0.0,
+        "pricing_worker_payload_count": 7,
+        "pricing_worker_response_count": 7,
+        "pricing_candidate_paths_before_merge": 0,
+        "pricing_candidate_paths_after_merge": 0,
+        "pricing_decoded_routes_in_main": 0,
+        "pricing_verified_routes_in_main": 0,
+        "pricing_batch_target": 32,
+        "pricing_returned_batch_size": 0,
+        "pricing_first_hit_enabled": false,
+        "pricing_stale_response_rejections": 0,
+        "pricing_worker_cpu_time_seconds": 0.0,
+        "pricing_main_process_cpu_time_seconds": 0.015625,
+        "pricing_main_merge_time_seconds": 0.011296987533569336,
+        "productive_slice_seconds": 0.0,
+        "productive_slice_deadline_used": false,
+        "productive_time_limit_with_columns": 0,
+        "productive_time_limit_no_columns": 0,
+        "adaptive_slice_seconds": 30.0,
+        "productive_yield_window_rate": 517.329671889654,
+        "stabilized_dual_enabled": false,
+        "stabilized_candidates_returned": 0,
+        "true_dual_rejected_candidates": 0,
+        "mean_worker_rc_minus_true_rc": 0.0,
+        "max_abs_worker_true_rc_discrepancy": 0.0,
+        "prefix_task_depth": 1,
+        "source_neighbor_task_count": 7,
+        "source_neighbor_task_sizes": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "local_worker_candidate_quota": 7,
+        "diversity_quota": 0,
+        "diversity_selected_routes": 0,
+        "diversity_selected_customers": 0,
+        "verified_candidates_by_source_neighbor": [],
+        "selected_candidates_by_source_neighbor": [],
+        "extensions_attempted": 359,
+        "extensions_rejected_by_deadline": 0,
+        "deadline_reachability_removed": 35,
+        "reward_set_size_before_deadline": 414,
+        "reward_set_size_after_deadline": 379,
+        "deadline_reward_bound_calls": 155,
+        "deadline_dominance_prefilter_skips": 0,
+        "routes_rejected_by_deadline_in_master": 0
+      }
+    ],
+    "route_pool_hydration_time": 0.0005865097045898438,
+    "route_signature_build_time": 0.0030062198638916016,
+    "sr_coeff_build_time": 0.0,
+    "duplicate_lookup_time": 0.002197265625,
+    "rmp_column_insertion_time": 0.07255339622497559,
+    "rmp_build_time": 0.022103071212768555,
+    "rmp_solve_time": 0.007380485534667969,
+    "rmp_basis_reuse_success": 0,
+    "column_hydration_time": 0.0005865097045898438,
+    "column_signature_lookup_time": 0.0,
+    "progress_serialization_time": 0.030737876892089844,
+    "progress_events_seen": 8,
+    "progress_events_written": 2,
+    "progress_events_skipped": 6,
+    "signature_cache_hits": 79,
+    "signature_cache_misses": 158,
+    "core_signature_cache_hits": 0,
+    "core_signature_cache_misses": 79,
+    "active_signature_cache_hits": 79,
+    "active_signature_cache_misses": 158,
+    "sr_coeff_cache_hits": 58,
+    "sr_coeff_cache_misses": 21,
+    "active_sr_key_cache_hits": 58,
+    "active_sr_key_cache_misses": 21,
+    "active_sr_coeffs_computed": 0,
+    "triplet_masks_built": 0,
+    "column_index_hits": 0,
+    "column_index_misses": 72,
+    "column_index_replacements": 0,
+    "column_index_refreshes": 1,
+    "column_index_refresh_time": 0.0,
+    "active_sr_version_refreshes": 0,
+    "active_sr_version_refresh_time": 0.0,
+    "heuristic_calls": 1,
+    "preclosure_heuristic_calls": 0,
+    "preclosure_heuristic_columns_generated": 0,
+    "preclosure_heuristic_incumbent_updates": 0,
+    "time_to_first_incumbent": 0.01946544647216797,
+    "first_incumbent_route_pool_calls": 0,
+    "first_incumbent_route_pool_time": 0.0,
+    "first_incumbent_route_pool_feasible_solves": 0,
+    "first_incumbent_route_pool_routes_max": 0,
+    "incumbent_source": "root_constructive",
+    "heuristic_columns_generated": 0,
+    "heuristic_incumbent_updates": 1,
+    "heuristic_hard_pool_solves": 1,
+    "heuristic_hard_pool_time": 0.0025038719177246094,
+    "heuristic_hard_pool_feasible_solves": 1,
+    "heuristic_soft_pool_solves": 0,
+    "heuristic_soft_pool_time": 0.0,
+    "heuristic_soft_pool_feasible_solves": 0,
+    "heuristic_repair_customers": 0,
+    "heuristic_repair_columns_generated": 0,
+    "postroot_heuristic_calls": 0,
+    "postroot_heuristic_hard_pool_solves": 0,
+    "postroot_heuristic_soft_pool_solves": 0,
+    "postroot_repair_calls": 0,
+    "postroot_repair_columns_generated": 0,
+    "postroot_heuristic_incumbent_updates": 0,
+    "postroot_heuristic_budget_hits": 0,
+    "heuristic_max_node_pool_routes": 79,
+    "heuristic_max_support_routes": 4,
+    "side_pool_routes": 0,
+    "side_pool_routes_added": 0,
+    "side_pool_routes_pruned": 0,
+    "side_pool_max_routes": 0,
+    "side_pool_prune_time": 0.0,
+    "side_pool_batch_size_last": 0,
+    "side_pool_candidates_seen": 0,
+    "side_pool_routes_rejected_by_budget": 0,
+    "side_pool_per_customer_keep": 0,
+    "repair_budget_hit": 0,
+    "heuristic_budget_hit": 0,
+    "heuristic_stall_count": 0,
+    "branching_nodes": 0,
+    "customer_pair_branches": 0,
+    "service_mode_branches": 0,
+    "launch_pad_branches": 0,
+    "transformed_arc_branches": 0,
+    "route_variable_branches": 0,
+    "child_nodes_created": 0,
+    "child_inherited_route_candidates": 0,
+    "child_inherited_route_accepted": 0,
+    "child_inherited_route_rejected": 0,
+    "child_reject_residual": 0,
+    "child_reject_fixed_route": 0,
+    "child_reject_fleet": 0,
+    "child_reject_branch": 0,
+    "child_reject_deadline": 0,
+    "child_reject_sr_signature": 0,
+    "child_reject_route_signature": 0,
+    "child_hydration_time": 0.0,
+    "child_refresh_count": 0,
+    "child_refresh_time": 0.0,
+    "postroot_nodes_processed": 0,
+    "postroot_nodes_closed": 0,
+    "postroot_open_nodes": 0,
+    "best_open_bound": null,
+    "max_node_columns": 79,
+    "max_active_sr": 0,
+    "max_active_sr_version": 0,
+    "root_closed": true,
+    "best_reduced_cost_at_stop": 0.0045254800747992485,
+    "open_nodes_at_termination": 0,
+    "adaptive_batch_size_min": 64,
+    "adaptive_batch_size_max": 64,
+    "adaptive_batch_size_last": 64,
+    "adaptive_batch_increases": 0,
+    "adaptive_batch_decreases": 0,
+    "adaptive_batch_window_ratio": 0.0,
+    "adaptive_batch_low_windows": 0,
+    "adaptive_batch_high_windows": 0,
+    "certification_pricing_passes": 1,
+    "certification_pricing_passes_with_columns": 0,
+    "root_productive_pricing_calls": 2,
+    "root_columns_since_last_heuristic": 72
+  },
+  "service_metrics": {
+    "service_feasible": true,
+    "coverage_counts": {
+      "C1": 1,
+      "C2": 1,
+      "C3": 1,
+      "C4": 1,
+      "C5": 1
+    },
+    "selected_trucks": 1,
+    "available_trucks": 2,
+    "drone_sorties": 0,
+    "available_drones_total": 8,
+    "truck_served_customers": 5,
+    "drone_served_customers": 0,
+    "payloads": [
+      27.97
+    ],
+    "max_payload": 27.97,
+    "payload_feasible": true,
+    "total_customer_demand": 27.97,
+    "available_truck_payload_total": 100.0,
+    "mean_delay": 18.73119543957033,
+    "max_delay": 48.16092991919879,
+    "delay_square_sum": 3169.7508760418395,
+    "waiting_blocks": 0,
+    "total_wait_time": 0,
+    "mean_wait_time": 0.0,
+    "max_wait_time": 0.0
+  },
+  "gurobi_log_files": [
+    "numerical_experiments\\run_after_promised_postroot_v2_final\\small_full_PS_seed_1\\gurobi_logs\\heuristic_hard_node_1_cols_4.log",
+    "numerical_experiments\\run_after_promised_postroot_v2_final\\small_full_PS_seed_1\\gurobi_logs\\rmp_node_1_cols_71_sr_0.log",
+    "numerical_experiments\\run_after_promised_postroot_v2_final\\small_full_PS_seed_1\\gurobi_logs\\rmp_node_1_cols_79_sr_0.log",
+    "numerical_experiments\\run_after_promised_postroot_v2_final\\small_full_PS_seed_1\\gurobi_logs\\rmp_node_1_cols_7_sr_0.log"
+  ],
+  "output_write_time_seconds": 0.01736140251159668
+}
