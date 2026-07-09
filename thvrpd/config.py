@@ -27,15 +27,20 @@ class InstanceConfig:
     drones_per_truck: int
     num_hubs: int = 2
     area_side: float = 14.0
-    truck_arc_probability: float = 0.2
-    hub_arc_probability: float = 0.5
+    truck_arc_probability: float = 0.05
+    hub_arc_probability: float = 0.18
     truck_speed: float = 40.0
-    drone_speed: float = 40.0
+    drone_speed: float = 100.0
     truck_payload: float = 50.0
-    drone_payload: float = 2.3
-    drone_endurance: float = 30.0
+    drone_payload: float = 6.0
+    drone_endurance: float = 75.0
     truck_cost: float = 20.0
-    drone_cost: float = 6.0
+    drone_cost: float = 1.0
+    mandatory_drone_customer_fraction: float = 0.16
+    max_drone_access_customers_per_hub: int = 2
+    max_drone_launch_hubs_per_customer: int = 1
+    min_drone_service_time_saving: float = 0.0
+    retain_optional_drone_arcs: bool = False
     low_demand_customer_ratio: float = 0.5
     low_demand_weight_mean: float = 1.0
     low_demand_weight_std: float = 5.0
@@ -62,6 +67,14 @@ class InstanceConfig:
             raise ValueError("drones per truck must be positive")
         if self.num_hubs <= 0:
             raise ValueError("hub count must be positive")
+        if not 0.0 <= self.truck_arc_probability <= 1.0 or not 0.0 <= self.hub_arc_probability <= 1.0:
+            raise ValueError("truck and hub arc probabilities must be in [0, 1]")
+        if not 0.0 <= self.mandatory_drone_customer_fraction <= 1.0:
+            raise ValueError("mandatory drone customer fraction must be in [0, 1]")
+        if self.max_drone_access_customers_per_hub <= 0 or self.max_drone_launch_hubs_per_customer <= 0:
+            raise ValueError("drone access caps must be positive")
+        if not isfinite(self.min_drone_service_time_saving):
+            raise ValueError("minimum drone service time saving must be finite")
         if self.service_deadline_mode not in {"none", "manual", "random_absolute"}:
             raise ValueError("service_deadline_mode must be none, manual, or random_absolute")
         if not 0.0 <= self.service_deadline_fraction <= 1.0:
@@ -93,10 +106,10 @@ class InstanceConfig:
 class SolverConfig:
     threads: int = 1
     time_limit: float = 1800.0
-    pricing_tolerance: float = 1e-7
+    pricing_tolerance: float = 0.05
     cut_tolerance: float = 1e-7
     integrality_tolerance: float = 1e-6
-    root_extraction_time_limit: float = 5.0
+    root_extraction_time_limit: float = 60.0
     route_pool_time_limit: float = 2.0
     support_threshold: float = 0.05
     support_best_per_customer: int = 3
@@ -133,15 +146,27 @@ class SolverConfig:
     productive_candidate_multiplier: float = 1.5
     source_neighbor_task_size: int = 1
     pricing_diversity_batch_fraction: float = 0.5
+    enable_balanced_kcore_pricing: bool = True
+    enable_dynamic_kcore_refinement: bool = True
+    kcore_balance_alpha_reachable_customers: float = 1.0
+    kcore_balance_alpha_out_degree: float = 0.25
+    kcore_balance_alpha_drone_pads: float = 0.5
+    kcore_balance_alpha_deadline_customers: float = 0.5
+    dynamic_split_label_threshold: int = 2_000
+    dynamic_split_gap_multiplier: float = 10.0
+    dynamic_split_time_threshold: float = 5.0
+    dynamic_split_work_threshold: float = 2_000.0
+    dynamic_refinement_depth: int = 2
+    checkpoint_extension_period: int = 5_000
     first_incumbent_route_pool_time_limit: float = 10.0
     post_incumbent_primal_budget_factor: float = 0.25
     root_constructive_time_limit: float = 5.0
     enable_constructive_root_incumbent: bool = True
-    root_compact_after_constructive: str = "conditional_wall_budget"
-    root_compact_time_limit_after_constructive: float = 1.0
-    root_compact_time_limit_without_constructive: float = 5.0
-    root_compact_wall_time_limit: float = 1.0
-    root_compact_solve_time_limit: float = 1.0
+    root_compact_after_constructive: str = "full_budget"
+    root_compact_time_limit_after_constructive: float = 60.0
+    root_compact_time_limit_without_constructive: float = 60.0
+    root_compact_wall_time_limit: float = 0.0
+    root_compact_solve_time_limit: float = 60.0
     constructive_diversity_threshold: float = 0.35
     constructive_incumbent_quality_threshold: float | None = None
     enable_drone_diversification_warm_start: bool = True
@@ -196,6 +221,22 @@ class SolverConfig:
     sr_removal_max_per_node: int = 20
     use_row_local_sr_coeff_cache: bool = True
     use_dominance_prefilter_keys: bool = True
+    enable_closure_frontier_cells: bool = True
+    enable_mask_trie_frontier: bool = True
+    enable_mask_containment_index: bool = True
+    enable_cell_envelope_rejection: bool = True
+    enable_cell_lb_certificates: bool = True
+    frontier_cell_max_labels: int = 512
+    frontier_cell_split_min_pairs: int = 2048
+    max_frontier_cell_size: int = 512
+    max_frontier_pair_product: int = 2000
+    max_frontier_split_depth: int = 6
+    enable_resource_restricted_closure_bound: bool = True
+    resource_bound_method: str = "greedy"
+    resource_bound_payload_bucket: int = 0
+    closure_queue_enabled: bool = True
+    closure_queue_mode: str = "cell_lb"
+    closure_mode_rebuild_frontier: bool = True
     use_promised_drone_construction: bool = False
     promised_drone_construct_time_limit: float = 5.0
     promised_drone_insert_top_k_customers: int = 20
@@ -275,6 +316,9 @@ class SolverConfig:
             self.prefix_task_depth_child,
             self.prefix_task_min_branching_for_depth2,
             self.source_neighbor_task_size,
+            self.dynamic_split_label_threshold,
+            self.dynamic_refinement_depth,
+            self.checkpoint_extension_period,
             self.sr_inactive_age_threshold,
             self.sr_removal_batch_size,
             self.sr_max_removals_per_node,
@@ -291,6 +335,11 @@ class SolverConfig:
             self.child_cert_no_route_yield_window,
             self.child_cert_dual_stability_window,
             self.sr_removal_max_per_node,
+            self.frontier_cell_max_labels,
+            self.frontier_cell_split_min_pairs,
+            self.max_frontier_cell_size,
+            self.max_frontier_pair_product,
+            self.max_frontier_split_depth,
             self.promised_drone_insert_top_k_customers,
             self.promised_drone_insert_top_k_pads,
             self.promised_drone_exchange_top_k_pairs,
@@ -338,6 +387,16 @@ class SolverConfig:
             raise ValueError("productive candidate multiplier must be positive")
         if not 0.0 <= self.pricing_diversity_batch_fraction <= 1.0:
             raise ValueError("pricing diversity batch fraction must be in [0, 1]")
+        if (
+            self.kcore_balance_alpha_reachable_customers < 0.0
+            or self.kcore_balance_alpha_out_degree < 0.0
+            or self.kcore_balance_alpha_drone_pads < 0.0
+            or self.kcore_balance_alpha_deadline_customers < 0.0
+            or self.dynamic_split_gap_multiplier < 0.0
+            or self.dynamic_split_time_threshold < 0.0
+            or self.dynamic_split_work_threshold < 0.0
+        ):
+            raise ValueError("balanced dynamic K-core coefficients and thresholds must be nonnegative")
         if self.first_incumbent_route_pool_time_limit < 0:
             raise ValueError("first-incumbent route-pool time limit must be nonnegative")
         if self.root_constructive_time_limit < 0:
@@ -403,6 +462,12 @@ class SolverConfig:
             raise ValueError("promised drone construction time limit must be nonnegative")
         if self.promised_drone_min_improvement < 0.0:
             raise ValueError("promised drone minimum improvement must be nonnegative")
+        if self.resource_bound_payload_bucket < 0:
+            raise ValueError("resource bound payload bucket must be nonnegative")
+        if self.resource_bound_method != "greedy":
+            raise ValueError("resource_bound_method must be greedy")
+        if self.closure_queue_mode != "cell_lb":
+            raise ValueError("closure_queue_mode must be cell_lb")
         if self.compact_after_no_drone_incumbent not in {"small_budget", "full_budget"}:
             raise ValueError("compact_after_no_drone_incumbent must be small_budget or full_budget")
         if not 0.0 <= self.dual_stabilization_weight <= 1.0:

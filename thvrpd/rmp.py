@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from itertools import combinations
+import time
 
 import gurobipy as gp
 from gurobipy import GRB
@@ -404,7 +405,21 @@ class RestrictedMaster:
     def _sr_coeff(self, path: tuple[str, ...], triplet: tuple[str, str, str]) -> int:
         residual_key = tuple(sorted(self.node.residual_customers))
         served_mask = customer_mask(self.routes[path].served, residual_key, self._sr_cache)
-        return sr_coeff_from_mask(served_mask, triplet_mask(residual_key, triplet, self._sr_cache))
+        triplet_bits = triplet_mask(residual_key, triplet, self._sr_cache)
+        if self.solver_config.use_row_local_sr_coeff_cache:
+            key = (served_mask, triplet_bits)
+            cached = self._sr_cache.sr_coeff_cache.get(key)
+            if cached is not None:
+                self._sr_cache.stats.sr_coeff_cache_hits += 1
+                return cached
+            self._sr_cache.stats.sr_coeff_cache_misses += 1
+            start = time.time()
+            coeff = sr_coeff_from_mask(served_mask, triplet_bits)
+            self._sr_cache.stats.sr_coeff_build_time += time.time() - start
+            self._sr_cache.stats.active_sr_coeffs_computed += 1
+            self._sr_cache.sr_coeff_cache[key] = coeff
+            return coeff
+        return sr_coeff_from_mask(served_mask, triplet_bits)
 
 
 def _restriction_key(restrictions: BranchRestrictions) -> tuple:
@@ -427,9 +442,40 @@ _RMP_COMPATIBILITY_FIELDS = (
     "fleet_limit",
     "fixed_cost",
     "branch_state",
+    "active_sr",
+    "active_sr_version",
     "service_deadline_version",
     "objective_scale_version",
+    "active_column_version",
+    "rmp_structure_version",
 )
+
+
+def _service_deadline_version(node: NodeState) -> int:
+    return 0
+
+
+def _objective_scale_version(node: NodeState) -> int:
+    return 0
+
+
+def _active_column_version(node: NodeState) -> tuple:
+    return (tuple(sorted(node.inactive_column_paths)),)
+
+
+def _rmp_structure_version(node: NodeState) -> tuple:
+    return (
+        tuple(sorted(node.residual_customers)),
+        tuple(route.path for route in node.fixed_routes),
+        node.fleet_limit,
+        node.fixed_cost,
+        _restriction_key(node.restrictions),
+        tuple(sorted(node.active_sr)),
+        node.active_sr_version,
+        _service_deadline_version(node),
+        _objective_scale_version(node),
+        _active_column_version(node),
+    )
 
 
 def _rmp_compatibility_key(node: NodeState) -> tuple:
@@ -439,8 +485,12 @@ def _rmp_compatibility_key(node: NodeState) -> tuple:
         node.fleet_limit,
         node.fixed_cost,
         _restriction_key(node.restrictions),
-        0,
-        0,
+        tuple(sorted(node.active_sr)),
+        node.active_sr_version,
+        _service_deadline_version(node),
+        _objective_scale_version(node),
+        _active_column_version(node),
+        _rmp_structure_version(node),
     )
 
 

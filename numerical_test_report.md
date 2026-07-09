@@ -1,30 +1,49 @@
-# Revised V4 Proof-Aligned TH-VRPD Numerical Test Report
+# Forced Compact Warm-Start Large20 Audit
 
 ## Scope
 
-This report documents the revised V4 proof-aligned solver audits generated in:
+This report documents the requested forced compact Gurobi warm-start revision and the large-only numerical audit. No medium run and no direct standalone compact Gurobi benchmark were run.
+
+Fresh output folders:
 
 ```text
-numerical_experiments\run_restored_v4_proof_revised_medium_10min
-numerical_experiments\run_restored_v4_proof_revised_large_20min
+numerical_experiments\run_force_compact_large20_seed1_15min
+numerical_experiments\run_force_compact_large20_seed2_15min
+numerical_experiments\run_force_compact_large20_seed3_15min
 ```
 
-The medium run is compared with the available medium 10-minute folders:
+Common instance and algorithm settings:
 
 ```text
-numerical_experiments\run_after_postroot_v4_medium_10min
-numerical_experiments\run_restored_postroot_v4_medium_10min
-numerical_experiments\run_after_postroot_v5_medium_10min
-numerical_experiments\run_after_postroot_v6_medium_10min
+20 customers, 5 trucks, 2 hubs, 4 drones/truck
+PS distribution, seeds 1, 2, 3
+random absolute promised windows, offset 30-90, witness slack 3
+truck_speed=40, truck_payload=50, truck_cost=20
+drone_payload=6, drone_speed=100, drone_endurance=75, drone_cost=1
+pricing_tolerance=0.05
+6 process pricing workers
+900-second time limit per seed
 ```
 
-The tested solver is the promised-service-window restricted TH-VRPD solver with forward-only source-neighbor process pricing, physical-location dominance with return-time credit, verified route-pool incumbent search, branch-indexed inheritance, incremental RMP updates, active-SR coefficient caching, active-SR lifecycle metadata, inactive-column hydration, and structured child-certification epochs. The large run uses the same promised-window policy as the medium run and extends the time limit to 20 minutes.
+## Code Revision
 
-## Verification
-
-The requested validation commands were run.
+The production default now forces compact Gurobi after a constructive incumbent:
 
 ```text
+root_compact_after_constructive = full_budget
+root_compact_solve_time_limit = 60.0
+root_compact_wall_time_limit = 0.0
+```
+
+The compact warm start uses a fixed Gurobi solve budget, not a wall-clock cap for build, solve, extraction, verification, and insertion. If Gurobi returns an incumbent, BPC decodes the returned route paths through `route_from_path` and inserts only verified routes.
+
+During the seed-2 audit, the initial run exposed an objective-consistency bug: the compact model rebuilt `ObjectiveData` internally, including time-limited promised-window witness construction, while BPC verified extracted routes against the root `ObjectiveData`. The code now passes the root objective into `solve_compact_solution`, so compact optimization and BPC route verification use the same service envelopes and objective scaling.
+
+## Validation
+
+Commands:
+
+```powershell
 python -m compileall thvrpd tests
 python -c "import sys, pytest; sys.path.append(r'D:\gurobi1201\win64\python311\lib'); raise SystemExit(pytest.main(['tests','-q']))"
 ```
@@ -33,492 +52,802 @@ Result:
 
 ```text
 compileall succeeded
-140 passed in 12.42s
+151 passed in 11.06s
 ```
 
-The Gurobi-backed pytest command was executed outside the sandbox because the sandbox user did not match the installed Gurobi license user. The same command passed under the licensed Windows user.
+The Gurobi-backed commands were run under the licensed Windows user.
 
-## Audit Command
+## Forced-Compact Results
 
-```powershell
-python -m thvrpd.experiments --output-dir numerical_experiments\run_restored_v4_proof_revised_medium_10min --seeds 1 --distributions PS --scales medium --threads 1 --case-time-limit 600 --external-timeout-grace 60 --pricing-parallel-workers 4 --pricing-worker-backend process --service-deadline-mode random_absolute --service-deadline-offset-min 45 --service-deadline-offset-max 120 --service-deadline-witness-slack 5 --service-deadline-witness-method constructive_then_compact --root-compact-after-constructive conditional_wall_budget --prefix-task-depth-child 2 --logging-mode light --gurobi-python-path D:\gurobi1201\win64\python311\lib
-```
+| Metric | Seed 1 | Seed 2 | Seed 3 |
+|---|---:|---:|---:|
+| Status | time_limit | time_limit | time_limit |
+| Runtime (s) | 902.5646 | 900.4643 | 900.5657 |
+| Nodes processed | 1 | 1 | 1 |
+| Root closed | false | false | false |
+| Constructive incumbent found | false | false | false |
+| Compact attempted | true | true | true |
+| Compact status | success | success | success |
+| Compact accepted columns | 4 | 5 | 3 |
+| Incumbent source | compact_root | compact_root | compact_root |
+| Final incumbent | 0.1656331182 | 0.1402907417 | 0.0986189338 |
+| Full lower bound | -0.3053709357 | -0.6032600744 | -0.3039501371 |
+| Full gap | 284.37% | 530.01% | 408.21% |
+| Best reduced cost at stop | -0.0957795735 | -0.0639856542 | -0.0594941881 |
+| Pricing time (s) | 777.7618 | 806.4517 | 805.9902 |
+| Selected routes | 4 | 4 | 3 |
+| Drone sorties | 5 | 5 | 8 |
 
-## Main Results
+The forced-after-constructive policy was validated by regression tests. In the three fresh large20 runs, constructive did not produce an incumbent, so compact was called through the no-constructive root path. The policy change is still active in code and will apply when a constructive incumbent exists.
 
-| Run | Status | Incumbent | Lower bound | Full gap | Root closed | Nodes | Post-root open nodes |
-|---|---:|---:|---:|---:|---|---:|---:|
-| Recorded V4 | time limit | 0.0846704491 | 0.0796601339 | 5.92% | yes | 7 | 5 |
-| Restored V4 | time limit | 0.0811406255 | 0.0783032343 | 3.50% | yes | 7 | 5 |
-| V5 | time limit | 0.2257310146 | 0.0783032343 | 65.31% | yes | 7 | 7 |
-| V6 | time limit | 0.2257310146 | 0.0798413484 | 64.63% | yes | 10 | 10 |
-| Revised proof V4 | time limit | 0.0811406255 | 0.0800923520 | 1.29% | yes | 11 | 7 |
+## Compact Warm-Start Accounting
 
-The revised proof-aligned implementation preserves the strong restored V4 incumbent value, improves the lower bound beyond both recorded V4 and restored V4, and reduces the full gap to 1.29%. The run remains time-limited, so this is not an optimality proof.
+| Metric | Seed 1 | Seed 2 | Seed 3 |
+|---|---:|---:|---:|
+| Compact build time (s) | 30.4484 | 0.1075 | 0.1526 |
+| Compact Gurobi solve time (s) | 60.0037 | 60.0053 | 60.0045 |
+| Compact route decode time (s) | 0.0040 | 0.0030 | 0.0022 |
+| BPC `route_from_path` verification time (s) | 0.0010 | 0.0000 | 0.0010 |
+| Compact wall budget hit | false | false | false |
 
-## Incumbent Structure
+The results confirm the intended semantics: Gurobi receives the full 60-second solve budget, and returned incumbents are decoded and inserted afterward. Compact extraction and route verification are negligible compared with the compact solve and root pricing.
 
-The revised proof V4 incumbent uses three truck-only routes and no drone sorties.
+## Selected Route Structures
 
-| Route | Truck path | Customers | Return time | Shifted route cost |
-|---:|---|---|---:|---:|
-| 366 | Source-C5-C10-C7-H2-C11-Sink | C5, C7, C10, C11 | 79.1671 | 0.0546946 |
-| 560 | Source-C8-C3-H2-C6-C13-C4-C14-Sink | C3, C4, C6, C8, C13, C14 | 75.5302 | 0.0564077 |
-| 336 | Source-C9-C1-C2-C12-H1-C15-Sink | C1, C2, C9, C12, C15 | 80.2829 | 0.0542687 |
+### Seed 1
 
-Objective components for this incumbent:
+| Route | Truck path | Drone block | Drone sorties |
+|---:|---|---|---:|
+| 1 | Source-C10-C16-H2-C2-Sink | H2: C1, C20 | 2 |
+| 2 | Source-C14-C8-C4-C11-Sink | none | 0 |
+| 3 | Source-C19-H1-C13-C6-H2-Sink | H1: C12, C15, C9 | 3 |
+| 4 | Source-C5-C18-C17-C7-C3-Sink | none | 0 |
 
-| Component | Value |
-|---|---:|
-| Raw delay-square sum | 5,563.7747 |
-| Raw return-time sum | 234.9803 |
-| Raw operating cost | 60.0000 |
-| Weighted delay contribution | 0.0199635 |
-| Weighted return contribution | 0.0211772 |
-| Weighted cost contribution | 0.0400000 |
-| Full normalized objective | 0.0811406255 |
+### Seed 2
 
-The good incumbent was produced by the V4 primal path: root constructive incumbent, verified route-pool construction, support-pool hard solves, full node-admissible hard-pool solves, and true route-cost incumbent evaluation. The route-pool layer made five incumbent updates; two came from support-pool hard solves and three came from full-pool hard solves. This confirms that the full node-admissible hard-pool step is active and materially contributes to incumbent quality.
+| Route | Truck path | Drone block | Drone sorties |
+|---:|---|---|---:|
+| 1 | Source-C13-C14-H2-C17-H1-Sink | H2: C1, C18, C3 | 3 |
+| 2 | Source-C16-C8-H2-C5-Sink | H2: C11, C9 | 2 |
+| 3 | Source-C19-C6-C4-C20-H2-C15-Sink | none | 0 |
+| 4 | Source-C2-C10-C7-C12-Sink | none | 0 |
 
-No drone sortie is used in the final solution. Therefore, the stronger incumbent in this case is not explained by drone-service insertion. It is explained by better verified truck-route composition from the route-pool incumbent mechanism.
+### Seed 3
 
-## Route-Pool Behavior
+| Route | Truck path | Drone block | Drone sorties |
+|---:|---|---|---:|
+| 1 | Source-C16-C5-C2-C1-C8-Sink | none | 0 |
+| 2 | Source-C19-H1-C13-C14-C10-Sink | H1: C12, C15, C6, C9 | 4 |
+| 3 | Source-H2-C7-C17-C20-Sink | H2: C11, C18, C3, C4 | 4 |
 
-| Diagnostic | Revised proof V4 |
-|---|---:|
-| Heuristic incumbent updates | 5 |
-| Support-pool hard calls | 18 |
-| Support-pool feasible solves | 2 |
-| Support-pool incumbent updates | 2 |
-| Full-pool hard calls | 12 |
-| Full-pool feasible solves | 12 |
-| Full-pool incumbent updates | 3 |
-| Hard-pool solve time | 0.5792s |
-| Soft-pool calls | 9 |
-| Repair-pricing time | 1.3587s |
-| Maximum node pool size | 614 |
-| Maximum support size | 29 |
-| Maximum node/support ratio | 33.47 |
+All reported incumbents are compact-root incumbents and include drone sorties.
 
-The measured bottleneck is not the route-pool solve time. Hard-pool solving consumed less than one second, while the full-pool calls generated most of the incumbent improvements. The large node/support ratio shows why the full node-admissible hard-pool phase matters: the support pool can be very small relative to the verified node pool, and support-only search would miss some high-quality integer combinations.
+## Pricing Workload
 
-## Dominance-Throughput Diagnostics
+| Metric | Seed 1 | Seed 2 | Seed 3 |
+|---|---:|---:|---:|
+| Standard pricing calls | 5 | 15 | 5 |
+| Forward labels generated | 95,563 | 334,066 | 146,846 |
+| Complete routes generated | 12,672 | 70,264 | 37,135 |
+| Dominance candidate pairs materialized | 793,057 | 2,105,066 | 1,622,107 |
+| Dominance pairs avoided before materialization | 50,961,913 | 58,353,653 | 47,366,067 |
+| Weighted effective CPU cores | 4.9700 | 3.8689 | 3.7719 |
+| Main-process merge time (s) | 0.0859 | 0.3117 | 0.0819 |
 
-| Diagnostic | Revised proof V4 |
-|---|---:|
-| Forward labels generated | 5,438,809 |
-| Dominance gate pairs seen | 107,643,334 |
-| Gate mask failures | 90,583,850 |
-| Gate scalar failures | 11,962,108 |
-| Gate branch failures | 2,807,429 |
-| Gate deadline failures | 31,908 |
-| Return-credit checks executed | 7,348,349 |
-| Return-credit checks skipped | 100,294,985 |
-| Labels dominated | 2,258,011 |
-| Same-node dominated labels | 1,873,372 |
-| Physical-location dominated labels | 384,639 |
+The remaining limitation in all three runs is root-pricing proof throughput. Each run stayed at node 1, root closure remained false, and the best reduced cost at termination was still below the configured tolerance threshold of `-0.05`.
 
-The dominance gates are highly selective. Only 7.35 million of 107.64 million candidate pairs reached the return-credit stage, so 93.17% of candidate pairs were filtered before the expensive full dominance evaluation. The largest screening source is customer/physical-node mask containment, which accounts for 90.58 million failures. Physical-location dominance is also productive: it removes 384,639 labels, approximately 17.03% of all dominated labels.
+## Interpretation
 
-The remaining pricing bottleneck is still proof throughput. Standard pricing consumed 468.47s, or 77.88% of the BPC wall time. Worker CPU time was 1,628.92s across process workers, and forward-labeling CPU accounting was 1,633.33s. The wall-clock bottleneck is therefore parallel forward-pricing certification and dominance work, not LP solving.
+The forced compact warm start is working as intended. Compact Gurobi returned incumbents for all three large20 seeds, BPC accepted verified compact columns, and each final incumbent came from the compact root warm start.
 
-## Child-Certification Epochs
+Across these different random instances, seed 3 has the lowest normalized incumbent value and the largest drone use. Seed 1 has the smallest reported full gap. Because the seeds define different instances and different promised-window realizations, these objective values should not be interpreted as a same-instance method comparison.
 
-| Diagnostic | Revised proof V4 |
-|---|---:|
-| Child certification calls | 94 |
-| Calls with columns | 71 |
-| Exhausted calls | 23 |
-| Time-limited child calls | 0 |
-| Epochs started | 94 |
-| Epochs completed | 23 |
-| Saved states | 94 |
-| Resumed states | 0 |
-| State discards | 85 |
-| Discards by active columns | 74 |
-| Discards by dual change | 14 |
-| Discards by SR change | 11 |
-| Exhausted source-neighbor tasks | 1,527 |
-| Unresolved source-neighbor tasks | 0 |
+The compact warm start improves primal feasibility and drone-using incumbent construction, but it does not address lower-bound proof throughput. The proof bottleneck remains exact forward pricing closure at the root.
 
-Certification is exact when it closes, but the measured epoch reuse is poor. No saved child-certification state was resumed. Most discards are caused by active-column changes after productive child certification returns columns. Dual and SR changes also invalidate saved epochs. This identifies child-node proof throughput as a real bottleneck: the solver repeatedly starts valid certification epochs, but the changing RMP state prevents reuse of partially exhausted work.
+## Large-25 Drone-Required Scale Update: 40% Baseline
 
-## RMP And Active-SR Burden
+This baseline used `25 customers, 5 trucks, 2 hubs, 4 drones/truck` with `truck_arc_probability=0.08`, `hub_arc_probability=0.25`, `mandatory_drone_customer_fraction=0.40`, `max_drone_access_customers_per_hub=8`, `max_drone_launch_hubs_per_customer=2`, and `min_drone_service_time_saving=0.0`. The drone-friendly parameters were `drone_payload=6`, `drone_speed=100`, `drone_endurance=75`, and `drone_cost=1`.
 
-| Diagnostic | Revised proof V4 |
-|---|---:|
-| RMP solves | 130 |
-| RMP build time | 49.8614s |
-| RMP solve time | 0.6655s |
-| Incremental RMP updates | 119 |
-| Incremental update time | 35.9648s |
-| Full rebuilds | 11 |
-| Active-SR coefficient count | 5,228,110 |
-| Active-SR nonzeros | 1,058,978 |
-| Active-SR max density | 0.2292 |
-| SR cuts added | 265 |
-| Root SR cuts added | 109 |
-| Post-root SR cuts added | 156 |
-| SR cuts removed | 0 |
-| SR removal candidates marked | 424 |
-| SR metadata update time | 10.7914s |
-| SR separation time | 28.0412s |
-
-LP optimization itself is not the bottleneck: RMP solve time is only 0.6655s. Model construction and coefficient maintenance dominate the RMP side. Incremental RMP update time alone is 35.96s, and active-SR metadata updates add 10.79s. SR removal did not remove cuts in this run, but 424 candidate marks and multiple trigger failures indicate that the burden logic was active and conservative. The post-root active-SR set reached 166 cuts, and the active-SR coefficient matrix exceeded one million nonzeros.
-
-## Compact Warm Start And Drone Diversification
-
-| Diagnostic | Revised proof V4 |
-|---|---:|
-| Root constructive incumbent found | true |
-| Root constructive value | 0.3724493585 |
-| Root constructive routes | 4 |
-| Root constructive time | 0.0260s |
-| Drone diversification attempted | true |
-| Root compact attempted | true |
-| Root compact conditional reason | low_diversity,no_drone_sorties |
-| Root compact status | budget_exhausted_build |
-| Root compact wall budget | 1.0000s |
-| Root compact non-solver/build accounting | 6.2243s |
-| Root compact warm-start only | true |
-
-The compact warm start remained primal-only. The wall budget was exhausted during build/accounting, so no proof-side state was changed by compact extraction. This is consistent with the revised paper requirement that compact warm starts can add verified primal columns but cannot certify closure or change a lower bound.
-
-## Timing Shares
-
-| Work category | Time | Share of BPC wall time |
-|---|---:|---:|
-| Standard pricing | 468.4678s | 77.88% |
-| RMP build/update | 49.8614s | 8.29% |
-| SR separation | 28.0412s | 4.66% |
-| Progress serialization | 19.7598s | 3.28% |
-| Root compact extraction/build accounting | 6.2243s | 1.03% |
-| Heuristic route-pool work | 2.7313s | 0.45% |
-| RMP LP solve | 0.6655s | 0.11% |
-
-The true bottlenecks are lower-bound proof throughput and model/coefficient construction, not incumbent discovery. The incumbent mechanism works; it reaches the strong restored objective and contributes several improvements at negligible wall time. The limiting factors are the exact certification workload, dominance-comparison volume, active-SR coefficient maintenance, and repeated child certification after state changes.
-
-## Future Revision Directions From Measured Bottlenecks
-
-1. Dominance-gate selectivity should be improved where the data show the largest comparison volume. Mask containment rejects 90.58 million pairs, so the next revision should prioritize bucket keys and frontier organization that avoid generating mask-incompatible comparisons in the first place. This is a data-structure target, not a change to the dominance theorem.
-
-2. Physical-location dominance should remain enabled. It removed 384,639 labels and accounts for 17.03% of dominated labels. The measured future work is to reduce the cost of reaching the physical-location full test, because return-credit checks were still executed 7.35 million times after cheap gates.
-
-3. Child-certification reuse needs an epoch-stability improvement. The run started 94 child-certification epochs, completed 23, and resumed zero. The main invalidation source is active-column changes. Future revisions should focus on scheduling and column-insertion timing that reduces avoidable epoch churn while preserving the rule that a saved certification state is reusable only under the same dual, SR set/version, residual mask, branch state, fixed-route signature, and active-column version.
-
-4. Active-SR coefficient burden is a proof-side bottleneck. The run maintained 5.23 million active-SR coefficients and 1.06 million active-SR nonzeros. Incremental RMP updates consumed 35.96s, and SR metadata updates consumed 10.79s. Future revisions should target row-local coefficient construction and active-SR density control, while keeping the current requirement that any SR removal is followed by RMP reoptimization and exact repricing before bound use.
-
-5. RMP LP solving is not the next bottleneck. Solver time was 0.6655s over 130 solves, whereas RMP build/update time was 49.86s. Future work on simplex tuning or basis reuse is unlikely to move this run unless it also reduces coefficient construction and model-update overhead.
-
-6. Route-pool incumbent search should be preserved. Full-pool hard solves produced three incumbent updates and support-pool solves produced two, with total hard-pool time under one second. The measured direction is to keep the support-plus-full-pool sequence and improve when it is invoked, not to replace it with compact fallback or biased heuristic-objective incumbents.
-
-7. Compact warm-start accounting should stay wall-clock bounded. The compact attempt exhausted the wall budget during build/accounting and produced no proof-side effect. Future revisions should either reduce compact model-build overhead or skip compact earlier under the same wall-budget rule; it should not become a fallback proof device.
-
-## Large-Scale BPC Audit
-
-The large-scale audit was run on the same PS seed-1 promised-window policy as the medium run, with a 20-minute case time limit. The output folder is:
+Validation after this change:
 
 ```text
-numerical_experiments\run_restored_v4_proof_revised_large_20min
+python -m compileall thvrpd tests
+python -c "import sys, pytest; sys.path.append(r'D:\gurobi1201\win64\python311\lib'); raise SystemExit(pytest.main(['tests','-q']))"
+
+compileall succeeded
+152 passed in 11.13s
 ```
 
-The command was:
+Fresh large-25 run:
 
-```powershell
-python -m thvrpd.experiments --output-dir numerical_experiments\run_restored_v4_proof_revised_large_20min --seeds 1 --distributions PS --scales large --threads 1 --case-time-limit 1200 --external-timeout-grace 60 --pricing-parallel-workers 4 --pricing-worker-backend process --service-deadline-mode random_absolute --service-deadline-offset-min 45 --service-deadline-offset-max 120 --service-deadline-witness-slack 5 --service-deadline-witness-method constructive_then_compact --root-compact-after-constructive conditional_wall_budget --prefix-task-depth-child 2 --logging-mode light --gurobi-python-path D:\gurobi1201\win64\python311\lib
+```text
+numerical_experiments\run_large25_drone_required_40pct_lite_p6_s100_e75_c1_mid_tol005_w6_15min
 ```
 
-### Large Instance Setup
+Command used `pricing_tolerance=0.05`, six process workers, service windows `30-90` with slack `3`, and a forced 60-second compact warm start.
 
-| Field | Value |
-|---|---:|
-| Scale | large |
-| Distribution | PS |
-| Seed | 1 |
-| Customers | 25 |
-| Trucks | 8 |
-| Hubs | 2 |
-| Drones per truck | 4 |
-| Total available drones | 32 |
-| Service-deadline mode | random_absolute |
-| Service-deadline file | none |
-| Manual deadline bound count | none |
-| Deadline offset range | 45 to 120 |
-| Witness slack | 5 |
-| Witness method | constructive_then_compact |
-| Active deadline count | 25 |
-| Minimum deadline slack | 48.8007 |
-| Witness status | success |
-| Witness lifts | 1 |
-| Maximum witness lift | 27.8564 |
-
-The large run therefore uses the same automatically generated random absolute promised-service windows as the medium run. It does not use a manually supplied deadline file or manual customer-specific upper-bound table. All 25 customers have active promised-service windows.
-
-### Large Main Result
+### Instance Structure
 
 | Metric | Value |
 |---|---:|
-| Solver status | time limit |
-| Full incumbent objective | 0.0306734659 |
-| Shifted incumbent objective | 0.1385497082 |
-| Full lower bound | -0.1078762423 |
-| Shifted lower bound | 0.0000000000 |
-| Full gap | 451.69% |
-| Shifted gap | 100.00% |
-| BPC wall time | 1200.9928s |
+| Customers | 25 |
+| Trucks | 5 |
+| Hubs | 2 |
+| Drones/truck | 4 |
+| Mandatory drone customers | 10 |
+| Truck arcs | 81 |
+| Drone arcs | 16 |
+| Transformed arcs | 265 |
+| Witness routes | 4 |
+| Witness drone sorties | 10 |
+
+Mandatory drone customers: `C12, C13, C17, C18, C21, C22, C24, C4, C6, C7`. These customers have no truck-service representation and each has at least one retained drone arc, so every feasible solution must use at least 10 drone sorties.
+
+### BPC Result
+
+| Metric | Value |
+|---|---:|
+| Status | time_limit |
+| Runtime (s) | 900.4657 |
 | Nodes processed | 1 |
 | Root closed | false |
-| Post-root nodes processed | 0 |
-| Post-root open nodes | 0 |
-| Best reduced cost at stop | -0.0009800377 |
-| RMP solves | 45 |
-| Standard pricing calls | 45 |
-| Productive pricing calls | 32 |
-| Closure-mode pricing calls | 13 |
-| Certification pricing passes | 13 |
-
-The 20-minute large run did not close the root node. The algorithm processed only the root node, and no post-root branching was reached. The root lower bound remains at the shifted value 0, which corresponds to the full-scale lower bound -0.1078762423 after adding the objective shift. The final best reduced cost is still negative, so the root was stopped during unresolved pricing rather than after exact column-generation closure.
-
-### Large Incumbent Structure
-
-The incumbent covers all 25 customers with four truck-only routes and no drone sorties.
-
-| Route | Truck path | Customers | Return time | Delay-square contribution | Shifted route cost |
-|---:|---|---|---:|---:|---:|
-| 1083 | Source-C16-C17-C7-C25-H1-C1-C21-Sink | C1, C16, C17, C21, C25, C7 | 89.5554 | 1880.3180 | 0.0343965 |
-| 1238 | Source-C19-C24-C12-C2-C15-C18-C13-H2-Sink | C12, C13, C15, C18, C19, C2, C24 | 97.8768 | 1661.7008 | 0.0342752 |
-| 1345 | Source-C20-C10-C3-C6-C23-C9-Sink | C10, C20, C23, C3, C6, C9 | 68.6240 | 2611.1491 | 0.0351129 |
-| 1400 | Source-C8-C4-H2-C11-C22-C14-C5-Sink | C11, C14, C22, C4, C5, C8 | 59.6715 | 2635.8020 | 0.0347652 |
-
-The selected route set satisfies the decoded service checks.
-
-| Service metric | Value |
-|---|---:|
-| Service feasible | true |
-| Selected trucks | 4 of 8 |
-| Covered customers | 25 of 25 |
-| Truck-served customers | 25 |
-| Drone-served customers | 0 |
-| Drone sorties | 0 |
-| Waiting blocks | 0 |
-| Total wait time | 0.0000 |
+| Best reduced cost at stop | -0.1148513080 |
+| Incumbent objective | 0.0861753092 |
+| Full lower bound | -0.7784979414 |
+| Full gap | 1003.39% |
+| Selected trucks | 4 |
+| Drone sorties | 10 |
+| Truck-served customers | 15 |
+| Drone-served customers | 10 |
 | Payload feasible | true |
-| Route payloads | 30.25, 30.20, 46.71, 49.87 |
-| Maximum route payload | 49.87 |
-| Total customer demand | 157.03 |
-| Available truck payload | 400.00 |
-| Mean delivery delay | 14.2877 |
-| Maximum delivery delay | 46.0635 |
+| Service feasible | true |
 
-Objective components for the large incumbent are:
+The incumbent uses exactly the structurally required 10 drone sorties. The selected routes are:
 
-| Component | Value |
+| Route | Truck path | Drone block | Drone sorties |
+|---:|---|---|---:|
+| 1 | Source-C11-C3-H2-C14-Sink | H2: C13, C18, C21, C4 | 4 |
+| 2 | Source-C16-C15-C25-C19-Sink | none | 0 |
+| 3 | Source-C20-C10-C5-H1-C2-C1-Sink | H1: C12, C7 | 2 |
+| 4 | Source-H2-C8-C23-C9-Sink | H2: C17, C22, C24, C6 | 4 |
+
+### Proof-Throughput Evidence
+
+| Metric | Value |
 |---|---:|
-| Raw delay-square sum | 8788.9698 |
-| Raw return-time sum | 315.7277 |
-| Raw operating cost | 80.0000 |
-| Weighted normalized delay | 0.0199651 |
-| Weighted normalized return | 0.0107084 |
-| Weighted normalized cost | 0.0000000 |
-| Route-sum value before shift | 0.1385497 |
-| Objective shift | -0.1078762 |
-| Full normalized objective | 0.0306735 |
+| Standard pricing time (s) | 806.7381 |
+| Standard pricing calls | 9 |
+| Labels generated | 128,020 |
+| Labels dominated | 12,397 |
+| Complete routes generated | 23,205 |
+| Extensions attempted | 145,207 |
+| Extensions rejected by deadline | 17,241 |
+| Dominance pairs avoided before materialization | 38,146,182 |
+| Dominance candidate pairs materialized | 914,369 |
+| Same-node dominance tests/deletions | 8,269 |
+| Physical-location dominance tests/deletions | 4,128 |
+| K-core subspaces | 6 |
+| Empty core blocks | 0 |
+| Certification calls | 2 |
+| Certification unresolved-core count | 8 |
+| Minimum core reduced cost observed | -0.3603988152 |
+| RMP build time (s) | 0.0160 |
+| RMP solve time (s) | 0.0150 |
+| SR separation time (s) | 0.0000 |
 
-The incumbent is strong on the primal side relative to the initial constructive solution. The constructive incumbent used all 8 trucks, had value 0.3391510450, and had no drone sorties. The final route-pool incumbent uses 4 trucks and reduces the full objective to 0.0306734659. Drone diversification was attempted, generated 5 verified columns, and improved an intermediate incumbent, but the final best solution remains truck-only.
+The run is not limited by RMP construction, LP solve time, or SR separation. The active bottleneck is still exact root-pricing proof throughput: pricing consumed almost all post-warm-start runtime, root closure remained false, and the best reduced cost at termination was below the configured tolerance threshold.
 
-### Large Route-Pool Behavior
+### Compact Warm Start
 
-| Diagnostic | Value |
+| Metric | Value |
 |---|---:|
-| Heuristic calls | 12 |
-| Heuristic incumbent updates | 10 |
-| Heuristic time | 8.9412s |
-| Hard-pool solves | 25 |
-| Hard-pool time | 1.7814s |
-| Hard-pool feasible solves | 12 |
-| Support-pool calls | 14 |
-| Support-pool feasible solves | 1 |
-| Support-pool incumbent updates | 1 |
-| Full-pool calls | 11 |
-| Full-pool feasible solves | 11 |
-| Full-pool incumbent updates | 9 |
-| Soft-pool solves | 2 |
-| Repair-pricing calls | 14 |
-| Repair-pricing time | 6.1572s |
-| Repair customers | 6 |
-| Repair columns generated | 36 |
-| Maximum node-pool size | 1508 |
-| Maximum support-pool size | 54 |
-| Maximum node/support ratio | 35.9048 |
+| Compact status | success |
+| Compact accepted columns | 4 |
+| Compact total extraction time (s) | 60.1407 |
+| Compact Gurobi solve time (s) | 60.0037 |
 
-The route-pool mechanism is the main source of the high-quality large incumbent. Of the 10 incumbent updates, 9 came from the full node-admissible hard-pool solve and only 1 came from the support-pool hard solve. The maximum node/support ratio is 35.90, so a support-only incumbent search would inspect only a small fraction of the verified pool. The measured large-scale result therefore reinforces the medium-run conclusion: the full node-admissible hard-pool solve is important for primal performance, and its wall time is small relative to pricing.
+The compact warm start produced the accepted incumbent routes and all route decoding/verification passed. Compact is still primal-only; it did not certify the lower bound or root closure.
 
-### Large Pricing And Dominance Throughput
+## Large-25 Protected-Only Drone-Access Update
 
-| Diagnostic | Value |
-|---|---:|
-| Forward labels generated | 10,011,682 |
-| Complete routes generated | 1,811,777 |
-| Verified negative routes | 1,955 |
-| Inserted negative routes | 1,561 |
-| Labels dominated | 5,873,098 |
-| Labels pruned by reduced-cost bound | 58,167 |
-| Labels purged | 10,832 |
-| Stale labels skipped | 7,458 |
-| Extensions attempted | 12,619,975 |
-| Extensions rejected by deadline | 2,609,886 |
-| Deadline reachability removals | 10,898,732 |
-| Maximum queue size | 4,653 |
-| Maximum pricing-call elapsed time | 72.6211s |
-
-The promised-service-window machinery is active at large scale. Deadline extension checks reject 2.61 million attempted extensions, and deadline reachability removes 10.90 million customer candidates from reduced-cost reward sets. No route was rejected by deadline at master insertion, which means the route decoder and verification layer accepted only deadline-feasible generated routes.
-
-Dominance statistics are:
-
-| Diagnostic | Value |
-|---|---:|
-| Dominance gate pairs seen | 641,619,664 |
-| Gate mask failures | 617,593,068 |
-| Gate scalar failures | 18,075,975 |
-| Gate branch failures | 0 |
-| Gate deadline failures | 77,399 |
-| Same-node full dominance tests | 4,314,950 |
-| Physical-location full dominance tests | 1,558,272 |
-| Return-credit checks executed | 20,518,149 |
-| Return-credit checks skipped | 621,101,515 |
-| Same-node dominated labels | 4,314,826 |
-| Physical-location dominated labels | 1,558,272 |
-
-The dominance gates are essential on the large instance. The solver observes 641.62 million candidate dominance pairs, but only 5.87 million reach full dominance tests. Thus, approximately 99.08% of candidate pairs are screened before full dominance. The dominant rejection source is mask containment: 617.59 million pair checks fail the customer or physical-node mask gate. Physical-location dominance removes 1.56 million labels, or 26.53% of all dominated labels, so it remains productive at large scale.
-
-The bottleneck is the sheer volume of forward-pricing proof work. Standard pricing consumes 1098.49s of the 1200.99s BPC wall time. Worker CPU time is 4043.48s, and the maximum observed core equivalent is 3.91 across the 4 process workers. The large run is therefore pricing-bound, not LP-bound.
-
-### Large RMP And Active-SR Burden
-
-| Diagnostic | Value |
-|---|---:|
-| RMP solves | 45 |
-| RMP build/update time | 16.5178s |
-| RMP solve time | 0.4142s |
-| RMP column insertion time | 14.4981s |
-| Incremental RMP updates | 44 |
-| Incremental update time | 16.5108s |
-| Full rebuilds | 1 |
-| Basis reuse attempts | 44 |
-| Basis reuse successes | 8 |
-| Active SR cuts added | 73 |
-| Maximum active SR cuts | 73 |
-| Active-SR coefficient count | 1,613,227 |
-| Active-SR nonzeros | 212,396 |
-| Active-SR maximum density | 0.1324 |
-| SR separation time | 32.3488s |
-| SR cuts removed | 0 |
-| SR cuts reactivated | 0 |
-
-The RMP solve time is negligible compared with pricing and model update time. LP solves take only 0.4142s over 45 RMP solves, while RMP construction and incremental updates take 16.52s. SR separation takes 32.35s and adds 73 root cuts. Because the root is not closed, no post-root active-SR lifecycle, child inheritance, child hydration, or child certification behavior is exercised in this large audit.
-
-### Large Warm-Start Accounting
-
-| Diagnostic | Value |
-|---|---:|
-| Root constructive status | success |
-| Root constructive routes | 8 |
-| Root constructive value | 0.3391510 |
-| Root constructive drone sorties | 0 |
-| Root constructive time | 0.0665s |
-| Drone diversification attempted | true |
-| Drone-diversification routes generated | 5 |
-| Drone-diversification columns accepted | 5 |
-| Drone-diversification incumbent improved | true |
-| Root compact attempted | true |
-| Compact trigger reason | low_diversity,all_trucks_used,no_drone_sorties |
-| Compact status | budget_exhausted_build |
-| Compact wall budget | 1.0000s |
-| Compact model-build time | 20.8409s |
-| Compact solve time | 0.0000s |
-| Compact accepted columns | 0 |
-
-The compact warm start remains a primal-only device. In this large run, compact extraction was triggered by the weak constructive structure, but the model-build phase itself exceeded the wall budget, so no compact solve was performed and no compact columns were accepted. This large run therefore obtains its final incumbent through verified route-pool search and pricing-generated columns, not through compact model extraction.
-
-### Large Timing Shares
-
-| Work category | Time | Share of BPC wall time |
-|---|---:|---:|
-| Standard pricing | 1098.4932s | 91.47% |
-| SR separation | 32.3488s | 2.69% |
-| Compact model build/extraction accounting | 20.8519s | 1.74% |
-| RMP build/update | 16.5178s | 1.38% |
-| RMP column insertion | 14.4981s | 1.21% |
-| Heuristic route-pool work | 8.9412s | 0.74% |
-| Progress serialization | 4.3170s | 0.36% |
-| RMP LP solve | 0.4142s | 0.03% |
-
-The large-scale bottleneck is root pricing closure. The route-pool incumbent mechanism is effective and inexpensive, but the exact proof side does not complete root certification within 20 minutes. The unresolved best reduced cost at termination, the absence of post-root nodes, and the negative full lower bound all indicate that the large run is limited by lower-bound proof throughput rather than by incumbent discovery.
-
-## Direct Arc-Based Gurobi Benchmark
-
-A direct Gurobi run was performed on the compact arc-based MIQP for the same medium PS seed-1 promised-window instance. The output is stored in:
+To reduce pricing state space, the default drone-access policy was tightened after the 40% baseline:
 
 ```text
-numerical_experiments\run_gurobi_arc_medium_10min
+mandatory_drone_customer_fraction = 0.30
+max_drone_access_customers_per_hub = 4
+max_drone_launch_hubs_per_customer = 1
+retain_optional_drone_arcs = false
 ```
 
-The benchmark used `solve_compact_solution` with a 600-second time limit, one thread, and `require_optimal=False`. The Gurobi log is:
+The generator now keeps only one protected launch hub for each mandatory drone customer by default. Nonmandatory optional drone arcs are not retained unless explicitly enabled. This preserves structural drone use while shrinking the duplicated drone-node layer in the transformed pricing network.
+
+Validation after this change:
 
 ```text
-numerical_experiments\run_gurobi_arc_medium_10min\compact_gurobi.log
+python -m compileall thvrpd tests
+python -c "import sys, pytest; sys.path.append(r'D:\gurobi1201\win64\python311\lib'); raise SystemExit(pytest.main(['tests','-q']))"
+
+compileall succeeded
+152 passed in 14.33s
+```
+
+Fresh protected-only run:
+
+```text
+numerical_experiments\run_large25_drone_required_30pct_protected_only_p6_s100_e75_c1_mid_tol005_w6_15min
 ```
 
 ### Direct Comparison
 
-| Method | Status | Incumbent | Lower bound | Gap | Nodes explored | Routes | Drone sorties |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| Proposed BPC | time limit | 0.0811406255 | 0.0800923520 | 1.29% | 11 BPC nodes | 3 | 0 |
-| Direct Gurobi arc MIQP | time limit | 0.0811982680 | -0.0838480176 | 203.26% | 20,837 MIP nodes | 3 | 0 |
+| Metric | 40% baseline | 30% protected-only |
+|---|---:|---:|
+| Mandatory drone customers | 10 | 8 |
+| Drone arcs | 16 | 8 |
+| Transformed arcs | 265 | 177 |
+| Witness drone sorties | 10 | 8 |
+| Status | time_limit | time_limit |
+| Runtime (s) | 900.4657 | 900.4831 |
+| Nodes processed | 1 | 1 |
+| Root closed | false | false |
+| Best reduced cost at stop | -0.1148513080 | -0.0681004403 |
+| Incumbent objective | 0.0861753092 | 0.0731124504 |
+| Full lower bound | -0.7784979414 | -0.7204886518 |
+| Full gap | 1003.39% | 1085.45% |
+| Selected trucks | 4 | 4 |
+| Drone sorties in incumbent | 10 | 8 |
+| Service feasible | true | true |
 
-The proposed BPC beats direct Gurobi on incumbent quality and lower-bound proof quality in this 10-minute run. The incumbent advantage is small but measurable:
+### Pricing Workload Comparison
+
+| Metric | 40% baseline | 30% protected-only |
+|---|---:|---:|
+| Standard pricing time (s) | 806.7381 | 801.4583 |
+| Standard pricing calls | 9 | 16 |
+| Labels generated | 128,020 | 180,892 |
+| Labels dominated | 12,397 | 15,741 |
+| Complete routes generated | 23,205 | 52,769 |
+| Extensions attempted | 145,207 | 244,196 |
+| Extensions rejected by deadline | 17,241 | 63,400 |
+| Dominance pairs avoided before materialization | 38,146,182 | 25,389,590 |
+| Dominance candidate pairs materialized | 914,369 | 896,357 |
+| Same-node dominance deletions | 8,269 | 10,282 |
+| Physical-location dominance deletions | 4,128 | 5,459 |
+| Certification unresolved-core count | 8 | 8 |
+
+The protected-only policy substantially reduced the transformed network size and moved the best reduced cost much closer to the configured closure threshold: from `-0.1148513080` to `-0.0681004403`. This is evidence that reducing drone accessibility helps the proof side. However, root closure still failed because the best reduced cost remained below `-0.05`.
+
+The pricing workload changed rather than uniformly decreasing. Fewer drone duplicate nodes reduced dominance pair pressure, but the solver completed more pricing calls and generated more complete routes within the same runtime. The remaining proof bottleneck is still certification of all source-neighbor core subspaces at the root, not compact warm start, RMP solve, or SR separation.
+
+## Large-25 Medium-Like Setting And Compact Arc Benchmark
+
+The retained large-lite target keeps the named large instance at `25 customers, 5 trucks, 2 hubs, 4 drones/truck`, keeps the structurally non-truck-only policy, and uses the original root-closed `425.017s` sparse graph. The production defaults are:
 
 ```text
-0.0811982680 - 0.0811406255 = 0.0000576425
+truck_arc_probability = 0.05
+hub_arc_probability = 0.18
+mandatory_drone_customer_fraction = 0.16
+max_drone_access_customers_per_hub = 2
+max_drone_launch_hubs_per_customer = 1
+retain_optional_drone_arcs = false
+drone_payload = 6
+drone_speed = 100
+drone_endurance = 75
+drone_cost = 1
 ```
 
-The proof-bound advantage is much larger. Direct Gurobi's compact MIQP lower bound remains negative after 600 seconds, while the proposed BPC lower bound is 0.0800923520. Thus, the proposed algorithm is not only finding a slightly better feasible solution, but also proving a much tighter lower bound for this promised-window instance.
+This gives four mandatory drone customers for the 25-customer instance. Because those customers have no truck-service representation, every feasible solution must use drones; hence the optimal solution cannot be truck-only.
 
-### Gurobi Incumbent Structure
+### Density Tuning Evidence
 
-The direct Gurobi incumbent is also a three-truck, truck-only solution.
+The table compares the verified sparse-density probes. The user-selected retained setting is `0.05/0.18`, which is the original `425.017s` root-closed case. The denser `0.06/0.20` case was tested and is reported for context, but it is not retained as the default.
 
-| Route | Truck path | Customers | Return time | Shifted route cost |
-|---:|---|---|---:|---:|
-| 0 | Source-C8-C1-C2-C12-H1-C15-Sink | C1, C2, C8, C12, C15 | 80.2829 | 0.0542687 |
-| 1 | Source-C3-C9-C14-H2-C6-C13-C4-Sink | C3, C4, C6, C9, C13, C14 | 86.7634 | 0.0564653 |
-| 2 | Source-C5-C10-C7-H2-C11-Sink | C5, C7, C10, C11 | 79.1671 | 0.0546946 |
+| Truck arc prob. | Hub arc prob. | Truck arcs | Drone arcs | Transformed arcs | Runtime (s) | Nodes | Root closed | Root standard pricing (s) | Final best reduced cost | Comment |
+|---:|---:|---:|---:|---:|---:|---:|:---:|---:|---:|---|
+| 0.05 | 0.18 | 111 | 4 | 145 | 600.332 | 2 | true | 425.017 | -0.071492298 | Retained default; root closes quickly and remains structurally non-truck-only. |
+| 0.05 | 0.20 | 112 | 4 | 146 | 208.023 | 1 | true | 101.528 | -0.041575440 | Too easy; full run closed quickly. |
+| 0.058 | 0.19 | 113 | 4 | 147 | 900.282 | 3 | true | 388.921 | -0.035092116 | Intermediate probe; farther from 600s than the retained default. |
+| 0.058 | 0.20 | 114 | 4 | 148 | 900.423 | 3 | true | 251.807 | -0.073206513 | Nonmonotone effect; root became easier, post-root became harder. |
+| 0.06 | 0.19 | 114 | 4 | 148 | 900.507 | 1 | false | 785.415 | -0.058361059 | Root did not close under the 900s run, so not selected. |
+| 0.065 | 0.18 | 115 | 4 | 149 | 900.281 | 2 | true | 263.123 | -0.028322143 | Denser graph but easier at the root. |
+| 0.06 | 0.20 | 115 | 4 | 149 | 900.359 | 2 | true | 754.264 | -0.109343882 | Denser alternative; not retained after the user selected the 425.017s setting. |
 
-Gurobi service metrics:
+The pricing difficulty is not monotone in arc count because the specific added arcs change which source-neighbor subproblems, SR cuts, dominance frontiers, and post-root branches become active. Therefore the retained setting is based on the user's selected 425.017s run, with the denser probes kept only as sensitivity evidence.
+
+### Selected Instance Structure
 
 | Metric | Value |
 |---|---:|
-| Service feasible | true |
-| Selected trucks | 3 |
-| Truck-served customers | 15 |
-| Drone-served customers | 0 |
-| Payload feasible | true |
-| Maximum route payload | 41.85 |
-| Mean delay | 14.4932 |
-| Maximum delay | 35.8747 |
-| Delay-square sum | 5,241.3320 |
-| Waiting blocks | 0 |
+| Customers | 25 |
+| Trucks | 5 |
+| Hubs | 2 |
+| Drones/truck | 4 |
+| Mandatory drone customers | 4 |
+| Truck arcs | 111 |
+| Drone arcs | 4 |
+| Transformed nodes | 33 |
+| Transformed arcs | 145 |
+| Witness routes | 4 |
+| Witness drone sorties | 4 |
 
-The Gurobi incumbent has a lower delay-square sum than the BPC incumbent, but it has a longer total return time. Its route return-time sum is approximately 246.2135, compared with 234.9803 for the BPC incumbent. Because the objective weights include both delay and return time, the BPC route set has the better full normalized objective.
+Mandatory drone customers: `C12, C13, C18, C21`.
 
-### Gurobi Search Diagnosis
-
-The compact MIQP explored 20,837 MIP nodes and 6,225,979 simplex iterations in 600 seconds. It found 10 feasible solutions. The final Gurobi log reports:
+### Selected Run Result
 
 ```text
-Best objective 8.119826802661e-02
-Best bound    -8.384801762822e-02
-Gap           203.2633%
+numerical_experiments\run_large25_mediumlike_drone_required_16pct_root600_p6_s100_e75_c1_tol005_w6
 ```
 
-This confirms that the compact arc-based formulation is a weak proof vehicle for the medium promised-window instance. Direct Gurobi can find a competitive feasible incumbent, but it does not approach the proof quality of the branch-price-and-cut formulation within the same time budget.
+| Metric | Value |
+|---|---:|
+| Status | time_limit |
+| Runtime (s) | 600.3323 |
+| Nodes processed | 2 |
+| Root closed | true |
+| Root standard pricing time (s) | 425.0171 |
+| Post-root standard pricing time (s) | 45.6460 |
+| Total standard pricing time (s) | 470.6631 |
+| Standard pricing calls | 31 |
+| Labels generated | 252,308 |
+| Completed routes generated | 71,325 |
+| Dominance candidate pairs materialized | 575,051 |
+
+The root pricing proof closed under the configured `pricing_tolerance=0.05`. The final negative `best_reduced_cost_at_stop = -0.071492298` is post-root evidence after branching, not a root-closure failure.
+
+### Incumbent And Feasibility
+
+| Metric | Value |
+|---|---:|
+| Incumbent objective | 0.1094226658 |
+| Full lower bound | 0.0878163258 |
+| Full gap | 19.75% |
+| Selected trucks | 4 |
+| Drone sorties | 4 |
+| Truck-served customers | 21 |
+| Drone-served customers | 4 |
+| Payload feasible | true |
+| Service feasible | true |
+
+### Direct Compact Arc-Based Gurobi Benchmark
+
+The direct compact MIQP benchmark uses the same retained `0.05/0.18` promised-window instance and calls the existing arc-based compact solver for a 20-minute Gurobi solve limit:
+
+```text
+numerical_experiments\run_compact_arc_large25_mediumlike_425param_20min
+```
+
+| Metric | Compact arc-based Gurobi |
+|---|---:|
+| Gurobi status | time limit |
+| Extracted incumbent status | success |
+| Runtime (s) | 1200.1017 |
+| Model build time (s) | 0.0754 |
+| Gurobi solve time (s) | 1200.0042 |
+| Route decode time (s) | 0.0020 |
+| Incumbent objective | 0.0727504027 |
+| Best bound | -0.2940004425 |
+| MIP gap | 504.12% |
+| Explored nodes | 14,021 |
+| Simplex iterations | 12,757,263 |
+| Route count | 4 |
+| Drone sorties | 4 |
+| Payload feasible | true |
+| Service feasible | true |
+
+Compact route structure:
+
+| Route | Truck path | Drone sorties | Served customers |
+|---:|---|---:|---|
+| 0 | Source-C5-C20-C8-C22-C3-C4-Sink | 0 | C20, C22, C3, C4, C5, C8 |
+| 1 | Source-C10-H2-C14-C9-C6-C23-Sink | 2 | C10, C13, C14, C18, C23, C6, C9 |
+| 2 | Source-C16-C15-C2-C1-Sink | 0 | C1, C15, C16, C2 |
+| 3 | Source-H1-C24-C7-C25-C19-C17-H2-C11-Sink | 2 | C11, C12, C17, C19, C21, C24, C25, C7 |
+
+The compact model found a substantially stronger feasible incumbent than the BPC 600-second run on the same instance (`0.0727504027` versus `0.1094226658`). Its proof bound is much weaker than the BPC root lower bound (`-0.2940004425` versus `0.0878163258`). Therefore, within 20 minutes the compact arc-based model is useful for primal incumbent discovery, but not for proving a strong lower bound on this instance.
+
+### One-Hour BPC Comparison Against Compact Incumbent
+
+The retained large-25 case was rerun with BPC for a one-hour time limit:
+
+```text
+numerical_experiments\run_bpc_large25_425param_1h
+```
+
+The run terminated early because the BPC root closed under the configured `pricing_tolerance=0.05`.
+
+| Metric | BPC 1-hour limit | Compact arc 20-minute |
+|---|---:|---:|
+| Status | optimal under pricing tolerance | time limit |
+| Runtime (s) | 200.5375 | 1200.1017 |
+| Nodes processed / explored | 1 | 14,021 |
+| Incumbent objective | 0.1056060693 | 0.0727504027 |
+| Lower/best bound | 0.1056060693 | -0.2940004425 |
+| Reported gap | 0.00% | 504.12% |
+| Drone sorties | 4 | 4 |
+| Service feasible | true | true |
+| Payload feasible | true | true |
+
+BPC did not beat the compact incumbent. The compact incumbent is better by `0.0328556666` in full normalized objective value.
+
+BPC route structure:
+
+| Route | Truck path | Drone sorties | Served customers |
+|---:|---|---:|---|
+| 33 | Source-C19-C17-C24-C7-C25-C14-H2-C4-Sink | 0 | C14, C17, C19, C24, C25, C4, C7 |
+| 31 | Source-C20-C10-H2-C9-C6-H1-C1-Sink | 2 | C1, C10, C13, C18, C20, C6, C9 |
+| 32 | Source-C5-H1-C16-C15-C2-Sink | 2 | C12, C15, C16, C2, C21, C5 |
+| 30 | Source-C8-C22-C3-H2-C11-C23-Sink | 0 | C11, C22, C23, C3, C8 |
+
+The compact route set was checked against the BPC run's service upper bounds and had no service-window violations. Its route-cost sum plus the BPC objective shift equals `0.0727504027`, so the objective comparison is on the same scale.
+
+The reason BPC can report `optimal` while the compact incumbent is better is the configured pricing tolerance. The BPC run stopped with `best_reduced_cost_at_stop=-0.0496311555`, which is inside the `0.05` tolerance and is therefore treated as nonnegative by the production pricing logic. This is a tolerance-closed solution, not an exact zero-reduced-cost closure.
+
+Validation after the retained default update:
+
+```text
+python -m compileall thvrpd tests
+python -c "import sys, pytest; sys.path.append(r'D:\gurobi1201\win64\python311\lib'); raise SystemExit(pytest.main(['tests','-q']))"
+
+compileall succeeded
+152 passed in 10.47s
+```
+
+This is the retained large-lite setting. It remains a sparse 25-customer extension of the 15-customer V4 medium case, structurally prevents truck-only solutions, and has a verified root pricing proof time of `425.017s`.
+
+## Balanced Dynamic K-Core Large25 Audit
+
+This section reports the resumed large-only efficiency audit after implementing balanced dynamic K-core pricing. No medium run was performed, and no direct compact Gurobi benchmark was rerun. The compact arc result below is reused only as existing context.
+
+Fresh output folder:
+
+```text
+numerical_experiments\run_balanced_dynamic_kcore_large25_tol001_w6_1h_resumed
+```
+
+Run setting:
+
+```text
+25 customers, 5 trucks, 2 hubs, 4 drones/truck
+PS distribution, seed 1
+pricing_tolerance=0.01
+6 process pricing workers
+time_limit=3600
+random absolute promised windows, offset 30-90, witness slack 3
+drone_payload=6, drone_speed=100, drone_endurance=75, drone_cost=1
+truck_arc_probability=0.05, hub_arc_probability=0.18
+```
+
+Validation after the balanced dynamic K-core implementation:
+
+```text
+python -m compileall thvrpd tests
+python -c "import sys, pytest; sys.path.append(r'D:\gurobi1201\win64\python311\lib'); raise SystemExit(pytest.main(['tests','-q']))"
+
+compileall succeeded
+154 passed in 11.12s
+```
+
+### Main Result
+
+| Metric | Balanced dynamic K-core BPC |
+|---|---:|
+| Status | optimal under `pricing_tolerance=0.01` |
+| Runtime (s) | 2036.1661 |
+| Nodes processed | 7 |
+| Post-root nodes processed | 6 |
+| Root closed | true |
+| Full incumbent | 0.0695884199 |
+| Full lower bound | 0.0695884199 |
+| Full gap | 0.00% |
+| Truck arcs | 111 |
+| Drone arcs | 4 |
+| Mandatory drone customers | 4: C12, C13, C18, C21 |
+| Selected routes | 4 |
+| Drone sorties | 4 |
+
+Selected route structure:
+
+| Route | Path | Drone sorties | Served customers |
+|---:|---|---:|---|
+| 450 | Source-C10-H2-C14-C9-C6-C23-Sink | 2 | C10, C13, C14, C18, C23, C6, C9 |
+| 444 | Source-C16-C15-C2-C1-Sink | 0 | C1, C15, C16, C2 |
+| 449 | Source-C5-C20-C8-C22-C3-C4-Sink | 0 | C20, C22, C3, C4, C5, C8 |
+| 427 | Source-H1-C24-C7-C25-C19-C17-H2-C11-Sink | 2 | C11, C12, C17, C19, C21, C24, C25, C7 |
+
+The four drone sorties are exactly the structurally mandatory drone customers: C13 and C18 from H2, and C12 and C21 from H1. The final solution is therefore not truck-only.
+
+### Comparison
+
+| Metric | Balanced dynamic K-core BPC | Previous BPC, `tol=0.05` | Existing compact arc 20-min |
+|---|---:|---:|---:|
+| Output folder | `run_balanced_dynamic_kcore_large25_tol001_w6_1h_resumed` | `run_bpc_large25_425param_1h` | `run_compact_arc_large25_mediumlike_425param_20min` |
+| Runtime (s) | 2036.1661 | 200.5375 | 1200.1017 |
+| Status | optimal | optimal under `tol=0.05` | time limit, incumbent extracted |
+| Nodes processed / explored | 7 | 1 | 14,021 |
+| Incumbent objective | 0.0695884199 | 0.1056060693 | 0.0727504027 |
+| Lower/best bound | 0.0695884199 | 0.1056060693 | -0.2940004425 |
+| Gap | 0.00% | 0.00% | 504.12% |
+| Drone sorties | 4 | 4 | 4 |
+
+The balanced dynamic BPC run improves the previous BPC incumbent by `0.0360176494` and improves the existing compact arc incumbent by `0.0031619828`. Unlike the compact arc run, it also proves the matching lower bound under the configured pricing tolerance.
+
+The earlier `run_bpc_large25_425param_tol001_1h` folder contains a progress snapshot with root closure and no final solve JSON. It is therefore used only for pricing-throughput context, not for incumbent comparison.
+
+### Pricing And Parallel Workload
+
+| Metric | Balanced dynamic K-core BPC |
+|---|---:|
+| Standard pricing time (s) | 1550.3974 |
+| Share of total runtime | 76.14% |
+| RMP time (s) | 146.3795 |
+| RMP share | 7.19% |
+| SR separation time (s) | 176.4038 |
+| SR share | 8.66% |
+| Compact warm-start solve time (s) | 60.0050 |
+| Compact share | 2.95% |
+| Heuristic time (s) | 1.7377 |
+| Pricing labels generated | 2,777,844 |
+| Labels dominated | 124,201 |
+| Labels pruned | 616,818 |
+| Complete routes generated | 803,514 |
+| Maximum queue size | 335 |
+| RMP solves | 229 |
+| SR cuts added | 387 |
+
+Pricing remains the dominant proof cost. RMP and SR work are material but secondary. The compact warm start is a small part of total runtime and remained primal-only.
+
+### Balanced K-Core And Dynamic Refinement Diagnostics
+
+| Metric | Value |
+|---|---:|
+| Process workers | 6 |
+| Maximum CPU-core equivalent | 5.7235 |
+| Weighted CPU-core equivalent | 4.7207 |
+| Pricing process CPU time (s) | 7309.5000 |
+| Worker CPU time (s) | 7304.1875 |
+| Main-process CPU time (s) | 5.3125 |
+| Main merge time (s) | 5.5194 |
+| Idle worker seconds | 1848.0260 |
+| Initial load imbalance, max/mean | 1.0565 |
+| Empty core blocks | 0 |
+| Split candidates | 1,150 |
+| Splits performed | 950 |
+| Dynamic child tasks created | 13,895 |
+| Labels transferred to child tasks | 13,895 |
+| Leaf tasks closed | 13,152 |
+| Max open labels by task | 335 |
+
+The balanced assignment produced a small initial load imbalance (`1.0565` max/mean) and no empty core blocks. Dynamic refinement was active: 950 of 1,150 split candidates were split, creating 13,895 child tasks. CPU utilization improved relative to the prior static-tolerance progress context (`4.7207` weighted core-equivalent versus `2.7265` in `run_bpc_large25_425param_tol001_1h`). Main-process merge and control time was only `5.5194s`, so serial merge/control is not the limiting factor in this run.
+
+Idle worker time is still measurable: `1848.0260` worker-seconds, about 19.9% of the theoretical six-worker pricing wall-clock capacity over standard pricing time. The remaining idle time occurs despite dynamic refinement, so the residual imbalance is in the tail of task exhaustion rather than in the initial source-neighbor assignment.
+
+### Dominance And Closure-Frontier Workload
+
+| Metric | Value |
+|---|---:|
+| Dominance frontier queries | 3,390,320 |
+| Frontier keys scanned | 4,314,525 |
+| Frontier keys skipped by mask | 41,510,177 |
+| Bucket pairs considered | 3,462,208 |
+| Candidate pairs materialized | 3,799,965 |
+| Pairs avoided before materialization | 56,113,954 |
+| Full same-node tests | 103,356 |
+| Full physical-location tests | 20,845 |
+| Labels deleted by same-node dominance | 103,356 |
+| Labels deleted by physical-location dominance | 20,845 |
+| Physical-location dominance time (s) | 28.2145 |
+| Resource reward-bound calls | 1,633,679 |
+| Resource reward-bound time (s) | 125.1060 |
+| Labels certified by cell lower bounds | 780,388 |
+
+The dominance-frontier gates avoided a large number of impossible comparisons before label-pair materialization. Full theorem checks were still substantial but much smaller than the avoided-pair count. Physical-location dominance consumed `28.2145s`, which is not negligible but is not the dominant bottleneck relative to total standard pricing time. Resource reward bounds consumed `125.1060s`, making reduced-cost pruning and closure-bound evaluation a larger measured pricing-side subcomponent than physical-location dominance.
+
+### Bottleneck Diagnosis
+
+The measured bottleneck is still lower-bound proof throughput in forward pricing, not primal incumbent discovery. The incumbent is strong enough to beat the compact arc incumbent, and the proof eventually closes. The dominant cost is the volume of exact forward-pricing work required across root and post-root certification:
+
+```text
+standard pricing time = 1550.3974s
+labels generated = 2,777,844
+complete routes generated = 803,514
+resource reward-bound calls = 1,633,679
+RMP solves = 229
+SR cuts added = 387
+```
+
+The balanced dynamic K-core scheduler improved processor use and reduced the original idle-worker problem. It did not eliminate tail imbalance completely. The evidence is:
+
+```text
+weighted CPU-core equivalent = 4.7207 / 6
+initial load imbalance max/mean = 1.0565
+idle worker seconds = 1848.0260
+dynamic splits performed = 950
+```
+
+The proof-side secondary burden is active RMP/SR cycling after root closure:
+
+```text
+RMP time = 146.3795s
+SR separation time = 176.4038s
+RMP solves = 229
+SR cuts added = 387
+nodes processed = 7
+```
+
+Thus, after balanced dynamic K-core scheduling, the bottleneck is no longer gross CPU underuse or serial merge/control. It is exact pricing volume plus repeated RMP/SR proof maintenance.
+
+### Future Revision Directions From This Run
+
+1. Dynamic refinement tail scheduling should focus on late certification tails. Initial load balancing is already effective (`1.0565` max/mean), but `1848.0260` idle worker-seconds remain. The next revision should measure whether late-stage leaf tasks with small open queues but long dominance/frontier histories are causing tail idle time.
+
+2. Resource reward-bound evaluation is a larger measured subcomponent than physical-location dominance. The run spent `125.1060s` in resource reward-bound calls versus `28.2145s` in physical-location dominance. Any future pruning revision should separately report reward-bound cache hits, repeated location states, and the distribution of reachable-customer set sizes.
+
+3. Active SR and RMP proof maintenance needs its own post-root budget accounting. The run added 387 SR cuts and solved 229 RMPs, consuming `322.7833s` combined RMP and SR time. Future revisions should report active-row density by node and distinguish coefficient materialization from LP solve time in the post-root nodes.
+
+4. Dominance-frontier gates are effective but still materialize millions of pairs. The run avoided `56,113,954` pairs before materialization, but still materialized `3,799,965` candidate pairs. The next revision should report materialized-pair distribution by task and by frontier cell, because the bottleneck may be concentrated in a small number of high-density cells.
+
+5. Serial merge/control is not the current limiting component. Main merge time was `5.5194s`, and main-process CPU time was `5.3125s`, compared with `7304.1875s` of worker CPU time. Future parallel work should therefore target task splitting, closure-bound reuse, and dominance-frontier density rather than moving merge logic into separate processors.
+
+6. The compact warm start remains useful but is not the proof bottleneck. It accepted 5 root columns after a 60-second solve and contributed to the final route pool, but total proof time was driven by pricing and RMP/SR cycling. Future warm-start revisions should be evaluated by incumbent quality and column diversity, not by lower-bound proof time.
+
+## Direct Compact Gurobi Same-Case 1-Hour Benchmark
+
+This section reports a direct compact arc-based MIQP run on the same 25-customer case as the balanced dynamic K-core BPC audit. This was a standalone compact benchmark, not a BPC warm start and not a new BPC run.
+
+Output folder:
+
+```text
+numerical_experiments\run_compact_arc_large25_samecase_1h
+```
+
+Run setting:
+
+```text
+25 customers, 5 trucks, 2 hubs, 4 drones/truck
+PS distribution, seed 1
+time_limit=3600
+threads=1
+random absolute promised windows, offset 30-90, witness slack 3
+drone_payload=6, drone_speed=100, drone_endurance=75, drone_cost=1
+truck_arc_probability=0.05, hub_arc_probability=0.18
+```
+
+The compact benchmark JSON reports `status=success` because a feasible incumbent was extracted and decoded. Gurobi itself terminated by time limit: `status_code=9`, with the log line `Time limit reached`.
+
+### Compact Gurobi Result
+
+| Metric | Direct compact Gurobi |
+|---|---:|
+| Runtime (s) | 3600.1241 |
+| Gurobi status | time limit |
+| Extracted incumbent objective | 0.0892879979 |
+| Best bound | -0.2941049923 |
+| MIP gap | 429.3892% |
+| Explored nodes | 48,936 |
+| Simplex iterations | 41,816,339 |
+| Transformed nodes | 33 |
+| Transformed arcs | 145 |
+| Selected routes | 4 |
+| Drone sorties | 4 |
+| Model build time (s) | 0.0940 |
+| Solve time (s) | 3600.0026 |
+| Route decode time (s) | 0.0015 |
+
+Selected compact route structure:
+
+| Route | Truck path | Drone block | Drone sorties | Served customers |
+|---:|---|---|---:|---|
+| 1 | Source-C10-C25-C19-C17-C24-C7-H2-C11-Sink | H2: C13, C18 | 2 | C10, C11, C13, C17, C18, C19, C24, C25, C7 |
+| 2 | Source-C5-C20-C8-C22-C3-C4-Sink | none | 0 | C20, C22, C3, C4, C5, C8 |
+| 3 | Source-C16-C23-C15-C2-Sink | none | 0 | C15, C16, C2, C23 |
+| 4 | Source-C14-C9-C6-H1-C1-Sink | H1: C12, C21 | 2 | C1, C12, C14, C21, C6, C9 |
+
+### Direct Comparison With Balanced Dynamic K-Core BPC
+
+| Metric | Balanced dynamic K-core BPC | Direct compact Gurobi |
+|---|---:|---:|
+| Output folder | `run_balanced_dynamic_kcore_large25_tol001_w6_1h_resumed` | `run_compact_arc_large25_samecase_1h` |
+| Runtime (s) | 2036.1661 | 3600.1241 |
+| Termination | proven optimal under `pricing_tolerance=0.01` | time limit with incumbent |
+| Incumbent objective | 0.0695884199 | 0.0892879979 |
+| Lower/best bound | 0.0695884199 | -0.2941049923 |
+| Gap | 0.00% | 429.3892% |
+| Search nodes | 7 BPC nodes | 48,936 compact MIP nodes |
+| Drone sorties | 4 | 4 |
+
+The BPC run beats the direct compact MIQP on both primal quality and proof quality for this case. Its incumbent is lower by `0.0196995780`, and it proves optimality under the configured pricing tolerance in `2036.1661s`. The compact MIQP still has a very weak proof bound after the full hour, despite exploring 48,936 branch-and-bound nodes and 41.8 million simplex iterations.
+
+The direct compact result reinforces the same bottleneck interpretation: the compact arc-based model can find drone-using incumbents, but its lower-bound proof is substantially weaker than the route-space BPC proof on this sparse, promised-window, drone-required instance.
+
+## Consistent Scale Settings And Medium 30-Minute Comparison
+
+The large 25-customer setting used above implies the following scale-consistent instance family. The graph-generation policy, drone-required policy, service-window policy, objective weights, and drone-friendly physical parameters are held fixed across scales; only the customer and truck counts change.
+
+| Scale | Customers | Trucks | Hubs | Drones/truck | Truck arc probability | Hub arc probability | Mandatory drone fraction | Max drone customers/hub | Max launch hubs/customer |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Small | 5 | 2 | 2 | 4 | 0.05 | 0.18 | 0.16 | 2 | 1 |
+| Medium | 15 | 5 | 2 | 4 | 0.05 | 0.18 | 0.16 | 2 | 1 |
+| Large | 25 | 5 | 2 | 4 | 0.05 | 0.18 | 0.16 | 2 | 1 |
+
+Common physical and algorithmic settings:
+
+```text
+distribution=PS, seed=1
+weights=(0.4, 0.3, 0.3)
+truck_speed=40, drone_speed=100
+truck_payload=50, drone_payload=6
+drone_endurance=75
+truck_cost=20, drone_cost=1
+service_deadline_mode=random_absolute
+service_deadline_offset_min=30
+service_deadline_offset_max=90
+service_deadline_witness_slack=3
+service_deadline_witness_method=constructive_then_compact
+pricing_tolerance=0.01 for BPC
+pricing_parallel_workers=6 for BPC
+root_compact_after_constructive=full_budget
+root_compact_solve_time_limit=60
+```
+
+Fresh medium output folders:
+
+```text
+numerical_experiments\run_medium15_samecase_bpc_tol001_w6_30min
+numerical_experiments\run_compact_arc_medium15_samecase_30min
+```
+
+Both runs used a 30-minute time limit. Both terminated before the limit.
+
+### Medium Result Summary
+
+| Metric | BPC | Direct compact Gurobi |
+|---|---:|---:|
+| Runtime (s) | 63.3401 | 97.5358 |
+| Termination | optimal | optimal |
+| Objective | 0.1629495288 | 0.1629495288 |
+| Lower/best bound | 0.1629495288 | 0.1629495288 |
+| Gap | 0.00% | 0.00% |
+| BPC/root or MIP nodes | 1 BPC node | 25,008 MIP nodes |
+| Simplex iterations | not applicable | 2,125,807 |
+| Selected routes | 3 | 3 |
+| Drone sorties | 3 | 3 |
+| Mandatory drone customers | 3 | 3: C12, C15, C7 |
+| Transformed nodes | 22 | 22 |
+| Transformed arcs | 75 | 75 |
+
+The medium BPC run closed at the root. Its total runtime includes the forced compact warm start:
+
+| BPC component | Value |
+|---|---:|
+| Root compact status | success |
+| Root compact accepted columns | 3 |
+| Standard pricing time (s) | 1.2326 |
+| RMP time (s) | 0.0216 |
+| SR separation time (s) | 0.1690 |
+| Labels generated | 3,974 |
+| Complete routes generated | 1,019 |
+| Weighted CPU-core equivalent | 1.3365 |
+
+The direct compact MIQP also solved the medium instance, but needed a substantially larger MIP tree:
+
+```text
+Explored 25,008 compact MIP nodes
+2,125,807 simplex iterations
+Best objective = 0.1629495288438
+Best bound = 0.1629495288438
+```
+
+### Medium Route Structure
+
+The BPC and compact Gurobi solutions select the same route set, up to route ordering:
+
+| Route | Path | Drone sorties | Served customers |
+|---:|---|---:|---|
+| 1 | Source-C10-C8-C14-C2-C9-Sink | 0 | C10, C14, C2, C8, C9 |
+| 2 | Source-H1-C15 drone block-C11-C6-C1-Sink | 1 | C1, C11, C15, C6 |
+| 3 | Source-H2-C12/C7 drone block-C3-C5-C4-C13-Sink | 2 | C12, C13, C3, C4, C5, C7 |
+
+The three drone sorties are exactly the mandatory drone customers in this medium instance: C12, C15, and C7. Thus the medium result is also not truck-only.
+
+### Medium Interpretation
+
+On the medium scale, both approaches prove optimality within the 30-minute budget. BPC is faster in wall-clock time (`63.3401s` versus `97.5358s`) and proves the same solution with one root node, while compact Gurobi explores 25,008 MIP nodes. The BPC runtime is dominated by the forced 60-second compact warm start; the route-space proof itself is very short, with only `1.2326s` of standard pricing time and `3,974` labels generated.

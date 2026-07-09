@@ -66,13 +66,18 @@ from thvrpd.pricing import (
     PricingDiagnostics,
     PricingDuals,
     PricingTimeLimitReached,
+    MaskContainmentTrie,
     _BackwardInterface,
     _DeadlinePricingCounters,
+    _DynamicRefinementConfig,
     _JoinEvalCache,
+    _KCoreBalanceConfig,
     _Label,
+    _balanced_source_neighbor_partition,
     _backward_dominates,
     _branch_state,
     _build_backward_label,
+    _build_balanced_dynamic_task_plan,
     _build_pricing_bounds,
     _bucketed_join_generators,
     _bucketed_join_pairs,
@@ -100,6 +105,7 @@ from thvrpd.pricing import (
     _join_prefilter,
     _paper_dominates,
     _partition_source_neighbors,
+    _pricing_epoch,
     _select_diverse_pricing_candidates,
     _merge_compact_worker_results,
     _shortest_truck_times,
@@ -162,7 +168,7 @@ def _source_label(instance, graph) -> _Label:
         physical_time=0.0,
         service_times=tuple(),
         sr_counts=tuple(),
-        reduced_cost=0.0,
+        reduced_cost=-1_000_000.0,
         used_arcs=frozenset(),
         represented_mask=0,
         truck_node_mask=0,
@@ -221,6 +227,59 @@ def test_deadline_pricing_diagnostics_and_forward_only_engine() -> None:
     assert result.diagnostics.extensions_attempted > 0
     assert result.diagnostics.extensions_rejected_by_deadline >= 0
     assert result.diagnostics.deadline_reward_bound_calls >= 0
+
+
+def test_solver_config_default_pricing_tolerance_is_five_hundredths() -> None:
+    assert SolverConfig().pricing_tolerance == pytest.approx(0.05)
+
+
+def test_cli_defaults_force_compact_after_constructive() -> None:
+    assert 'default="full_budget"' in Path("thvrpd/solve.py").read_text()
+    assert 'default="full_budget"' in Path("thvrpd/experiments.py").read_text()
+
+
+def test_pricing_tolerance_controls_negative_column_acceptance() -> None:
+    instance, _, objective, graph = _setup()
+    residual = frozenset({"C1"})
+    base_route = route_from_path(1, ("Source", "C1", "Sink"), graph, objective)
+    threshold = SolverConfig().pricing_tolerance
+
+    not_negative_duals = PricingDuals(
+        mu={"C1": base_route.cost + threshold - 0.001, "C2": 0.0, "C3": 0.0},
+        kappa=0.0,
+        nu={},
+    )
+    not_negative = price_route(
+        graph,
+        objective,
+        residual,
+        BranchRestrictions(),
+        not_negative_duals,
+        next_route_id=10,
+        pricing_tolerance=threshold,
+        batch_size=4,
+    )
+    assert route_reduced_cost(base_route, not_negative_duals) == pytest.approx(-0.049)
+    assert not not_negative.routes
+
+    negative_duals = PricingDuals(
+        mu={"C1": base_route.cost + threshold + 0.001, "C2": 0.0, "C3": 0.0},
+        kappa=0.0,
+        nu={},
+    )
+    negative = price_route(
+        graph,
+        objective,
+        residual,
+        BranchRestrictions(),
+        negative_duals,
+        next_route_id=20,
+        pricing_tolerance=threshold,
+        batch_size=4,
+    )
+    assert route_reduced_cost(base_route, negative_duals) == pytest.approx(-0.051)
+    assert len(negative.routes) == 1
+    assert negative.reduced_costs == pytest.approx((-0.051,))
 
 
 def test_root_constructive_heuristic_produces_verified_service_window_incumbent() -> None:
@@ -303,6 +362,51 @@ def test_compact_warm_start_skips_after_constructive_incumbent_by_policy() -> No
     assert stats.root_compact_attempted is False
 
 
+def test_forced_compact_policy_runs_after_good_constructive_incumbent(monkeypatch) -> None:
+    instance, weights, objective, graph = _setup()
+    stats = BPCStats(
+        root_constructive_incumbent_found=True,
+        root_constructive_diversity_score=1.0,
+        root_constructive_drone_sorties=1,
+        root_constructive_truck_count=1,
+        root_constructive_value=0.01,
+    )
+    calls = []
+    routes = {}
+
+    def fake_compact_solution(*args, **kwargs):
+        calls.append(kwargs)
+        return CompactSolution(
+            objective_full=1.0,
+            route_paths=(("Source", "C1", "Sink"),),
+            timing=CompactTiming(model_build_time=0.25, solve_time=0.5, route_decode_time=0.1),
+            status="success",
+        )
+
+    monkeypatch.setattr(bpc_module, "solve_compact_solution", fake_compact_solution)
+    extracted = _extract_root_routes(
+        instance,
+        weights,
+        SolverConfig(root_compact_solve_time_limit=0.5),
+        graph,
+        objective,
+        routes,
+        stats,
+        time.time() + 60.0,
+        constructive_incumbent_found=True,
+    )
+    assert extracted == {("Source", "C1", "Sink")}
+    assert calls
+    assert calls[0]["time_limit"] == pytest.approx(0.5)
+    assert calls[0]["objective"] is objective
+    assert "wall_deadline" not in calls[0]
+    assert stats.root_compact_attempted is True
+    assert stats.root_compact_conditional_triggered is False
+    assert stats.root_compact_status == "success"
+    assert stats.root_compact_budget_seconds == pytest.approx(0.5)
+    assert stats.root_compact_solve_budget_seconds == pytest.approx(0.5)
+
+
 def test_conditional_compact_policy_triggers_small_budget_for_low_diversity() -> None:
     instance, weights, objective, graph = _setup()
     stats = BPCStats(
@@ -333,7 +437,7 @@ def test_conditional_compact_policy_triggers_small_budget_for_low_diversity() ->
     assert stats.root_compact_skipped_reason == "zero_budget"
 
 
-def test_conditional_wall_budget_counts_compact_build_solve_decode_and_insertion(monkeypatch) -> None:
+def test_conditional_compact_uses_fixed_solve_budget_and_processes_incumbent(monkeypatch) -> None:
     instance, weights, objective, graph = _setup()
     stats = BPCStats(
         root_constructive_incumbent_found=True,
@@ -342,14 +446,15 @@ def test_conditional_wall_budget_counts_compact_build_solve_decode_and_insertion
         root_constructive_truck_count=instance.num_trucks,
     )
     calls = []
+    routes = {}
 
     def fake_compact_solution(*args, **kwargs):
         calls.append(kwargs)
         return CompactSolution(
-            objective_full=None,
-            route_paths=tuple(),
-            timing=CompactTiming(model_build_time=1.25, solve_time=0.0, route_decode_time=0.0),
-            status="budget_exhausted_build",
+            objective_full=1.0,
+            route_paths=(("Source", "C1", "Sink"),),
+            timing=CompactTiming(model_build_time=1.25, solve_time=0.5, route_decode_time=0.1),
+            status="success",
         )
 
     monkeypatch.setattr(bpc_module, "solve_compact_solution", fake_compact_solution)
@@ -358,27 +463,31 @@ def test_conditional_wall_budget_counts_compact_build_solve_decode_and_insertion
         weights,
             SolverConfig(
                 root_compact_after_constructive="conditional_wall_budget",
-                root_compact_wall_time_limit=2.0,
                 root_compact_solve_time_limit=0.5,
                 compact_after_no_drone_incumbent="small_budget",
             ),
         graph,
         objective,
-        {},
+        routes,
         stats,
         time.time() + 60.0,
         constructive_incumbent_found=True,
     )
-    assert extracted == set()
+    assert extracted == {("Source", "C1", "Sink")}
+    assert ("Source", "C1", "Sink") in routes
     assert calls
     assert calls[0]["time_limit"] == pytest.approx(0.5)
-    assert calls[0]["wall_deadline"] is not None
-    assert stats.root_compact_budget_seconds == pytest.approx(2.0)
-    assert stats.root_compact_wall_budget_seconds == pytest.approx(2.0)
+    assert calls[0]["objective"] is objective
+    assert "wall_deadline" not in calls[0]
+    assert stats.root_compact_budget_seconds == pytest.approx(0.5)
+    assert stats.root_compact_wall_budget_seconds == pytest.approx(0.0)
     assert stats.root_compact_solve_budget_seconds == pytest.approx(0.5)
-    assert stats.root_compact_status == "budget_exhausted_build"
-    assert stats.root_compact_wall_budget_hit is True
+    assert stats.root_compact_status == "success"
+    assert stats.root_compact_wall_budget_hit is False
     assert stats.root_model_build_time == pytest.approx(1.25)
+    assert stats.root_model_solve_time == pytest.approx(0.5)
+    assert stats.root_route_decode_time == pytest.approx(0.1)
+    assert stats.root_compact_decode_verification_time >= 0.0
 
 
 def test_rmp_insertion_rejects_late_route_object() -> None:
@@ -862,14 +971,90 @@ def test_source_neighbor_partition_disjoint_exhaustive() -> None:
     neighbors = tuple(f"N{i}" for i in range(1, 9))
     blocks = _partition_source_neighbors(neighbors, 4)
     assert blocks == (
-        ("N1", "N2"),
-        ("N3", "N4"),
-        ("N5", "N6"),
-        ("N7", "N8"),
+        ("N1", "N5"),
+        ("N2", "N6"),
+        ("N3", "N7"),
+        ("N4", "N8"),
     )
     flattened = [node for block in blocks for node in block]
-    assert flattened == list(neighbors)
+    assert sorted(flattened) == sorted(neighbors)
     assert sum(len(block) for block in blocks) == len(set(flattened))
+
+    sparse_blocks = _partition_source_neighbors(("A", "B", "C"), 5)
+    assert sparse_blocks == (("A",), ("B",), ("C",), tuple(), tuple())
+    assert len(sparse_blocks) == 5
+    assert tuple(node for block in sparse_blocks for node in block) == ("A", "B", "C")
+
+    empty_blocks = _partition_source_neighbors(tuple(), 3)
+    assert empty_blocks == (tuple(), tuple(), tuple())
+
+
+def test_balanced_source_neighbor_partition_is_disjoint_and_load_balanced() -> None:
+    instance, _, objective, graph = _setup()
+    neighbors = tuple(sorted(node for node in graph.out_arcs[instance.depot_source] if node != instance.depot_sink))
+
+    partition = _balanced_source_neighbor_partition(
+        neighbors,
+        3,
+        graph=graph,
+        objective=objective,
+        residual_customers=frozenset(instance.customers),
+        balance_config=_KCoreBalanceConfig(enabled=True),
+    )
+
+    flattened = tuple(node for block in partition.blocks for node in block)
+    assert sorted(flattened) == sorted(neighbors)
+    assert len(flattened) == len(set(flattened))
+    assert len(partition.blocks) == 3
+    assert len(partition.loads) == 3
+    assert partition.imbalance_max_mean >= 0.0
+
+
+def test_dynamic_kcore_refinement_conserves_prefix_subspaces() -> None:
+    instance, _, objective, graph = _setup()
+    neighbors = tuple(sorted(node for node in graph.out_arcs[instance.depot_source] if node != instance.depot_sink))
+
+    plan = _build_balanced_dynamic_task_plan(
+        graph,
+        objective,
+        frozenset(instance.customers),
+        BranchRestrictions(),
+        neighbors,
+        2,
+        prefix_task_depth=1,
+        balance_config=_KCoreBalanceConfig(enabled=True),
+        refinement_config=_DynamicRefinementConfig(
+            enabled=True,
+            split_label_threshold=1,
+            split_gap_multiplier=10.0,
+            split_time_threshold=0.0,
+            split_work_threshold=1.0,
+            refinement_depth=2,
+            checkpoint_extension_period=1,
+        ),
+        pricing_tolerance=0.01,
+    )
+
+    expected_prefixes = _source_neighbor_prefix_tasks(
+        graph,
+        objective,
+        frozenset(instance.customers),
+        BranchRestrictions(),
+        2,
+    )
+    planned_prefixes = tuple(prefix for block in plan.source_prefix_blocks for prefix in block)
+    planned_neighbors = sorted(node for block in plan.source_neighbor_blocks for node in block)
+    assert sorted(planned_prefixes) == sorted(expected_prefixes)
+    assert set(planned_neighbors).issubset(set(neighbors))
+    assert len(plan.source_neighbor_blocks) == len(plan.source_prefix_blocks)
+    assert sum(len(block) for block in plan.source_prefix_blocks) == len(expected_prefixes)
+    assert plan.labels_transferred_to_idle_workers <= len(expected_prefixes)
+    assert plan.dynamic_split_candidates >= plan.dynamic_splits_performed
+    assert plan.dynamic_splits_performed > 0
+    for block, prefixes in zip(plan.source_neighbor_blocks, plan.source_prefix_blocks):
+        for prefix in prefixes:
+            assert prefix
+            assert prefix[0] in block
 
 
 def test_parallel_forward_certification_matches_serial_forward() -> None:
@@ -903,6 +1088,9 @@ def test_parallel_forward_certification_matches_serial_forward() -> None:
     assert threaded.diagnostics.exact_completion is True
     assert threaded.diagnostics.certification_mode == "source_neighbor_partitions_closed"
     assert threaded.diagnostics.parallel_calls == 1
+    assert threaded.diagnostics.pricing_first_hit_enabled is False
+    assert threaded.diagnostics.core_subspace_count == 2
+    assert threaded.diagnostics.root_closed_by_all_cores is True
     assert threaded.diagnostics.source_neighbor_count == len(
         [node for node in graph.out_arcs[instance.depot_source] if node != instance.depot_sink]
     )
@@ -1032,7 +1220,10 @@ def test_persistent_process_pool_reuses_workers_and_returns_batch() -> None:
     assert first.diagnostics.pricing_returned_batch_size == len(first.routes)
     assert first.diagnostics.pricing_worker_payload_count == first.diagnostics.source_neighbor_task_count
     assert first.diagnostics.pricing_worker_response_count == first.diagnostics.source_neighbor_task_count
-    assert first.diagnostics.source_neighbor_task_count == first.diagnostics.source_neighbor_count
+    assert first.diagnostics.source_neighbor_task_count == 2
+    assert first.diagnostics.core_subspace_count == 2
+    assert len(first.diagnostics.source_neighbor_block_sizes) == 2
+    assert sum(first.diagnostics.source_neighbor_block_sizes) == first.diagnostics.source_neighbor_count
     assert first.diagnostics.local_worker_candidate_quota >= 1
     assert first.diagnostics.diversity_quota == 2
     assert first.diagnostics.diversity_selected_routes == len(first.routes)
@@ -1058,9 +1249,12 @@ def test_persistent_process_merge_rejects_stale_call_id() -> None:
         best_reduced_cost=None,
         exact_completion=True,
     )
+    duals = PricingDuals(mu={c: 0.0 for c in instance.customers}, kappa=0.0, nu={})
+    epoch = _pricing_epoch(objective, frozenset(instance.customers), BranchRestrictions(), duals, None, None)
     stale = _WorkerPricingResult(
         call_id=1,
         dual_id=1,
+        epoch=epoch,
         worker_id=0,
         route_paths=tuple(),
         reduced_costs=tuple(),
@@ -1075,7 +1269,7 @@ def test_persistent_process_merge_rejects_stale_call_id() -> None:
             objective,
             frozenset(instance.customers),
             BranchRestrictions(),
-            PricingDuals(mu={c: 0.0 for c in instance.customers}, kappa=0.0, nu={}),
+            duals,
             next_route_id=1300,
             farkas=False,
             pricing_tolerance=1e-7,
@@ -1091,6 +1285,7 @@ def test_persistent_process_merge_rejects_stale_call_id() -> None:
             force_time_limit=False,
             call_id=2,
             dual_id=1,
+            expected_epoch=epoch,
             submission_time_seconds=0.0,
             pool_startup_time_seconds=0.0,
             pool_startup_count=0,
@@ -1164,9 +1359,9 @@ def test_solver_config_yield_alignment_defaults_and_validation() -> None:
     assert config.prefix_task_min_branching_for_depth2 == 4
     assert config.post_incumbent_primal_budget_factor == 0.25
     assert config.enable_constructive_root_incumbent is True
-    assert config.root_compact_after_constructive == "conditional_wall_budget"
-    assert config.root_compact_time_limit_after_constructive == 1.0
-    assert config.root_compact_time_limit_without_constructive == 5.0
+    assert config.root_compact_after_constructive == "full_budget"
+    assert config.root_compact_time_limit_after_constructive == 60.0
+    assert config.root_compact_time_limit_without_constructive == 60.0
     assert config.constructive_diversity_threshold == 0.35
     assert config.enable_sr_aging is True
     assert config.sr_inactive_age_threshold == 1
@@ -1178,9 +1373,21 @@ def test_solver_config_yield_alignment_defaults_and_validation() -> None:
     assert config.child_certification_slice_seconds == 30.0
     assert config.child_productive_before_certification is False
     assert config.enable_rmp_basis_reuse is True
-    assert config.root_compact_wall_time_limit == 1.0
-    assert config.root_compact_solve_time_limit == 1.0
+    assert config.root_compact_wall_time_limit == 0.0
+    assert config.root_compact_solve_time_limit == 60.0
     assert config.enable_drone_diversification_warm_start is True
+    assert config.enable_balanced_kcore_pricing is True
+    assert config.enable_dynamic_kcore_refinement is True
+    assert config.kcore_balance_alpha_reachable_customers == pytest.approx(1.0)
+    assert config.kcore_balance_alpha_out_degree == pytest.approx(0.25)
+    assert config.kcore_balance_alpha_drone_pads == pytest.approx(0.5)
+    assert config.kcore_balance_alpha_deadline_customers == pytest.approx(0.5)
+    assert config.dynamic_split_label_threshold == 2000
+    assert config.dynamic_split_gap_multiplier == pytest.approx(10.0)
+    assert config.dynamic_split_time_threshold == pytest.approx(5.0)
+    assert config.dynamic_split_work_threshold == pytest.approx(2000.0)
+    assert config.dynamic_refinement_depth == 2
+    assert config.checkpoint_extension_period == 5000
     assert config.enable_incremental_rmp is True
     assert config.enable_active_coefficient_cache is True
     assert config.enable_global_branch_route_index is True
@@ -1202,6 +1409,22 @@ def test_solver_config_yield_alignment_defaults_and_validation() -> None:
     assert config.child_no_route_yield_high == pytest.approx(1.0)
     assert config.use_row_local_sr_coeff_cache is True
     assert config.use_dominance_prefilter_keys is True
+    assert config.enable_closure_frontier_cells is True
+    assert config.enable_mask_trie_frontier is True
+    assert config.enable_mask_containment_index is True
+    assert config.enable_cell_envelope_rejection is True
+    assert config.enable_cell_lb_certificates is True
+    assert config.frontier_cell_max_labels == 512
+    assert config.frontier_cell_split_min_pairs == 2048
+    assert config.max_frontier_cell_size == 512
+    assert config.max_frontier_pair_product == 2000
+    assert config.max_frontier_split_depth == 6
+    assert config.enable_resource_restricted_closure_bound is True
+    assert config.resource_bound_method == "greedy"
+    assert config.resource_bound_payload_bucket == 0
+    assert config.closure_queue_enabled is True
+    assert config.closure_queue_mode == "cell_lb"
+    assert config.closure_mode_rebuild_frontier is True
     assert config.use_promised_drone_construction is False
     assert config.no_drone_incumbent_trigger is False
     assert config.compact_after_no_drone_incumbent == "small_budget"
@@ -1229,6 +1452,12 @@ def test_solver_config_yield_alignment_defaults_and_validation() -> None:
         SolverConfig(root_compact_wall_time_limit=-1.0)
     with pytest.raises(ValueError, match="root compact time limits"):
         SolverConfig(root_compact_solve_time_limit=-1.0)
+    with pytest.raises(ValueError, match="pricing batch sizes must be positive"):
+        SolverConfig(dynamic_refinement_depth=0)
+    with pytest.raises(ValueError, match="pricing batch sizes must be positive"):
+        SolverConfig(checkpoint_extension_period=0)
+    with pytest.raises(ValueError, match="balanced dynamic K-core"):
+        SolverConfig(kcore_balance_alpha_reachable_customers=-1.0)
     with pytest.raises(ValueError, match="child closure batches"):
         SolverConfig(child_closure_batch_min=32, child_closure_batch_initial=16)
     with pytest.raises(ValueError, match="child certification yield thresholds"):
@@ -1239,6 +1468,20 @@ def test_solver_config_yield_alignment_defaults_and_validation() -> None:
         SolverConfig(child_no_route_yield_high=1.1)
     with pytest.raises(ValueError, match="compact_after_no_drone_incumbent"):
         SolverConfig(compact_after_no_drone_incumbent="bad")
+    with pytest.raises(ValueError, match="pricing batch sizes must be positive"):
+        SolverConfig(frontier_cell_max_labels=0)
+    with pytest.raises(ValueError, match="pricing batch sizes must be positive"):
+        SolverConfig(max_frontier_cell_size=0)
+    with pytest.raises(ValueError, match="pricing batch sizes must be positive"):
+        SolverConfig(max_frontier_pair_product=0)
+    with pytest.raises(ValueError, match="pricing batch sizes must be positive"):
+        SolverConfig(max_frontier_split_depth=0)
+    with pytest.raises(ValueError, match="resource bound payload bucket"):
+        SolverConfig(resource_bound_payload_bucket=-1)
+    with pytest.raises(ValueError, match="resource_bound_method"):
+        SolverConfig(resource_bound_method="dynamic")
+    with pytest.raises(ValueError, match="closure_queue_mode"):
+        SolverConfig(closure_queue_mode="fifo")
 
 
 def test_closure_aware_state_forces_certification_by_count_and_time() -> None:
@@ -1256,6 +1499,19 @@ def test_closure_aware_state_forces_certification_by_count_and_time() -> None:
     state.reset_after_certification_attempt()
     state.force_next_certification = True
     assert state.should_certify(config)
+
+
+def test_mask_containment_trie_matches_bruteforce_subset_and_superset_queries() -> None:
+    masks = (0b0000, 0b0001, 0b0011, 0b0101, 0b1010, 0b1111)
+    trie = MaskContainmentTrie(bit_count=4)
+    for mask in masks:
+        trie.insert(mask, f"m{mask}")
+
+    for query in range(16):
+        expected_subsets = tuple(f"m{mask}" for mask in masks if mask & ~query == 0)
+        expected_supersets = tuple(f"m{mask}" for mask in masks if query & ~mask == 0)
+        assert sorted(trie.query_subsets(query)) == sorted(expected_subsets)
+        assert sorted(trie.query_supersets(query)) == sorted(expected_supersets)
 
 
 def test_adaptive_productive_slice_controller_updates_bounds_and_stats() -> None:
@@ -1371,6 +1627,7 @@ def test_production_cli_help_hides_legacy_join_and_bidirectional_controls() -> N
         )
 
         assert "--productive-pricing-slice-seconds" in completed.stdout
+        assert "--pricing-tolerance" in completed.stdout
         assert "--pricing-worker-backend" in completed.stdout
         assert "--join" not in completed.stdout
         assert "--disable-bidirectional-pricing" not in completed.stdout
@@ -1429,9 +1686,9 @@ def test_productive_batch_pricing_returns_diagnostics() -> None:
         farkas=False,
         batch_size=2,
     )
-    assert len(result.routes) == 1
+    assert len(result.routes) == 2
     assert all(cost < 0.0 for cost in result.reduced_costs)
-    assert result.diagnostics.returned_routes == 1
+    assert result.diagnostics.returned_routes == 2
     assert result.diagnostics.labels_generated >= result.diagnostics.returned_routes
     assert result.diagnostics.max_queue_size >= 1
     assert result.diagnostics.exact_completion is False
@@ -1446,7 +1703,7 @@ def test_productive_batch_pricing_returns_diagnostics() -> None:
     assert result.diagnostics.pricing_engine == "source_neighbor_parallel_forward"
     assert result.diagnostics.pricing_worker_backend == "thread"
     assert result.diagnostics.parallel_calls == 1
-    assert result.diagnostics.first_hit_exits == 1
+    assert result.diagnostics.first_hit_exits == 0
     assert result.diagnostics.source_neighbor_count > 0
     assert result.diagnostics.process_cpu_time_seconds >= 0.0
     assert result.diagnostics.cpu_core_equivalent >= 0.0
@@ -1523,6 +1780,7 @@ def test_interrupted_pricing_is_not_a_certificate() -> None:
             next_route_id=501,
             farkas=False,
             deadline=time.time() - 1.0,
+            parallel_workers=1,
         )
     assert raised.value.diagnostics.exact_completion is False
     assert raised.value.diagnostics.returned_routes == 0
@@ -1548,7 +1806,7 @@ def test_dual_reward_bound_uses_fractional_knapsack_item() -> None:
         physical_time=0.0,
         service_times=tuple(),
         sr_counts=tuple(),
-        reduced_cost=0.0,
+        reduced_cost=-1_000_000.0,
         used_arcs=frozenset(),
     )
     reward = _dual_reward_bound(label, graph, bounds)
@@ -1574,7 +1832,7 @@ def test_dual_reward_bound_excludes_customers_over_total_residual_payload() -> N
         physical_time=0.0,
         service_times=tuple(),
         sr_counts=tuple(),
-        reduced_cost=0.0,
+        reduced_cost=-1_000_000.0,
         used_arcs=frozenset(),
     )
     assert _dual_reward_bound(label, graph, bounds) == 0.0
@@ -1597,7 +1855,7 @@ def test_dual_reward_bound_uses_cardinality_cap() -> None:
         physical_time=0.0,
         service_times=tuple(),
         sr_counts=tuple(),
-        reduced_cost=0.0,
+        reduced_cost=-1_000_000.0,
         used_arcs=frozenset({(instance.depot_source, "H1")}),
     )
     assert _dual_reward_bound(label, graph, bounds) == pytest.approx(duals.mu["C1"])
@@ -1647,9 +1905,13 @@ def test_same_node_dominance_uses_return_time_credit() -> None:
     assert counters.forward_return_time_credit_checks_skipped == 0
     assert counters.dom_prefilter_pairs == 1
     assert counters.dom_full_tests == 1
+    assert counters.dom_full_tests_same_node == 1
+    assert counters.dom_full_tests_physical_location == 0
     assert counters.dom_full_rejections == 1
     assert counters.labels_dominated_same_node == 1
+    assert counters.dom_labels_deleted_same_node == 1
     assert counters.labels_dominated_physical == 0
+    assert counters.dom_labels_deleted_physical_location == 0
 
 
 def test_dominance_gate_skip_does_not_delete_label() -> None:
@@ -1667,7 +1929,7 @@ def test_dominance_gate_skip_does_not_delete_label() -> None:
         physical_time=5.0,
         service_times=(("C1", 5.0),),
         sr_counts=tuple(),
-        reduced_cost=0.0,
+        reduced_cost=-1_000_000.0,
         used_arcs=frozenset({("Source", "C1")}),
     )
     c2 = _Label(
@@ -1693,6 +1955,208 @@ def test_dominance_gate_skip_does_not_delete_label() -> None:
     assert counters.forward_return_time_credit_checks_skipped == 1
     assert counters.dom_full_tests == 0
     assert counters.dom_full_rejections == 0
+    assert counters.labels_dominated_same_node == 0
+    assert counters.labels_dominated_physical == 0
+
+
+def test_dominance_bucket_gate_skips_comparison_without_deleting_label() -> None:
+    instance, _, objective, graph = _setup()
+    duals = PricingDuals(mu={c: 0.0 for c in instance.customers}, kappa=0.0, nu={})
+    h1_c1 = duplicate_node("H1", "C1")
+    h1_c2 = duplicate_node("H1", "C2")
+    label_c1 = _Label(
+        path=("Source", "H1", h1_c1),
+        represented=frozenset({"C1"}),
+        truck_visited=frozenset({"Source", "H1"}),
+        truck_load=instance.demand["C1"],
+        active_pad="H1",
+        active_pad_arrival=5.0,
+        active_wait=1.0,
+        block_count=1,
+        physical_time=5.0,
+        service_times=(("C1", 6.0),),
+        sr_counts=tuple(),
+        reduced_cost=0.0,
+        used_arcs=frozenset({("Source", "H1"), ("H1", h1_c1)}),
+    )
+    label_c2 = _Label(
+        path=("Source", "H1", h1_c2),
+        represented=frozenset({"C2"}),
+        truck_visited=frozenset({"Source", "H1"}),
+        truck_load=instance.demand["C2"],
+        active_pad="H1",
+        active_pad_arrival=5.0,
+        active_wait=1.0,
+        block_count=1,
+        physical_time=5.0,
+        service_times=(("C2", 6.0),),
+        sr_counts=tuple(),
+        reduced_cost=0.0,
+        used_arcs=frozenset({("Source", "H1"), ("H1", h1_c2)}),
+    )
+    kept: dict[str, list[_Label]] = {}
+    counters = _DeadlinePricingCounters(shortest=_shortest_truck_times(graph))
+    arc_customer_sets = _arc_customer_sets(graph)
+
+    assert _insert_nondominated_standard_label(
+        kept,
+        label_c1,
+        graph,
+        objective,
+        duals,
+        BranchRestrictions(),
+        arc_customer_sets,
+        counters,
+    ) == (True, 0, 0)
+    assert _insert_nondominated_standard_label(
+        kept,
+        label_c2,
+        graph,
+        objective,
+        duals,
+        BranchRestrictions(),
+        arc_customer_sets,
+        counters,
+    ) == (True, 0, 0)
+    assert kept["H1"] == [label_c1, label_c2]
+    assert counters.dom_frontier_queries >= 2
+    assert counters.mask_trie_subset_queries + counters.mask_trie_superset_queries > 0
+    assert counters.dom_frontier_keys_skipped_by_mask >= 1
+    assert counters.dom_pairs_avoided_before_materialization >= 1
+    assert counters.dom_candidate_pairs_materialized == 0
+    assert counters.dom_full_tests == 0
+    assert counters.labels_dominated_same_node == 0
+    assert counters.labels_dominated_physical == 0
+
+
+def test_frontier_materialized_pair_deletes_only_after_full_same_node_witness() -> None:
+    instance, _, objective, graph = _setup()
+    duals = PricingDuals(mu={c: 0.0 for c in instance.customers}, kappa=0.0, nu={})
+    later = _Label(
+        path=("Source", "C1"),
+        represented=frozenset({"C1"}),
+        truck_visited=frozenset({"Source", "C1"}),
+        truck_load=instance.demand["C1"],
+        active_pad=None,
+        active_pad_arrival=0.0,
+        active_wait=0.0,
+        block_count=0,
+        physical_time=10.0,
+        service_times=(("C1", 10.0),),
+        sr_counts=tuple(),
+        reduced_cost=-1_000_000.0,
+        used_arcs=frozenset({("Source", "C1")}),
+        represented_mask=1,
+        truck_node_mask=0,
+    )
+    earlier = _Label(
+        path=("Source", "C1"),
+        represented=frozenset({"C1"}),
+        truck_visited=frozenset({"Source", "C1"}),
+        truck_load=instance.demand["C1"],
+        active_pad=None,
+        active_pad_arrival=0.0,
+        active_wait=0.0,
+        block_count=0,
+        physical_time=5.0,
+        service_times=(("C1", 5.0),),
+        sr_counts=tuple(),
+        reduced_cost=-1_000_000.0,
+        used_arcs=frozenset({("Source", "C1")}),
+        represented_mask=1,
+        truck_node_mask=0,
+    )
+    kept: dict[str, list[_Label]] = {}
+    counters = _DeadlinePricingCounters(shortest=_shortest_truck_times(graph))
+    arc_customer_sets = _arc_customer_sets(graph)
+
+    assert _insert_nondominated_standard_label(
+        kept,
+        later,
+        graph,
+        objective,
+        duals,
+        BranchRestrictions(),
+        arc_customer_sets,
+        counters,
+    ) == (True, 0, 0)
+    assert _insert_nondominated_standard_label(
+        kept,
+        earlier,
+        graph,
+        objective,
+        duals,
+        BranchRestrictions(),
+        arc_customer_sets,
+        counters,
+    ) == (True, 0, 1)
+    assert kept["C1"] == [earlier]
+    assert counters.dom_candidate_pairs_materialized >= 1
+    assert counters.dom_full_tests_same_node == 1
+    assert counters.dom_labels_deleted_same_node == 1
+    assert counters.dom_labels_deleted_physical_location == 0
+
+
+def test_frontier_cell_envelope_rejects_without_deleting_label() -> None:
+    instance, _, objective, graph = _setup()
+    duals = PricingDuals(mu={c: 0.0 for c in instance.customers}, kappa=0.0, nu={})
+    heavy = _Label(
+        path=("Source", "C1"),
+        represented=frozenset({"C1"}),
+        truck_visited=frozenset({"Source", "C1"}),
+        truck_load=10.0,
+        active_pad=None,
+        active_pad_arrival=0.0,
+        active_wait=0.0,
+        block_count=0,
+        physical_time=5.0,
+        service_times=(("C1", 5.0),),
+        sr_counts=tuple(),
+        reduced_cost=0.0,
+        used_arcs=frozenset({("Source", "C1")}),
+    )
+    light = _Label(
+        path=("Source", "C1"),
+        represented=frozenset({"C1"}),
+        truck_visited=frozenset({"Source", "C1"}),
+        truck_load=1.0,
+        active_pad=None,
+        active_pad_arrival=0.0,
+        active_wait=0.0,
+        block_count=0,
+        physical_time=5.0,
+        service_times=(("C1", 5.0),),
+        sr_counts=tuple(),
+        reduced_cost=1.0,
+        used_arcs=frozenset({("Source", "C1")}),
+    )
+    kept: dict[str, list[_Label]] = {}
+    counters = _DeadlinePricingCounters(shortest=_shortest_truck_times(graph))
+    arc_customer_sets = _arc_customer_sets(graph)
+
+    assert _insert_nondominated_standard_label(
+        kept,
+        heavy,
+        graph,
+        objective,
+        duals,
+        BranchRestrictions(),
+        arc_customer_sets,
+        counters,
+    ) == (True, 0, 0)
+    assert _insert_nondominated_standard_label(
+        kept,
+        light,
+        graph,
+        objective,
+        duals,
+        BranchRestrictions(),
+        arc_customer_sets,
+        counters,
+    ) == (True, 0, 0)
+    assert kept["C1"] == [heavy, light]
+    assert counters.cell_pairs_considered >= 1
+    assert counters.cell_pairs_rejected_by_envelope >= 1
     assert counters.labels_dominated_same_node == 0
     assert counters.labels_dominated_physical == 0
 
@@ -1742,8 +2206,10 @@ def test_physical_location_dominance_reports_return_credit_rejection() -> None:
     assert counters.forward_return_time_credit_checks_skipped == 0
     assert counters.physical_location_full_tests == 1
     assert counters.physical_location_rejections == 1
+    assert counters.dom_full_tests_physical_location == 1
     assert counters.labels_dominated_same_node == 0
     assert counters.labels_dominated_physical == 1
+    assert counters.dom_labels_deleted_physical_location == 1
 
 
 def test_same_regular_node_dominance_ignores_stale_active_pad_state() -> None:
@@ -2228,6 +2694,55 @@ def test_incremental_rmp_compatibility_key_rebuilds_on_branch_state_change() -> 
     assert "branch_state" in rebuilt.compatibility_failure_reasons
 
 
+def test_rmp_compatibility_signature_tracks_active_sr_version_and_inactive_columns() -> None:
+    instance, _, objective, graph = _setup()
+    paths = [("Source", "C1", "Sink"), ("Source", "C2", "C3", "Sink")]
+    routes = {path: route_from_path(i, path, graph, objective) for i, path in enumerate(paths)}
+    triplet = tuple(instance.customers)
+    config = SolverConfig(enable_incremental_rmp=True)
+    node = NodeState(
+        id=771,
+        depth=1,
+        restrictions=BranchRestrictions(),
+        fixed_routes=tuple(),
+        residual_customers=frozenset(instance.customers),
+        fleet_limit=2,
+        fixed_cost=0.0,
+        column_paths=set(paths),
+        active_sr={triplet},
+        active_sr_version=1,
+    )
+    initial = RestrictedMaster(graph, node, routes, config, RouteSignatureCache())
+    assert initial.solve().status == GRB.OPTIMAL
+
+    node.active_sr_version += 1
+    sr_rebuilt = RestrictedMaster(graph, node, routes, config, RouteSignatureCache())
+    assert sr_rebuilt.used_full_rebuild is True
+    assert "active_sr_version" in sr_rebuilt.compatibility_failure_reasons
+    assert "rmp_structure_version" in sr_rebuilt.compatibility_failure_reasons
+
+    node = NodeState(
+        id=772,
+        depth=1,
+        restrictions=BranchRestrictions(),
+        fixed_routes=tuple(),
+        residual_customers=frozenset(instance.customers),
+        fleet_limit=2,
+        fixed_cost=0.0,
+        column_paths=set(paths),
+        active_sr=set(),
+    )
+    initial = RestrictedMaster(graph, node, routes, config, RouteSignatureCache())
+    assert initial.solve().status == GRB.OPTIMAL
+    inactive_path = paths[0]
+    node.column_paths.remove(inactive_path)
+    node.inactive_column_paths.add(inactive_path)
+    inactive_rebuilt = RestrictedMaster(graph, node, routes, config, RouteSignatureCache())
+    assert inactive_rebuilt.used_full_rebuild is True
+    assert "active_column_version" in inactive_rebuilt.compatibility_failure_reasons
+    assert "rmp_structure_version" in inactive_rebuilt.compatibility_failure_reasons
+
+
 def test_active_sr_coefficient_cache_matches_direct_recomputation_and_reports_density() -> None:
     instance, _, objective, graph = _setup()
     paths = [("Source", "C1", "C2", "Sink"), ("Source", "C2", "C3", "Sink")]
@@ -2245,11 +2760,15 @@ def test_active_sr_coefficient_cache_matches_direct_recomputation_and_reports_de
         active_sr={triplet},
         active_sr_version=1,
     )
-    rmp = RestrictedMaster(graph, node, routes, SolverConfig(enable_active_coefficient_cache=True), RouteSignatureCache())
+    cache = RouteSignatureCache()
+    rmp = RestrictedMaster(graph, node, routes, SolverConfig(enable_active_coefficient_cache=True), cache)
     direct_nonzero = sum(1 for path in paths if routes[path].sr_coeff(triplet))
     assert rmp.active_sr_nonzero_count == direct_nonzero
     assert rmp.active_sr_coefficient_count == len(paths)
+    assert cache.stats.sr_coeff_cache_misses >= len(paths)
+    hits_before = cache.stats.sr_coeff_cache_hits
     assert all(rmp._sr_coeff(path, triplet) == routes[path].sr_coeff(triplet) for path in paths)
+    assert cache.stats.sr_coeff_cache_hits >= hits_before + len(paths)
     assert rmp.active_sr_full_rebuilds == 1
     assert rmp.active_sr_rows_added == 1
     path3 = ("Source", "C1", "C3", "Sink")
@@ -2501,11 +3020,14 @@ def test_child_certification_signature_reuses_only_unchanged_node_and_dual_state
         nu={tuple(instance.customers): -0.5},
     )
     signature = _child_certification_signature(node, duals)
+    assert "rmp_structure_version" in dict(signature)
     assert _child_certification_signature(node, duals) == signature
     assert _child_certification_signature(node, replace(duals, kappa=-0.30)) != signature
 
     node.active_sr_version += 1
-    assert _child_certification_signature(node, duals) != signature
+    changed = _child_certification_signature(node, duals)
+    assert changed != signature
+    assert dict(changed)["rmp_structure_version"] != dict(signature)["rmp_structure_version"]
 
 
 def test_child_certification_signature_changes_when_visible_route_set_changes() -> None:
@@ -2582,6 +3104,7 @@ def test_child_certification_epoch_discard_records_structured_cause() -> None:
     node.column_paths.add(("Source", "C3", "Sink"))
     _record_child_certification_epoch_discard(stats, base, _child_certification_signature(node, duals))
     assert stats.child_certification_state_discarded_by_active_columns == 1
+    assert stats.child_certification_state_discarded_by_rmp_structure == 1
 
 
 def test_child_certification_yield_tracking_does_not_adapt_batch_limit() -> None:
@@ -2742,6 +3265,7 @@ def test_branch_decision_reports_launch_pad_rule() -> None:
             drones_per_truck=4,
             distribution="PS",
             hub_arc_probability=1.0,
+            mandatory_drone_customer_fraction=0.0,
         )
     )
     objective = build_objective_data(instance, ObjectiveWeights(0.4, 0.3, 0.3))
@@ -2900,12 +3424,22 @@ def test_bpc_batch_size_one_and_large_batch_same_tiny_objective() -> None:
     one = solve_branch_price_cut(
         instance,
         weights,
-        SolverConfig(root_extraction_time_limit=0.0, pricing_batch_size=1, route_pool_time_limit=0.1),
+        SolverConfig(
+            root_extraction_time_limit=0.0,
+            pricing_tolerance=1e-7,
+            pricing_batch_size=1,
+            route_pool_time_limit=0.1,
+        ),
     )
     large = solve_branch_price_cut(
         instance,
         weights,
-        SolverConfig(root_extraction_time_limit=0.0, pricing_batch_size=64, route_pool_time_limit=0.1),
+        SolverConfig(
+            root_extraction_time_limit=0.0,
+            pricing_tolerance=1e-7,
+            pricing_batch_size=64,
+            route_pool_time_limit=0.1,
+        ),
     )
 
     assert one.objective_full == pytest.approx(large.objective_full)

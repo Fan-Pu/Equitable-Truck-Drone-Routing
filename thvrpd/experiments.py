@@ -18,9 +18,30 @@ from .service_windows import load_manual_service_deadline_bounds
 
 
 SCALES = {
-    "small": {"num_customers": 5, "num_trucks": 2, "num_hubs": 2, "drones_per_truck": 4},
-    "medium": {"num_customers": 15, "num_trucks": 5, "num_hubs": 2, "drones_per_truck": 4},
-    "large": {"num_customers": 25, "num_trucks": 8, "num_hubs": 2, "drones_per_truck": 4},
+    "small": {
+        "num_customers": 5,
+        "num_trucks": 2,
+        "num_hubs": 2,
+        "drones_per_truck": 4,
+        "truck_arc_probability": 0.05,
+        "hub_arc_probability": 0.18,
+    },
+    "medium": {
+        "num_customers": 15,
+        "num_trucks": 5,
+        "num_hubs": 2,
+        "drones_per_truck": 4,
+        "truck_arc_probability": 0.05,
+        "hub_arc_probability": 0.18,
+    },
+    "large": {
+        "num_customers": 25,
+        "num_trucks": 5,
+        "num_hubs": 2,
+        "drones_per_truck": 4,
+        "truck_arc_probability": 0.05,
+        "hub_arc_probability": 0.18,
+    },
 }
 DEFAULT_SEEDS = [1, 2, 3]
 
@@ -33,6 +54,20 @@ def main() -> None:
     parser.add_argument("--distributions", nargs="+", choices=["PS", "PC", "mixed"], default=["PS"])
     parser.add_argument("--scales", nargs="+", choices=sorted(SCALES), default=["small", "medium", "large"])
     parser.add_argument("--weights", nargs=3, type=float, default=[0.4, 0.3, 0.3])
+    parser.add_argument("--truck-arc-probability", type=float, default=0.05)
+    parser.add_argument("--hub-arc-probability", type=float, default=0.18)
+    parser.add_argument("--truck-speed", type=float, default=40.0)
+    parser.add_argument("--drone-speed", type=float, default=100.0)
+    parser.add_argument("--truck-payload", type=float, default=50.0)
+    parser.add_argument("--drone-payload", type=float, default=6.0)
+    parser.add_argument("--drone-endurance", type=float, default=75.0)
+    parser.add_argument("--truck-cost", type=float, default=20.0)
+    parser.add_argument("--drone-cost", type=float, default=1.0)
+    parser.add_argument("--mandatory-drone-customer-fraction", type=float, default=0.16)
+    parser.add_argument("--max-drone-access-customers-per-hub", type=int, default=2)
+    parser.add_argument("--max-drone-launch-hubs-per-customer", type=int, default=1)
+    parser.add_argument("--min-drone-service-time-saving", type=float, default=0.0)
+    parser.add_argument("--retain-optional-drone-arcs", action="store_true")
     parser.add_argument("--service-deadline-mode", choices=["none", "manual", "random_absolute"], default="none")
     parser.add_argument("--service-deadline-file", type=Path)
     parser.add_argument("--service-deadline-fraction", type=float, default=0.60, help=legacy_help)
@@ -49,6 +84,7 @@ def main() -> None:
     parser.add_argument("--threads", type=int, default=1)
     parser.add_argument("--case-time-limit", type=float, default=900.0)
     parser.add_argument("--external-timeout-grace", type=float, default=10.0)
+    parser.add_argument("--pricing-tolerance", type=float, default=0.05)
     parser.add_argument("--pricing-batch-size", type=int, default=64)
     parser.add_argument("--min-pricing-batch-size", type=int, default=32)
     parser.add_argument("--max-root-pricing-batch-size", type=int, default=256)
@@ -73,6 +109,18 @@ def main() -> None:
     parser.add_argument("--productive-candidate-multiplier", type=float, default=1.5)
     parser.add_argument("--source-neighbor-task-size", type=int, default=1)
     parser.add_argument("--pricing-diversity-batch-fraction", type=float, default=0.5)
+    parser.add_argument("--disable-balanced-kcore-pricing", action="store_true")
+    parser.add_argument("--disable-dynamic-kcore-refinement", action="store_true")
+    parser.add_argument("--kcore-balance-alpha-reachable-customers", type=float, default=1.0)
+    parser.add_argument("--kcore-balance-alpha-out-degree", type=float, default=0.25)
+    parser.add_argument("--kcore-balance-alpha-drone-pads", type=float, default=0.5)
+    parser.add_argument("--kcore-balance-alpha-deadline-customers", type=float, default=0.5)
+    parser.add_argument("--dynamic-split-label-threshold", type=int, default=2000)
+    parser.add_argument("--dynamic-split-gap-multiplier", type=float, default=10.0)
+    parser.add_argument("--dynamic-split-time-threshold", type=float, default=5.0)
+    parser.add_argument("--dynamic-split-work-threshold", type=float, default=2000.0)
+    parser.add_argument("--dynamic-refinement-depth", type=int, default=2)
+    parser.add_argument("--checkpoint-extension-period", type=int, default=5000)
     parser.add_argument("--first-incumbent-route-pool-time-limit", type=float, default=10.0)
     parser.add_argument("--post-incumbent-primal-budget-factor", type=float, default=0.25)
     parser.add_argument("--root-constructive-time-limit", type=float, default=5.0)
@@ -80,12 +128,12 @@ def main() -> None:
     parser.add_argument(
         "--root-compact-after-constructive",
         choices=["skip", "small_budget", "full_budget", "conditional_small_budget", "conditional_wall_budget"],
-        default="conditional_wall_budget",
+        default="full_budget",
     )
-    parser.add_argument("--root-compact-time-limit-after-constructive", type=float, default=1.0)
-    parser.add_argument("--root-compact-time-limit-without-constructive", type=float, default=5.0)
-    parser.add_argument("--root-compact-wall-time-limit", type=float, default=1.0)
-    parser.add_argument("--root-compact-solve-time-limit", type=float, default=1.0)
+    parser.add_argument("--root-compact-time-limit-after-constructive", type=float, default=60.0)
+    parser.add_argument("--root-compact-time-limit-without-constructive", type=float, default=60.0)
+    parser.add_argument("--root-compact-wall-time-limit", type=float, default=0.0)
+    parser.add_argument("--root-compact-solve-time-limit", type=float, default=60.0)
     parser.add_argument("--constructive-diversity-threshold", type=float, default=0.35)
     parser.add_argument("--constructive-incumbent-quality-threshold", type=float)
     parser.add_argument("--enable-drone-diversification-warm-start", action="store_true", default=True)
@@ -139,6 +187,22 @@ def main() -> None:
     parser.add_argument("--sr-removal-max-per-node", type=int, default=20)
     parser.add_argument("--disable-row-local-sr-coeff-cache", action="store_true")
     parser.add_argument("--disable-dominance-prefilter-keys", action="store_true")
+    parser.add_argument("--disable-closure-frontier-cells", action="store_true")
+    parser.add_argument("--disable-mask-trie-frontier", action="store_true")
+    parser.add_argument("--disable-mask-containment-index", action="store_true")
+    parser.add_argument("--disable-cell-envelope-rejection", action="store_true")
+    parser.add_argument("--disable-cell-lb-certificates", action="store_true")
+    parser.add_argument("--frontier-cell-max-labels", type=int, default=512)
+    parser.add_argument("--frontier-cell-split-min-pairs", type=int, default=2048)
+    parser.add_argument("--max-frontier-cell-size", type=int, default=512)
+    parser.add_argument("--max-frontier-pair-product", type=int, default=2000)
+    parser.add_argument("--max-frontier-split-depth", type=int, default=6)
+    parser.add_argument("--disable-resource-restricted-closure-bound", action="store_true")
+    parser.add_argument("--resource-bound-method", default="greedy")
+    parser.add_argument("--resource-bound-payload-bucket", type=int, default=0)
+    parser.add_argument("--disable-closure-queue", action="store_true")
+    parser.add_argument("--closure-queue-mode", default="cell_lb")
+    parser.add_argument("--disable-closure-mode-rebuild-frontier", action="store_true")
     parser.add_argument("--enable-promised-drone-construction", action="store_true", default=False, help=legacy_help)
     parser.add_argument("--promised-drone-construct-time-limit", type=float, default=5.0)
     parser.add_argument("--promised-drone-insert-top-k-customers", type=int, default=20)
@@ -222,6 +286,20 @@ def _run_parent(args: argparse.Namespace) -> None:
                 "distributions": args.distributions,
                 "scales": args.scales,
                 "weights": args.weights,
+                "truck_arc_probability": args.truck_arc_probability,
+                "hub_arc_probability": args.hub_arc_probability,
+                "truck_speed": args.truck_speed,
+                "drone_speed": args.drone_speed,
+                "truck_payload": args.truck_payload,
+                "drone_payload": args.drone_payload,
+                "drone_endurance": args.drone_endurance,
+                "truck_cost": args.truck_cost,
+                "drone_cost": args.drone_cost,
+                "mandatory_drone_customer_fraction": args.mandatory_drone_customer_fraction,
+                "max_drone_access_customers_per_hub": args.max_drone_access_customers_per_hub,
+                "max_drone_launch_hubs_per_customer": args.max_drone_launch_hubs_per_customer,
+                "min_drone_service_time_saving": args.min_drone_service_time_saving,
+                "retain_optional_drone_arcs": args.retain_optional_drone_arcs,
                 "service_deadline_mode": args.service_deadline_mode,
                 "service_deadline_file": str(args.service_deadline_file) if args.service_deadline_file else None,
                 "service_deadline_fraction": args.service_deadline_fraction,
@@ -235,6 +313,7 @@ def _run_parent(args: argparse.Namespace) -> None:
                 "service_deadline_witness_method": args.service_deadline_witness_method,
                 "service_deadline_witness_time_limit": args.service_deadline_witness_time_limit,
                 "threads": args.threads,
+                "pricing_tolerance": args.pricing_tolerance,
                 "pricing_batch_size": args.pricing_batch_size,
                 "min_pricing_batch_size": args.min_pricing_batch_size,
                 "max_root_pricing_batch_size": args.max_root_pricing_batch_size,
@@ -259,6 +338,18 @@ def _run_parent(args: argparse.Namespace) -> None:
                 "productive_candidate_multiplier": args.productive_candidate_multiplier,
                 "source_neighbor_task_size": args.source_neighbor_task_size,
                 "pricing_diversity_batch_fraction": args.pricing_diversity_batch_fraction,
+                "enable_balanced_kcore_pricing": not args.disable_balanced_kcore_pricing,
+                "enable_dynamic_kcore_refinement": not args.disable_dynamic_kcore_refinement,
+                "kcore_balance_alpha_reachable_customers": args.kcore_balance_alpha_reachable_customers,
+                "kcore_balance_alpha_out_degree": args.kcore_balance_alpha_out_degree,
+                "kcore_balance_alpha_drone_pads": args.kcore_balance_alpha_drone_pads,
+                "kcore_balance_alpha_deadline_customers": args.kcore_balance_alpha_deadline_customers,
+                "dynamic_split_label_threshold": args.dynamic_split_label_threshold,
+                "dynamic_split_gap_multiplier": args.dynamic_split_gap_multiplier,
+                "dynamic_split_time_threshold": args.dynamic_split_time_threshold,
+                "dynamic_split_work_threshold": args.dynamic_split_work_threshold,
+                "dynamic_refinement_depth": args.dynamic_refinement_depth,
+                "checkpoint_extension_period": args.checkpoint_extension_period,
                 "first_incumbent_route_pool_time_limit": args.first_incumbent_route_pool_time_limit,
                 "post_incumbent_primal_budget_factor": args.post_incumbent_primal_budget_factor,
                 "root_constructive_time_limit": args.root_constructive_time_limit,
@@ -438,7 +529,7 @@ def _run_worker(case_file: Path) -> None:
 
     from .bpc import BPCTimeLimitNoIncumbent, solve_branch_price_cut
     from .config import InstanceConfig, ObjectiveWeights, SolverConfig
-    from .instance import generate_instance
+    from .instance import generate_instance, instance_generation_metadata
 
     start = time.time()
     instance_generation_time = None
@@ -478,6 +569,7 @@ def _run_worker(case_file: Path) -> None:
             "gurobi_version": ".".join(map(str, gp.gurobi.version())),
             "locations": instance.locations,
             "demand": instance.demand,
+            **instance_generation_metadata(instance),
             "memory": {
                 "python_current_allocated_mb": current_alloc / 1024.0 / 1024.0,
                 "python_peak_allocated_mb": peak_alloc / 1024.0 / 1024.0,
@@ -513,6 +605,7 @@ def _run_worker(case_file: Path) -> None:
             "gurobi_version": ".".join(map(str, gp.gurobi.version())),
             "locations": instance.locations,
             "demand": instance.demand,
+            **instance_generation_metadata(instance),
             "memory": {
                 "python_current_allocated_mb": current_alloc / 1024.0 / 1024.0,
                 "python_peak_allocated_mb": peak_alloc / 1024.0 / 1024.0,
@@ -595,11 +688,21 @@ def _case_spec(
     distribution: str,
     seed: int,
     variant: str,
-    scale_config: dict[str, int],
+    scale_config: dict[str, int | float],
     enable_pricing_pruning: bool,
     root_extraction_time_limit: float,
 ) -> dict[str, Any]:
     total_drones = scale_config["num_trucks"] * scale_config["drones_per_truck"]
+    truck_arc_probability = (
+        args.truck_arc_probability
+        if args.truck_arc_probability is not None
+        else scale_config.get("truck_arc_probability", 0.05)
+    )
+    hub_arc_probability = (
+        args.hub_arc_probability
+        if args.hub_arc_probability is not None
+        else scale_config.get("hub_arc_probability", 0.18)
+    )
     case_id = f"{scale}_{variant}_{distribution}_seed_{seed}"
     return {
         "case_id": case_id,
@@ -618,6 +721,20 @@ def _case_spec(
             "distribution": distribution,
             "drones_per_truck": scale_config["drones_per_truck"],
             "num_hubs": scale_config["num_hubs"],
+            "truck_arc_probability": truck_arc_probability,
+            "hub_arc_probability": hub_arc_probability,
+            "truck_speed": args.truck_speed,
+            "drone_speed": args.drone_speed,
+            "truck_payload": args.truck_payload,
+            "drone_payload": args.drone_payload,
+            "drone_endurance": args.drone_endurance,
+            "truck_cost": args.truck_cost,
+            "drone_cost": args.drone_cost,
+            "mandatory_drone_customer_fraction": args.mandatory_drone_customer_fraction,
+            "max_drone_access_customers_per_hub": args.max_drone_access_customers_per_hub,
+            "max_drone_launch_hubs_per_customer": args.max_drone_launch_hubs_per_customer,
+            "min_drone_service_time_saving": args.min_drone_service_time_saving,
+            "retain_optional_drone_arcs": args.retain_optional_drone_arcs,
             "service_deadline_mode": args.service_deadline_mode,
             "service_deadline_fraction": args.service_deadline_fraction,
             "service_deadline_manual_bounds": args.service_deadline_manual_bounds,
@@ -631,6 +748,7 @@ def _case_spec(
         "solver_config": {
             "threads": args.threads,
             "time_limit": args.case_time_limit,
+            "pricing_tolerance": args.pricing_tolerance,
             "root_extraction_time_limit": root_extraction_time_limit,
             "enable_pricing_pruning": enable_pricing_pruning,
             "pricing_batch_size": args.pricing_batch_size,
@@ -657,6 +775,18 @@ def _case_spec(
             "productive_candidate_multiplier": args.productive_candidate_multiplier,
             "source_neighbor_task_size": args.source_neighbor_task_size,
             "pricing_diversity_batch_fraction": args.pricing_diversity_batch_fraction,
+            "enable_balanced_kcore_pricing": not args.disable_balanced_kcore_pricing,
+            "enable_dynamic_kcore_refinement": not args.disable_dynamic_kcore_refinement,
+            "kcore_balance_alpha_reachable_customers": args.kcore_balance_alpha_reachable_customers,
+            "kcore_balance_alpha_out_degree": args.kcore_balance_alpha_out_degree,
+            "kcore_balance_alpha_drone_pads": args.kcore_balance_alpha_drone_pads,
+            "kcore_balance_alpha_deadline_customers": args.kcore_balance_alpha_deadline_customers,
+            "dynamic_split_label_threshold": args.dynamic_split_label_threshold,
+            "dynamic_split_gap_multiplier": args.dynamic_split_gap_multiplier,
+            "dynamic_split_time_threshold": args.dynamic_split_time_threshold,
+            "dynamic_split_work_threshold": args.dynamic_split_work_threshold,
+            "dynamic_refinement_depth": args.dynamic_refinement_depth,
+            "checkpoint_extension_period": args.checkpoint_extension_period,
             "first_incumbent_route_pool_time_limit": args.first_incumbent_route_pool_time_limit,
             "post_incumbent_primal_budget_factor": args.post_incumbent_primal_budget_factor,
             "root_constructive_time_limit": args.root_constructive_time_limit,
@@ -719,6 +849,22 @@ def _case_spec(
             "sr_removal_max_per_node": args.sr_removal_max_per_node,
             "use_row_local_sr_coeff_cache": not args.disable_row_local_sr_coeff_cache,
             "use_dominance_prefilter_keys": not args.disable_dominance_prefilter_keys,
+            "enable_closure_frontier_cells": not args.disable_closure_frontier_cells,
+            "enable_mask_trie_frontier": not args.disable_mask_trie_frontier,
+            "enable_mask_containment_index": not args.disable_mask_containment_index,
+            "enable_cell_envelope_rejection": not args.disable_cell_envelope_rejection,
+            "enable_cell_lb_certificates": not args.disable_cell_lb_certificates,
+            "frontier_cell_max_labels": args.frontier_cell_max_labels,
+            "frontier_cell_split_min_pairs": args.frontier_cell_split_min_pairs,
+            "max_frontier_cell_size": args.max_frontier_cell_size,
+            "max_frontier_pair_product": args.max_frontier_pair_product,
+            "max_frontier_split_depth": args.max_frontier_split_depth,
+            "enable_resource_restricted_closure_bound": not args.disable_resource_restricted_closure_bound,
+            "resource_bound_method": args.resource_bound_method,
+            "resource_bound_payload_bucket": args.resource_bound_payload_bucket,
+            "closure_queue_enabled": not args.disable_closure_queue,
+            "closure_queue_mode": args.closure_queue_mode,
+            "closure_mode_rebuild_frontier": not args.disable_closure_mode_rebuild_frontier,
             "use_promised_drone_construction": args.enable_promised_drone_construction,
             "promised_drone_construct_time_limit": args.promised_drone_construct_time_limit,
             "promised_drone_insert_top_k_customers": args.promised_drone_insert_top_k_customers,
@@ -799,6 +945,29 @@ def _summary_row(record: dict[str, Any]) -> dict[str, Any]:
         "trucks": instance.get("num_trucks"),
         "hubs": instance.get("num_hubs"),
         "drones_per_truck": instance.get("drones_per_truck"),
+        "truck_arc_probability": instance.get("truck_arc_probability"),
+        "hub_arc_probability": instance.get("hub_arc_probability"),
+        "truck_speed": instance.get("truck_speed"),
+        "drone_speed": instance.get("drone_speed"),
+        "truck_payload": instance.get("truck_payload"),
+        "drone_payload": instance.get("drone_payload"),
+        "drone_endurance": instance.get("drone_endurance"),
+        "truck_cost": instance.get("truck_cost"),
+        "drone_cost": instance.get("drone_cost"),
+        "mandatory_drone_customer_fraction": instance.get("mandatory_drone_customer_fraction"),
+        "max_drone_access_customers_per_hub": instance.get("max_drone_access_customers_per_hub"),
+        "max_drone_launch_hubs_per_customer": instance.get("max_drone_launch_hubs_per_customer"),
+        "min_drone_service_time_saving": instance.get("min_drone_service_time_saving"),
+        "retain_optional_drone_arcs": instance.get("retain_optional_drone_arcs"),
+        "truck_arcs": record.get("truck_arcs"),
+        "drone_arcs": record.get("drone_arcs"),
+        "transformed_arcs": stats.get("transformed_arcs"),
+        "mandatory_drone_customer_count": record.get("mandatory_drone_customer_count"),
+        "retained_drone_arc_saving_min": record.get("retained_drone_arc_saving_min"),
+        "retained_drone_arc_saving_mean": record.get("retained_drone_arc_saving_mean"),
+        "retained_drone_arc_saving_max": record.get("retained_drone_arc_saving_max"),
+        "witness_route_count": record.get("witness_route_count"),
+        "witness_drone_sorties": record.get("witness_drone_sorties"),
         "service_deadline_mode": instance.get("service_deadline_mode"),
         "service_deadline_fraction": instance.get("service_deadline_fraction"),
         "service_deadline_manual_bound_count": (
@@ -917,6 +1086,70 @@ def _summary_row(record: dict[str, Any]) -> dict[str, Any]:
         "pricing_dom_gate_scalar_failures": stats.get("pricing_dom_gate_scalar_failures"),
         "pricing_dom_gate_branch_failures": stats.get("pricing_dom_gate_branch_failures"),
         "pricing_dom_gate_deadline_failures": stats.get("pricing_dom_gate_deadline_failures"),
+        "pricing_dom_frontier_queries": stats.get("pricing_dom_frontier_queries"),
+        "pricing_dom_frontier_keys_scanned": stats.get("pricing_dom_frontier_keys_scanned"),
+        "pricing_dom_frontier_keys_skipped_by_mask": stats.get("pricing_dom_frontier_keys_skipped_by_mask"),
+        "pricing_dom_frontier_keys_skipped_by_branch": stats.get("pricing_dom_frontier_keys_skipped_by_branch"),
+        "pricing_dom_frontier_keys_skipped_by_deadline": stats.get("pricing_dom_frontier_keys_skipped_by_deadline"),
+        "pricing_dom_frontier_keys_skipped_by_return_credit": stats.get(
+            "pricing_dom_frontier_keys_skipped_by_return_credit"
+        ),
+        "pricing_frontier_cells_created": stats.get("pricing_frontier_cells_created"),
+        "pricing_frontier_cells_split": stats.get("pricing_frontier_cells_split"),
+        "pricing_frontier_cell_lb_min_at_stop": stats.get("pricing_frontier_cell_lb_min_at_stop"),
+        "pricing_frontier_cell_lb_closed": stats.get("pricing_frontier_cell_lb_closed"),
+        "pricing_frontier_cell_lb_invalidations": stats.get("pricing_frontier_cell_lb_invalidations"),
+        "pricing_mask_trie_subset_queries": stats.get("pricing_mask_trie_subset_queries"),
+        "pricing_mask_trie_superset_queries": stats.get("pricing_mask_trie_superset_queries"),
+        "pricing_mask_trie_returned_items": stats.get("pricing_mask_trie_returned_items"),
+        "pricing_mask_subset_queries": stats.get("pricing_mask_subset_queries"),
+        "pricing_mask_superset_queries": stats.get("pricing_mask_superset_queries"),
+        "pricing_mask_query_cache_hits": stats.get("pricing_mask_query_cache_hits"),
+        "pricing_mask_query_cache_misses": stats.get("pricing_mask_query_cache_misses"),
+        "pricing_cell_splits": stats.get("pricing_cell_splits"),
+        "pricing_cell_pair_products_before_split": stats.get("pricing_cell_pair_products_before_split"),
+        "pricing_cell_pairs_considered": stats.get("pricing_cell_pairs_considered"),
+        "pricing_cell_pairs_rejected_by_mask": stats.get("pricing_cell_pairs_rejected_by_mask"),
+        "pricing_cell_pairs_rejected_by_envelope": stats.get("pricing_cell_pairs_rejected_by_envelope"),
+        "pricing_cell_pairs_rejected_by_lb": stats.get("pricing_cell_pairs_rejected_by_lb"),
+        "pricing_cell_pairs_rejected_by_closure_lb": stats.get("pricing_cell_pairs_rejected_by_closure_lb"),
+        "pricing_label_pairs_materialized": stats.get("pricing_label_pairs_materialized"),
+        "pricing_labels_certified_by_cell_lb": stats.get("pricing_labels_certified_by_cell_lb"),
+        "pricing_full_same_node_tests": stats.get("pricing_full_same_node_tests"),
+        "pricing_full_physical_location_tests": stats.get("pricing_full_physical_location_tests"),
+        "pricing_labels_deleted_same_node": stats.get("pricing_labels_deleted_same_node"),
+        "pricing_labels_deleted_physical_location": stats.get("pricing_labels_deleted_physical_location"),
+        "pricing_closure_queue_pushes": stats.get("pricing_closure_queue_pushes"),
+        "pricing_closure_queue_pops": stats.get("pricing_closure_queue_pops"),
+        "pricing_closure_queue_min_key_at_stop": stats.get("pricing_closure_queue_min_key_at_stop"),
+        "pricing_certification_tasks_exhausted_by_cell_lb": stats.get(
+            "pricing_certification_tasks_exhausted_by_cell_lb"
+        ),
+        "pricing_certification_tasks_closed_by_cell_lb": stats.get(
+            "pricing_certification_tasks_closed_by_cell_lb"
+        ),
+        "pricing_certification_tasks_exhausted_by_label_search": stats.get(
+            "pricing_certification_tasks_exhausted_by_label_search"
+        ),
+        "pricing_resource_reward_bound_calls": stats.get("pricing_resource_reward_bound_calls"),
+        "pricing_resource_reward_bound_time": stats.get("pricing_resource_reward_bound_time"),
+        "pricing_resource_reward_bound_fallbacks": stats.get("pricing_resource_reward_bound_fallbacks"),
+        "pricing_physdom_cell_pairs_considered": stats.get("pricing_physdom_cell_pairs_considered"),
+        "pricing_physdom_cell_pairs_rejected_by_mask": stats.get("pricing_physdom_cell_pairs_rejected_by_mask"),
+        "pricing_physdom_cell_pairs_rejected_by_envelope": stats.get(
+            "pricing_physdom_cell_pairs_rejected_by_envelope"
+        ),
+        "pricing_physdom_label_pairs_materialized": stats.get("pricing_physdom_label_pairs_materialized"),
+        "pricing_physdom_full_tests": stats.get("pricing_physdom_full_tests"),
+        "pricing_physdom_deletions": stats.get("pricing_physdom_deletions"),
+        "pricing_physdom_time": stats.get("pricing_physdom_time"),
+        "pricing_return_credit_incompatible_pairs": stats.get("pricing_return_credit_incompatible_pairs"),
+        "pricing_dom_pairs_avoided_before_materialization": stats.get("pricing_dom_pairs_avoided_before_materialization"),
+        "pricing_dom_candidate_pairs_materialized": stats.get("pricing_dom_candidate_pairs_materialized"),
+        "pricing_dom_full_tests_same_node": stats.get("pricing_dom_full_tests_same_node"),
+        "pricing_dom_full_tests_physical_location": stats.get("pricing_dom_full_tests_physical_location"),
+        "pricing_dom_labels_deleted_same_node": stats.get("pricing_dom_labels_deleted_same_node"),
+        "pricing_dom_labels_deleted_physical_location": stats.get("pricing_dom_labels_deleted_physical_location"),
         "pricing_labels_dominated_same_node": stats.get("pricing_labels_dominated_same_node"),
         "pricing_labels_dominated_physical": stats.get("pricing_labels_dominated_physical"),
         "pricing_deadline_reachability_removed": stats.get("pricing_deadline_reachability_removed"),
@@ -969,6 +1202,7 @@ def _summary_row(record: dict[str, Any]) -> dict[str, Any]:
         "pricing_join_time": stats.get("pricing_join_time"),
         "pricing_parallel_calls": stats.get("pricing_parallel_calls"),
         "pricing_parallel_workers_max": stats.get("pricing_parallel_workers_max"),
+        "pricing_tolerance": solver_config.get("pricing_tolerance"),
         "prefix_task_depth_root_config": solver_config.get("prefix_task_depth_root"),
         "prefix_task_depth_child_config": solver_config.get("prefix_task_depth_child"),
         "prefix_task_min_branching_for_depth2": solver_config.get("prefix_task_min_branching_for_depth2"),
@@ -1001,6 +1235,23 @@ def _summary_row(record: dict[str, Any]) -> dict[str, Any]:
         "pricing_source_neighbor_count_max": stats.get("pricing_source_neighbor_count_max"),
         "pricing_source_neighbor_task_count_max": stats.get("pricing_source_neighbor_task_count_max"),
         "pricing_source_neighbor_task_size_max": stats.get("pricing_source_neighbor_task_size_max"),
+        "pricing_core_subspace_count_max": stats.get("pricing_core_subspace_count_max"),
+        "pricing_core_empty_blocks_max": stats.get("pricing_core_empty_blocks_max"),
+        "pricing_min_core_reduced_cost": stats.get("pricing_min_core_reduced_cost"),
+        "pricing_productive_first_hit_core_id_last": stats.get("pricing_productive_first_hit_core_id_last"),
+        "pricing_productive_interrupted_cores": stats.get("pricing_productive_interrupted_cores"),
+        "pricing_certification_core_closed_count": stats.get("pricing_certification_core_closed_count"),
+        "pricing_certification_core_unresolved_count": stats.get("pricing_certification_core_unresolved_count"),
+        "pricing_root_closed_by_all_cores_calls": stats.get("pricing_root_closed_by_all_cores_calls"),
+        "pricing_stale_worker_results_discarded": stats.get("pricing_stale_worker_results_discarded"),
+        "pricing_number_of_productive_restarts": stats.get("pricing_number_of_productive_restarts"),
+        "pricing_number_of_certification_calls": stats.get("pricing_number_of_certification_calls"),
+        "pricing_number_of_certification_failures_due_to_negative_column": stats.get(
+            "pricing_number_of_certification_failures_due_to_negative_column"
+        ),
+        "pricing_number_of_certification_timeouts_unresolved": stats.get(
+            "pricing_number_of_certification_timeouts_unresolved"
+        ),
         "pricing_local_worker_candidate_quota_max": stats.get("pricing_local_worker_candidate_quota_max"),
         "pricing_diversity_quota_max": stats.get("pricing_diversity_quota_max"),
         "pricing_diversity_selected_routes": stats.get("pricing_diversity_selected_routes"),
@@ -1030,6 +1281,12 @@ def _summary_row(record: dict[str, Any]) -> dict[str, Any]:
         "pricing_dominance_bucket_pairs_considered": stats.get("pricing_dominance_bucket_pairs_considered"),
         "pricing_dominance_bucket_pairs_rejected": stats.get("pricing_dominance_bucket_pairs_rejected"),
         "pricing_dominance_bucket_candidate_pairs": stats.get("pricing_dominance_bucket_candidate_pairs"),
+        "pricing_dominance_bucket_queries": stats.get("pricing_dominance_bucket_queries"),
+        "pricing_dominance_bucket_skipped_by_mask": stats.get("pricing_dominance_bucket_skipped_by_mask"),
+        "pricing_dominance_bucket_skipped_by_scalar": stats.get("pricing_dominance_bucket_skipped_by_scalar"),
+        "pricing_dominance_bucket_skipped_by_branch": stats.get("pricing_dominance_bucket_skipped_by_branch"),
+        "pricing_dominance_bucket_skipped_by_deadline": stats.get("pricing_dominance_bucket_skipped_by_deadline"),
+        "pricing_dominance_bucket_skipped_by_return_credit": stats.get("pricing_dominance_bucket_skipped_by_return_credit"),
         "pricing_dominance_compatible_keys_generated": stats.get("pricing_dominance_compatible_keys_generated"),
         "pricing_dominance_compatible_key_lookups": stats.get("pricing_dominance_compatible_key_lookups"),
         "pricing_dominance_bucket_scans_avoided": stats.get("pricing_dominance_bucket_scans_avoided"),
@@ -1146,6 +1403,12 @@ def _summary_row(record: dict[str, Any]) -> dict[str, Any]:
         "rmp_compatibility_failure_objective_scale_version": stats.get(
             "rmp_compatibility_failure_objective_scale_version"
         ),
+        "rmp_compatibility_failure_active_column_version": stats.get(
+            "rmp_compatibility_failure_active_column_version"
+        ),
+        "rmp_compatibility_failure_rmp_structure_version": stats.get(
+            "rmp_compatibility_failure_rmp_structure_version"
+        ),
         "max_positive_le_dual_violation": stats.get("max_positive_le_dual_violation"),
         "max_negative_ge_dual_violation": stats.get("max_negative_ge_dual_violation"),
         "sr_dual_sign_violations": stats.get("sr_dual_sign_violations"),
@@ -1245,6 +1508,9 @@ def _summary_row(record: dict[str, Any]) -> dict[str, Any]:
         ),
         "child_certification_state_discarded_by_active_columns": stats.get(
             "child_certification_state_discarded_by_active_columns"
+        ),
+        "child_certification_state_discarded_by_rmp_structure": stats.get(
+            "child_certification_state_discarded_by_rmp_structure"
         ),
         "child_certification_exhausted_tasks": stats.get("child_certification_exhausted_tasks"),
         "child_certification_unresolved_tasks": stats.get("child_certification_unresolved_tasks"),
@@ -1516,6 +1782,130 @@ def _read_pricing_diagnostics(case_dir: Path) -> dict[str, Any]:
         "pricing_dom_gate_deadline_failures": sum(
             int(record.get("dom_gate_deadline_failures", 0) or 0) for record in records
         ),
+        "pricing_dom_frontier_queries": sum(int(record.get("dom_frontier_queries", 0) or 0) for record in records),
+        "pricing_dom_frontier_keys_scanned": sum(
+            int(record.get("dom_frontier_keys_scanned", 0) or 0) for record in records
+        ),
+        "pricing_dom_frontier_keys_skipped_by_mask": sum(
+            int(record.get("dom_frontier_keys_skipped_by_mask", 0) or 0) for record in records
+        ),
+        "pricing_dom_frontier_keys_skipped_by_branch": sum(
+            int(record.get("dom_frontier_keys_skipped_by_branch", 0) or 0) for record in records
+        ),
+        "pricing_dom_frontier_keys_skipped_by_deadline": sum(
+            int(record.get("dom_frontier_keys_skipped_by_deadline", 0) or 0) for record in records
+        ),
+        "pricing_dom_frontier_keys_skipped_by_return_credit": sum(
+            int(record.get("dom_frontier_keys_skipped_by_return_credit", 0) or 0) for record in records
+        ),
+        "pricing_frontier_cells_created": max(int(record.get("frontier_cells_created", 0) or 0) for record in records),
+        "pricing_frontier_cells_split": max(int(record.get("frontier_cells_split", 0) or 0) for record in records),
+        "pricing_frontier_cell_lb_min_at_stop": min(
+            (
+                float(record["frontier_cell_lb_min_at_stop"])
+                for record in records
+                if record.get("frontier_cell_lb_min_at_stop") is not None
+            ),
+            default=None,
+        ),
+        "pricing_frontier_cell_lb_closed": sum(int(record.get("frontier_cell_lb_closed", 0) or 0) for record in records),
+        "pricing_frontier_cell_lb_invalidations": sum(
+            int(record.get("frontier_cell_lb_invalidations", 0) or 0) for record in records
+        ),
+        "pricing_mask_trie_subset_queries": sum(int(record.get("mask_trie_subset_queries", 0) or 0) for record in records),
+        "pricing_mask_trie_superset_queries": sum(int(record.get("mask_trie_superset_queries", 0) or 0) for record in records),
+        "pricing_mask_trie_returned_items": sum(int(record.get("mask_trie_returned_items", 0) or 0) for record in records),
+        "pricing_mask_subset_queries": sum(int(record.get("mask_subset_queries", 0) or 0) for record in records),
+        "pricing_mask_superset_queries": sum(int(record.get("mask_superset_queries", 0) or 0) for record in records),
+        "pricing_mask_query_cache_hits": sum(int(record.get("mask_query_cache_hits", 0) or 0) for record in records),
+        "pricing_mask_query_cache_misses": sum(int(record.get("mask_query_cache_misses", 0) or 0) for record in records),
+        "pricing_cell_splits": sum(int(record.get("cell_splits", 0) or 0) for record in records),
+        "pricing_cell_pair_products_before_split": sum(
+            int(record.get("cell_pair_products_before_split", 0) or 0) for record in records
+        ),
+        "pricing_cell_pairs_considered": sum(int(record.get("cell_pairs_considered", 0) or 0) for record in records),
+        "pricing_cell_pairs_rejected_by_mask": sum(int(record.get("cell_pairs_rejected_by_mask", 0) or 0) for record in records),
+        "pricing_cell_pairs_rejected_by_envelope": sum(
+            int(record.get("cell_pairs_rejected_by_envelope", 0) or 0) for record in records
+        ),
+        "pricing_cell_pairs_rejected_by_lb": sum(int(record.get("cell_pairs_rejected_by_lb", 0) or 0) for record in records),
+        "pricing_cell_pairs_rejected_by_closure_lb": sum(
+            int(record.get("cell_pairs_rejected_by_closure_lb", 0) or 0) for record in records
+        ),
+        "pricing_label_pairs_materialized": sum(int(record.get("label_pairs_materialized", 0) or 0) for record in records),
+        "pricing_labels_certified_by_cell_lb": sum(
+            int(record.get("labels_certified_by_cell_lb", 0) or 0) for record in records
+        ),
+        "pricing_full_same_node_tests": sum(int(record.get("full_same_node_tests", 0) or 0) for record in records),
+        "pricing_full_physical_location_tests": sum(
+            int(record.get("full_physical_location_tests", 0) or 0) for record in records
+        ),
+        "pricing_labels_deleted_same_node": sum(int(record.get("labels_deleted_same_node", 0) or 0) for record in records),
+        "pricing_labels_deleted_physical_location": sum(
+            int(record.get("labels_deleted_physical_location", 0) or 0) for record in records
+        ),
+        "pricing_closure_queue_pushes": sum(int(record.get("closure_queue_pushes", 0) or 0) for record in records),
+        "pricing_closure_queue_pops": sum(int(record.get("closure_queue_pops", 0) or 0) for record in records),
+        "pricing_closure_queue_min_key_at_stop": min(
+            (
+                float(record["closure_queue_min_key_at_stop"])
+                for record in records
+                if record.get("closure_queue_min_key_at_stop") is not None
+            ),
+            default=None,
+        ),
+        "pricing_certification_tasks_exhausted_by_cell_lb": sum(
+            int(record.get("certification_tasks_exhausted_by_cell_lb", 0) or 0) for record in records
+        ),
+        "pricing_certification_tasks_closed_by_cell_lb": sum(
+            int(record.get("certification_tasks_closed_by_cell_lb", 0) or 0) for record in records
+        ),
+        "pricing_certification_tasks_exhausted_by_label_search": sum(
+            int(record.get("certification_tasks_exhausted_by_label_search", 0) or 0) for record in records
+        ),
+        "pricing_resource_reward_bound_calls": sum(
+            int(record.get("resource_reward_bound_calls", 0) or 0) for record in records
+        ),
+        "pricing_resource_reward_bound_time": sum(
+            float(record.get("resource_reward_bound_time", 0.0) or 0.0) for record in records
+        ),
+        "pricing_resource_reward_bound_fallbacks": sum(
+            int(record.get("resource_reward_bound_fallbacks", 0) or 0) for record in records
+        ),
+        "pricing_physdom_cell_pairs_considered": sum(
+            int(record.get("physdom_cell_pairs_considered", 0) or 0) for record in records
+        ),
+        "pricing_physdom_cell_pairs_rejected_by_mask": sum(
+            int(record.get("physdom_cell_pairs_rejected_by_mask", 0) or 0) for record in records
+        ),
+        "pricing_physdom_cell_pairs_rejected_by_envelope": sum(
+            int(record.get("physdom_cell_pairs_rejected_by_envelope", 0) or 0) for record in records
+        ),
+        "pricing_physdom_label_pairs_materialized": sum(
+            int(record.get("physdom_label_pairs_materialized", 0) or 0) for record in records
+        ),
+        "pricing_physdom_full_tests": sum(int(record.get("physdom_full_tests", 0) or 0) for record in records),
+        "pricing_physdom_deletions": sum(int(record.get("physdom_deletions", 0) or 0) for record in records),
+        "pricing_physdom_time": sum(float(record.get("physdom_time", 0.0) or 0.0) for record in records),
+        "pricing_return_credit_incompatible_pairs": sum(
+            int(record.get("return_credit_incompatible_pairs", 0) or 0) for record in records
+        ),
+        "pricing_dom_pairs_avoided_before_materialization": sum(
+            int(record.get("dom_pairs_avoided_before_materialization", 0) or 0) for record in records
+        ),
+        "pricing_dom_candidate_pairs_materialized": sum(
+            int(record.get("dom_candidate_pairs_materialized", 0) or 0) for record in records
+        ),
+        "pricing_dom_full_tests_same_node": sum(int(record.get("dom_full_tests_same_node", 0) or 0) for record in records),
+        "pricing_dom_full_tests_physical_location": sum(
+            int(record.get("dom_full_tests_physical_location", 0) or 0) for record in records
+        ),
+        "pricing_dom_labels_deleted_same_node": sum(
+            int(record.get("dom_labels_deleted_same_node", 0) or 0) for record in records
+        ),
+        "pricing_dom_labels_deleted_physical_location": sum(
+            int(record.get("dom_labels_deleted_physical_location", 0) or 0) for record in records
+        ),
         "pricing_labels_dominated_same_node": sum(
             int(record.get("labels_dominated_same_node", 0) or 0) for record in records
         ),
@@ -1609,6 +1999,48 @@ def _read_pricing_diagnostics(case_dir: Path) -> dict[str, Any]:
             float(record.get("pricing_main_process_cpu_time_seconds", 0.0) or 0.0) for record in records
         ),
         "pricing_main_merge_time": sum(float(record.get("pricing_main_merge_time_seconds", 0.0) or 0.0) for record in records),
+        "pricing_core_subspace_count_max": max(int(record.get("core_subspace_count", 0) or 0) for record in records),
+        "pricing_core_empty_blocks_max": max(int(record.get("core_empty_blocks", 0) or 0) for record in records),
+        "pricing_min_core_reduced_cost": min(
+            (
+                float(record["min_core_reduced_cost"])
+                for record in records
+                if record.get("min_core_reduced_cost") is not None
+            ),
+            default=None,
+        ),
+        "pricing_productive_first_hit_core_id_last": next(
+            (
+                int(record["productive_first_hit_core_id"])
+                for record in reversed(records)
+                if record.get("productive_first_hit_core_id") is not None
+            ),
+            None,
+        ),
+        "pricing_productive_interrupted_cores": sum(int(record.get("productive_interrupted_cores", 0) or 0) for record in records),
+        "pricing_certification_core_closed_count": sum(
+            int(record.get("certification_core_closed_count", 0) or 0) for record in records
+        ),
+        "pricing_certification_core_unresolved_count": sum(
+            int(record.get("certification_core_unresolved_count", 0) or 0) for record in records
+        ),
+        "pricing_root_closed_by_all_cores_calls": sum(1 for record in records if record.get("root_closed_by_all_cores")),
+        "pricing_stale_worker_results_discarded": sum(
+            int(record.get("stale_worker_results_discarded", 0) or 0) for record in records
+        ),
+        "pricing_number_of_productive_restarts": sum(
+            int(record.get("number_of_productive_restarts", 0) or 0) for record in records
+        ),
+        "pricing_number_of_certification_calls": sum(
+            int(record.get("number_of_certification_calls", 0) or 0) for record in records
+        ),
+        "pricing_number_of_certification_failures_due_to_negative_column": sum(
+            int(record.get("number_of_certification_failures_due_to_negative_column", 0) or 0)
+            for record in records
+        ),
+        "pricing_number_of_certification_timeouts_unresolved": sum(
+            int(record.get("number_of_certification_timeouts_unresolved", 0) or 0) for record in records
+        ),
         "pricing_pool_startup_time": sum(float(record.get("pricing_pool_startup_time_seconds", 0.0) or 0.0) for record in records),
         "pricing_pool_startup_count": sum(int(record.get("pricing_pool_startup_count", 0) or 0) for record in records),
         "pricing_pool_reused_calls": sum(int(record.get("pricing_pool_reused_calls", 0) or 0) for record in records),
@@ -1641,6 +2073,14 @@ def _read_pricing_diagnostics(case_dir: Path) -> dict[str, Any]:
         "pricing_dominance_bucket_pairs_considered": sum(int(record.get("dominance_bucket_pairs_considered", 0) or 0) for record in records),
         "pricing_dominance_bucket_pairs_rejected": sum(int(record.get("dominance_bucket_pairs_rejected", 0) or 0) for record in records),
         "pricing_dominance_bucket_candidate_pairs": sum(int(record.get("dominance_bucket_candidate_pairs", 0) or 0) for record in records),
+        "pricing_dominance_bucket_queries": sum(int(record.get("dominance_bucket_queries", 0) or 0) for record in records),
+        "pricing_dominance_bucket_skipped_by_mask": sum(int(record.get("dominance_bucket_skipped_by_mask", 0) or 0) for record in records),
+        "pricing_dominance_bucket_skipped_by_scalar": sum(int(record.get("dominance_bucket_skipped_by_scalar", 0) or 0) for record in records),
+        "pricing_dominance_bucket_skipped_by_branch": sum(int(record.get("dominance_bucket_skipped_by_branch", 0) or 0) for record in records),
+        "pricing_dominance_bucket_skipped_by_deadline": sum(int(record.get("dominance_bucket_skipped_by_deadline", 0) or 0) for record in records),
+        "pricing_dominance_bucket_skipped_by_return_credit": sum(
+            int(record.get("dominance_bucket_skipped_by_return_credit", 0) or 0) for record in records
+        ),
         "pricing_dominance_compatible_keys_generated": sum(int(record.get("dominance_compatible_keys_generated", 0) or 0) for record in records),
         "pricing_dominance_compatible_key_lookups": sum(int(record.get("dominance_compatible_key_lookups", 0) or 0) for record in records),
         "pricing_dominance_bucket_scans_avoided": sum(int(record.get("dominance_bucket_scans_avoided", 0) or 0) for record in records),
@@ -1794,6 +2234,54 @@ def _merge_timeout_stats(progress_stats: dict[str, Any], pricing_summary: dict[s
         "pricing_dom_gate_scalar_failures",
         "pricing_dom_gate_branch_failures",
         "pricing_dom_gate_deadline_failures",
+        "pricing_dom_frontier_queries",
+        "pricing_dom_frontier_keys_scanned",
+        "pricing_dom_frontier_keys_skipped_by_mask",
+        "pricing_dom_frontier_keys_skipped_by_branch",
+        "pricing_dom_frontier_keys_skipped_by_deadline",
+        "pricing_dom_frontier_keys_skipped_by_return_credit",
+        "pricing_frontier_cell_lb_closed",
+        "pricing_frontier_cell_lb_invalidations",
+        "pricing_mask_trie_subset_queries",
+        "pricing_mask_trie_superset_queries",
+        "pricing_mask_trie_returned_items",
+        "pricing_mask_subset_queries",
+        "pricing_mask_superset_queries",
+        "pricing_mask_query_cache_hits",
+        "pricing_mask_query_cache_misses",
+        "pricing_cell_splits",
+        "pricing_cell_pair_products_before_split",
+        "pricing_cell_pairs_considered",
+        "pricing_cell_pairs_rejected_by_mask",
+        "pricing_cell_pairs_rejected_by_envelope",
+        "pricing_cell_pairs_rejected_by_lb",
+        "pricing_cell_pairs_rejected_by_closure_lb",
+        "pricing_label_pairs_materialized",
+        "pricing_labels_certified_by_cell_lb",
+        "pricing_full_same_node_tests",
+        "pricing_full_physical_location_tests",
+        "pricing_labels_deleted_same_node",
+        "pricing_labels_deleted_physical_location",
+        "pricing_closure_queue_pushes",
+        "pricing_closure_queue_pops",
+        "pricing_certification_tasks_exhausted_by_cell_lb",
+        "pricing_certification_tasks_closed_by_cell_lb",
+        "pricing_certification_tasks_exhausted_by_label_search",
+        "pricing_resource_reward_bound_calls",
+        "pricing_resource_reward_bound_fallbacks",
+        "pricing_physdom_cell_pairs_considered",
+        "pricing_physdom_cell_pairs_rejected_by_mask",
+        "pricing_physdom_cell_pairs_rejected_by_envelope",
+        "pricing_physdom_label_pairs_materialized",
+        "pricing_physdom_full_tests",
+        "pricing_physdom_deletions",
+        "pricing_return_credit_incompatible_pairs",
+        "pricing_dom_pairs_avoided_before_materialization",
+        "pricing_dom_candidate_pairs_materialized",
+        "pricing_dom_full_tests_same_node",
+        "pricing_dom_full_tests_physical_location",
+        "pricing_dom_labels_deleted_same_node",
+        "pricing_dom_labels_deleted_physical_location",
         "pricing_labels_dominated_same_node",
         "pricing_labels_dominated_physical",
         "pricing_dom_prefilter_pairs",
@@ -1834,6 +2322,12 @@ def _merge_timeout_stats(progress_stats: dict[str, Any], pricing_summary: dict[s
         "pricing_dominance_bucket_pairs_considered",
         "pricing_dominance_bucket_pairs_rejected",
         "pricing_dominance_bucket_candidate_pairs",
+        "pricing_dominance_bucket_queries",
+        "pricing_dominance_bucket_skipped_by_mask",
+        "pricing_dominance_bucket_skipped_by_scalar",
+        "pricing_dominance_bucket_skipped_by_branch",
+        "pricing_dominance_bucket_skipped_by_deadline",
+        "pricing_dominance_bucket_skipped_by_return_credit",
         "pricing_dominance_compatible_keys_generated",
         "pricing_dominance_compatible_key_lookups",
         "pricing_dominance_bucket_scans_avoided",
@@ -1914,8 +2408,21 @@ def _merge_timeout_stats(progress_stats: dict[str, Any], pricing_summary: dict[s
         "pricing_candidate_paths_after_merge",
         "pricing_decoded_routes_in_main",
         "pricing_verified_routes_in_main",
+        "pricing_frontier_cells_created",
+        "pricing_frontier_cells_split",
         "pricing_source_neighbor_task_count_max",
         "pricing_source_neighbor_task_size_max",
+        "pricing_core_subspace_count_max",
+        "pricing_core_empty_blocks_max",
+        "pricing_productive_interrupted_cores",
+        "pricing_certification_core_closed_count",
+        "pricing_certification_core_unresolved_count",
+        "pricing_root_closed_by_all_cores_calls",
+        "pricing_stale_worker_results_discarded",
+        "pricing_number_of_productive_restarts",
+        "pricing_number_of_certification_calls",
+        "pricing_number_of_certification_failures_due_to_negative_column",
+        "pricing_number_of_certification_timeouts_unresolved",
         "pricing_local_worker_candidate_quota_max",
         "pricing_diversity_quota_max",
         "pricing_diversity_selected_routes",
@@ -1933,6 +2440,16 @@ def _merge_timeout_stats(progress_stats: dict[str, Any], pricing_summary: dict[s
         "pricing_source_neighbor_count_max",
     ):
         merged[field] = max(int(merged.get(field, 0) or 0), int(pricing_summary[field]))
+    if pricing_summary.get("pricing_productive_first_hit_core_id_last") is not None:
+        merged["pricing_productive_first_hit_core_id_last"] = pricing_summary[
+            "pricing_productive_first_hit_core_id_last"
+        ]
+    if pricing_summary.get("pricing_min_core_reduced_cost") is not None:
+        previous_min = merged.get("pricing_min_core_reduced_cost")
+        current_min = float(pricing_summary["pricing_min_core_reduced_cost"])
+        merged["pricing_min_core_reduced_cost"] = (
+            current_min if previous_min is None else min(float(previous_min), current_min)
+        )
     for field in (
         "pricing_forward_labeling_time",
         "pricing_backward_labeling_time",
@@ -1960,6 +2477,8 @@ def _merge_timeout_stats(progress_stats: dict[str, Any], pricing_summary: dict[s
         "pricing_pool_shutdown_time",
         "pricing_task_submission_time",
         "pricing_productive_slice_time",
+        "pricing_physdom_time",
+        "pricing_resource_reward_bound_time",
     ):
         merged[field] = max(float(merged.get(field, 0.0) or 0.0), float(pricing_summary[field]))
     for field in (

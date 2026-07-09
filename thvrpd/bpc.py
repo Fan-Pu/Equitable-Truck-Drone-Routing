@@ -27,7 +27,16 @@ from .heuristics import run_route_pool_heuristic
 from .instance import InstanceData
 from .objective import ObjectiveData, build_objective_data
 from .phasei import PhaseISeeder
-from .pricing import PricingDuals, PricingResult, PricingTimeLimitReached, SourceNeighborPricingPool, price_route, route_reduced_cost
+from .pricing import (
+    _DynamicRefinementConfig,
+    _KCoreBalanceConfig,
+    PricingDuals,
+    PricingResult,
+    PricingTimeLimitReached,
+    SourceNeighborPricingPool,
+    price_route,
+    route_reduced_cost,
+)
 from .rmp import NodeState, RestrictedMaster, SRCutMetadata
 from .routes import Route, ServiceEnvelopeViolation, route_from_path
 from .transform import build_transformed_graph, duplicate_node, is_duplicate
@@ -239,6 +248,19 @@ class BPCStats:
     pricing_worker_cpu_time: float = 0.0
     pricing_main_process_cpu_time: float = 0.0
     pricing_main_merge_time: float = 0.0
+    pricing_core_subspace_count_max: int = 0
+    pricing_core_empty_blocks_max: int = 0
+    pricing_min_core_reduced_cost: float | None = None
+    pricing_productive_first_hit_core_id_last: int | None = None
+    pricing_productive_interrupted_cores: int = 0
+    pricing_certification_core_closed_count: int = 0
+    pricing_certification_core_unresolved_count: int = 0
+    pricing_root_closed_by_all_cores_calls: int = 0
+    pricing_stale_worker_results_discarded: int = 0
+    pricing_number_of_productive_restarts: int = 0
+    pricing_number_of_certification_calls: int = 0
+    pricing_number_of_certification_failures_due_to_negative_column: int = 0
+    pricing_number_of_certification_timeouts_unresolved: int = 0
     pricing_pool_startup_time: float = 0.0
     pricing_pool_startup_count: int = 0
     pricing_pool_reused_calls: int = 0
@@ -259,6 +281,35 @@ class BPCStats:
     pricing_source_neighbor_count_max: int = 0
     pricing_source_neighbor_task_count_max: int = 0
     pricing_source_neighbor_task_size_max: int = 0
+    pricing_initial_source_neighbors_max: int = 0
+    pricing_initial_task_count_max: int = 0
+    pricing_initial_load_imbalance_max_mean: float = 0.0
+    pricing_empty_initial_blocks_max: int = 0
+    pricing_idle_worker_seconds: float = 0.0
+    pricing_dynamic_split_candidates: int = 0
+    pricing_dynamic_splits_performed: int = 0
+    pricing_dynamic_split_rejected_close_to_closure: int = 0
+    pricing_dynamic_split_rejected_small_queue: int = 0
+    pricing_dynamic_split_rejected_short_elapsed: int = 0
+    pricing_dynamic_split_rejected_low_workload: int = 0
+    pricing_dynamic_child_tasks_created: int = 0
+    pricing_dynamic_labels_transferred: int = 0
+    pricing_dynamic_split_overhead_seconds: float = 0.0
+    pricing_leaf_tasks_closed: int = 0
+    pricing_leaf_tasks_stale: int = 0
+    pricing_best_active_task_gap_max: float = 0.0
+    pricing_open_labels_by_task_max: int = 0
+    pricing_epoch_invalidations_dual: int = 0
+    pricing_epoch_invalidations_sr: int = 0
+    pricing_epoch_invalidations_residual_branch: int = 0
+    pricing_epoch_invalidations_fixed_routes: int = 0
+    pricing_epoch_invalidations_active_columns: int = 0
+    pricing_epoch_invalidations_rmp_structure: int = 0
+    pricing_epoch_invalidations_objective_window: int = 0
+    pricing_stale_task_reuse_attempts: int = 0
+    pricing_stale_task_reuse_blocked: int = 0
+    pricing_cross_task_dominance_attempts: int = 0
+    pricing_cross_task_dominance_blocked: int = 0
     pricing_local_worker_candidate_quota_max: int = 0
     pricing_diversity_quota_max: int = 0
     pricing_diversity_selected_routes: int = 0
@@ -305,6 +356,64 @@ class BPCStats:
     pricing_dominance_bucket_pairs_considered: int = 0
     pricing_dominance_bucket_pairs_rejected: int = 0
     pricing_dominance_bucket_candidate_pairs: int = 0
+    pricing_dominance_bucket_queries: int = 0
+    pricing_dominance_bucket_skipped_by_mask: int = 0
+    pricing_dominance_bucket_skipped_by_scalar: int = 0
+    pricing_dominance_bucket_skipped_by_branch: int = 0
+    pricing_dominance_bucket_skipped_by_deadline: int = 0
+    pricing_dominance_bucket_skipped_by_return_credit: int = 0
+    pricing_dom_frontier_queries: int = 0
+    pricing_dom_frontier_keys_scanned: int = 0
+    pricing_dom_frontier_keys_skipped_by_mask: int = 0
+    pricing_dom_frontier_keys_skipped_by_branch: int = 0
+    pricing_dom_frontier_keys_skipped_by_deadline: int = 0
+    pricing_dom_frontier_keys_skipped_by_return_credit: int = 0
+    pricing_frontier_cells_created: int = 0
+    pricing_frontier_cells_split: int = 0
+    pricing_frontier_cell_lb_closed: int = 0
+    pricing_frontier_cell_lb_invalidations: int = 0
+    pricing_mask_trie_subset_queries: int = 0
+    pricing_mask_trie_superset_queries: int = 0
+    pricing_mask_trie_returned_items: int = 0
+    pricing_mask_subset_queries: int = 0
+    pricing_mask_superset_queries: int = 0
+    pricing_mask_query_cache_hits: int = 0
+    pricing_mask_query_cache_misses: int = 0
+    pricing_cell_splits: int = 0
+    pricing_cell_pair_products_before_split: int = 0
+    pricing_cell_pairs_considered: int = 0
+    pricing_cell_pairs_rejected_by_mask: int = 0
+    pricing_cell_pairs_rejected_by_envelope: int = 0
+    pricing_cell_pairs_rejected_by_lb: int = 0
+    pricing_cell_pairs_rejected_by_closure_lb: int = 0
+    pricing_label_pairs_materialized: int = 0
+    pricing_labels_certified_by_cell_lb: int = 0
+    pricing_full_same_node_tests: int = 0
+    pricing_full_physical_location_tests: int = 0
+    pricing_labels_deleted_same_node: int = 0
+    pricing_labels_deleted_physical_location: int = 0
+    pricing_closure_queue_pushes: int = 0
+    pricing_closure_queue_pops: int = 0
+    pricing_certification_tasks_exhausted_by_cell_lb: int = 0
+    pricing_certification_tasks_closed_by_cell_lb: int = 0
+    pricing_certification_tasks_exhausted_by_label_search: int = 0
+    pricing_resource_reward_bound_calls: int = 0
+    pricing_resource_reward_bound_time: float = 0.0
+    pricing_resource_reward_bound_fallbacks: int = 0
+    pricing_physdom_cell_pairs_considered: int = 0
+    pricing_physdom_cell_pairs_rejected_by_mask: int = 0
+    pricing_physdom_cell_pairs_rejected_by_envelope: int = 0
+    pricing_physdom_label_pairs_materialized: int = 0
+    pricing_physdom_full_tests: int = 0
+    pricing_physdom_deletions: int = 0
+    pricing_physdom_time: float = 0.0
+    pricing_return_credit_incompatible_pairs: int = 0
+    pricing_dom_pairs_avoided_before_materialization: int = 0
+    pricing_dom_candidate_pairs_materialized: int = 0
+    pricing_dom_full_tests_same_node: int = 0
+    pricing_dom_full_tests_physical_location: int = 0
+    pricing_dom_labels_deleted_same_node: int = 0
+    pricing_dom_labels_deleted_physical_location: int = 0
     pricing_dominance_compatible_keys_generated: int = 0
     pricing_dominance_compatible_key_lookups: int = 0
     pricing_dominance_bucket_scans_avoided: int = 0
@@ -432,6 +541,8 @@ class BPCStats:
     rmp_compatibility_failure_active_sr_version: int = 0
     rmp_compatibility_failure_service_deadline_version: int = 0
     rmp_compatibility_failure_objective_scale_version: int = 0
+    rmp_compatibility_failure_active_column_version: int = 0
+    rmp_compatibility_failure_rmp_structure_version: int = 0
     max_positive_le_dual_violation: float = 0.0
     max_negative_ge_dual_violation: float = 0.0
     sr_dual_sign_violations: int = 0
@@ -575,6 +686,7 @@ class BPCStats:
     child_certification_state_discarded_by_branch: int = 0
     child_certification_state_discarded_by_fixed_routes: int = 0
     child_certification_state_discarded_by_active_columns: int = 0
+    child_certification_state_discarded_by_rmp_structure: int = 0
     child_certification_exhausted_tasks: int = 0
     child_certification_unresolved_tasks: int = 0
     child_closure_batch_min: int = 0
@@ -994,6 +1106,8 @@ def solve_branch_price_cut(
             objective,
             solver_config.pricing_parallel_workers,
             solver_config.source_neighbor_task_size,
+            _pricing_balance_config(solver_config),
+            _pricing_refinement_config(solver_config),
         )
         if solver_config.pricing_worker_backend == "process" and solver_config.pricing_parallel_workers > 1
         else None
@@ -1459,6 +1573,13 @@ def _solve_node(
                     source_neighbor_task_size=solver_config.source_neighbor_task_size,
                     pricing_diversity_batch_fraction=solver_config.pricing_diversity_batch_fraction,
                     prefix_task_depth=_prefix_task_depth_for_node(solver_config, node, stats),
+                    enable_mask_trie_frontier=solver_config.enable_mask_trie_frontier,
+                    max_frontier_cell_size=solver_config.max_frontier_cell_size,
+                    max_frontier_pair_product=solver_config.max_frontier_pair_product,
+                    max_frontier_split_depth=solver_config.max_frontier_split_depth,
+                    enable_resource_restricted_closure_bound=solver_config.enable_resource_restricted_closure_bound,
+                    resource_bound_method=solver_config.resource_bound_method,
+                    **_pricing_scheduler_kwargs(solver_config),
             )
             except PricingTimeLimitReached as exc:
                 _record_farkas_pricing_time(stats, node, time.time() - pricing_start)
@@ -1516,7 +1637,6 @@ def _solve_node(
                 else:
                     stats.child_certification_epochs_started += 1
                 node.child_certification_signature = cert_signature
-                stats.child_certification_state_saved += 1
         standard_batch_size = (
             solver_config.closure_batch_size
             if certification_attempt
@@ -1604,6 +1724,13 @@ def _solve_node(
                 productive_yield_window_rate=slice_controller.last_yield_rate,
                 search_duals=search_duals,
                 prefix_task_depth=_prefix_task_depth_for_node(solver_config, node, stats),
+                enable_mask_trie_frontier=solver_config.enable_mask_trie_frontier,
+                max_frontier_cell_size=solver_config.max_frontier_cell_size,
+                max_frontier_pair_product=solver_config.max_frontier_pair_product,
+                max_frontier_split_depth=solver_config.max_frontier_split_depth,
+                enable_resource_restricted_closure_bound=solver_config.enable_resource_restricted_closure_bound,
+                resource_bound_method=solver_config.resource_bound_method,
+                **_pricing_scheduler_kwargs(solver_config),
             )
         except PricingTimeLimitReached as exc:
             _record_standard_pricing_time(stats, node, time.time() - pricing_start)
@@ -1622,6 +1749,7 @@ def _solve_node(
                         unresolved = len(exc.diagnostics.source_neighbor_block_sizes) or exc.diagnostics.source_neighbor_task_count
                         node.child_certification_unresolved_task_count = unresolved
                         stats.child_certification_unresolved_tasks += unresolved
+                        stats.child_certification_state_saved += 1
                 if closure_attempt:
                     stats.closure_attempts_time_limited += 1
                 stats.certification_time_limit_no_columns += 1
@@ -1933,6 +2061,13 @@ def _run_phase_i_seeding(
                     productive_candidate_multiplier=solver_config.productive_candidate_multiplier,
                     source_neighbor_task_size=solver_config.source_neighbor_task_size,
                     pricing_diversity_batch_fraction=solver_config.pricing_diversity_batch_fraction,
+                    enable_mask_trie_frontier=solver_config.enable_mask_trie_frontier,
+                    max_frontier_cell_size=solver_config.max_frontier_cell_size,
+                    max_frontier_pair_product=solver_config.max_frontier_pair_product,
+                    max_frontier_split_depth=solver_config.max_frontier_split_depth,
+                    enable_resource_restricted_closure_bound=solver_config.enable_resource_restricted_closure_bound,
+                    resource_bound_method=solver_config.resource_bound_method,
+                    **_pricing_scheduler_kwargs(solver_config),
                 )
         except PricingTimeLimitReached as exc:
             _record_pricing_timeout(stats, "seed_interrupted", exc, solver_config, node, routes, global_pool_paths, signature_cache)
@@ -2344,6 +2479,45 @@ def _sync_closure_aware_pricing_stats(
     stats.stabilized_dual_enabled = solver_config.use_dual_stabilized_productive_search
 
 
+def _pricing_balance_config(solver_config: SolverConfig) -> _KCoreBalanceConfig:
+    return _KCoreBalanceConfig(
+        enabled=solver_config.enable_balanced_kcore_pricing,
+        alpha_reachable_customers=solver_config.kcore_balance_alpha_reachable_customers,
+        alpha_out_degree=solver_config.kcore_balance_alpha_out_degree,
+        alpha_drone_pads=solver_config.kcore_balance_alpha_drone_pads,
+        alpha_deadline_customers=solver_config.kcore_balance_alpha_deadline_customers,
+    )
+
+
+def _pricing_refinement_config(solver_config: SolverConfig) -> _DynamicRefinementConfig:
+    return _DynamicRefinementConfig(
+        enabled=solver_config.enable_dynamic_kcore_refinement,
+        split_label_threshold=solver_config.dynamic_split_label_threshold,
+        split_gap_multiplier=solver_config.dynamic_split_gap_multiplier,
+        split_time_threshold=solver_config.dynamic_split_time_threshold,
+        split_work_threshold=solver_config.dynamic_split_work_threshold,
+        refinement_depth=solver_config.dynamic_refinement_depth,
+        checkpoint_extension_period=solver_config.checkpoint_extension_period,
+    )
+
+
+def _pricing_scheduler_kwargs(solver_config: SolverConfig) -> dict[str, object]:
+    return {
+        "enable_balanced_kcore_pricing": solver_config.enable_balanced_kcore_pricing,
+        "enable_dynamic_kcore_refinement": solver_config.enable_dynamic_kcore_refinement,
+        "kcore_balance_alpha_reachable_customers": solver_config.kcore_balance_alpha_reachable_customers,
+        "kcore_balance_alpha_out_degree": solver_config.kcore_balance_alpha_out_degree,
+        "kcore_balance_alpha_drone_pads": solver_config.kcore_balance_alpha_drone_pads,
+        "kcore_balance_alpha_deadline_customers": solver_config.kcore_balance_alpha_deadline_customers,
+        "dynamic_split_label_threshold": solver_config.dynamic_split_label_threshold,
+        "dynamic_split_gap_multiplier": solver_config.dynamic_split_gap_multiplier,
+        "dynamic_split_time_threshold": solver_config.dynamic_split_time_threshold,
+        "dynamic_split_work_threshold": solver_config.dynamic_split_work_threshold,
+        "dynamic_refinement_depth": solver_config.dynamic_refinement_depth,
+        "checkpoint_extension_period": solver_config.checkpoint_extension_period,
+    }
+
+
 def _prefix_task_depth_for_node(solver_config: SolverConfig, node: NodeState, stats: BPCStats) -> int:
     if node.depth == 0:
         return max(solver_config.prefix_task_depth, solver_config.prefix_task_depth_root)
@@ -2551,6 +2725,38 @@ def _record_pricing_diagnostic_dict(
     stats.pricing_worker_cpu_time += float(record.get("pricing_worker_cpu_time_seconds", 0.0) or 0.0)
     stats.pricing_main_process_cpu_time += float(record.get("pricing_main_process_cpu_time_seconds", 0.0) or 0.0)
     stats.pricing_main_merge_time += float(record.get("pricing_main_merge_time_seconds", 0.0) or 0.0)
+    stats.pricing_core_subspace_count_max = max(
+        stats.pricing_core_subspace_count_max,
+        int(record.get("core_subspace_count", 0) or 0),
+    )
+    stats.pricing_core_empty_blocks_max = max(
+        stats.pricing_core_empty_blocks_max,
+        int(record.get("core_empty_blocks", 0) or 0),
+    )
+    min_core_reduced_cost = record.get("min_core_reduced_cost")
+    if min_core_reduced_cost is not None:
+        value = float(min_core_reduced_cost)
+        stats.pricing_min_core_reduced_cost = (
+            value
+            if stats.pricing_min_core_reduced_cost is None
+            else min(stats.pricing_min_core_reduced_cost, value)
+        )
+    if record.get("productive_first_hit_core_id") is not None:
+        stats.pricing_productive_first_hit_core_id_last = int(record.get("productive_first_hit_core_id"))
+    stats.pricing_productive_interrupted_cores += int(record.get("productive_interrupted_cores", 0) or 0)
+    stats.pricing_certification_core_closed_count += int(record.get("certification_core_closed_count", 0) or 0)
+    stats.pricing_certification_core_unresolved_count += int(record.get("certification_core_unresolved_count", 0) or 0)
+    if bool(record.get("root_closed_by_all_cores", False)):
+        stats.pricing_root_closed_by_all_cores_calls += 1
+    stats.pricing_stale_worker_results_discarded += int(record.get("stale_worker_results_discarded", 0) or 0)
+    stats.pricing_number_of_productive_restarts += int(record.get("number_of_productive_restarts", 0) or 0)
+    stats.pricing_number_of_certification_calls += int(record.get("number_of_certification_calls", 0) or 0)
+    stats.pricing_number_of_certification_failures_due_to_negative_column += int(
+        record.get("number_of_certification_failures_due_to_negative_column", 0) or 0
+    )
+    stats.pricing_number_of_certification_timeouts_unresolved += int(
+        record.get("number_of_certification_timeouts_unresolved", 0) or 0
+    )
     stats.pricing_pool_startup_time += float(record.get("pricing_pool_startup_time_seconds", 0.0) or 0.0)
     stats.pricing_pool_startup_count += int(record.get("pricing_pool_startup_count", 0) or 0)
     stats.pricing_pool_reused_calls += int(record.get("pricing_pool_reused_calls", 0) or 0)
@@ -2593,6 +2799,71 @@ def _record_pricing_diagnostic_dict(
     stats.pricing_source_neighbor_task_size_max = max(
         stats.pricing_source_neighbor_task_size_max,
         max(task_sizes, default=0),
+    )
+    stats.pricing_initial_source_neighbors_max = max(
+        stats.pricing_initial_source_neighbors_max,
+        int(record.get("pricing_initial_source_neighbors", 0) or 0),
+    )
+    stats.pricing_initial_task_count_max = max(
+        stats.pricing_initial_task_count_max,
+        int(record.get("pricing_initial_task_count", 0) or 0),
+    )
+    stats.pricing_initial_load_imbalance_max_mean = max(
+        stats.pricing_initial_load_imbalance_max_mean,
+        float(record.get("pricing_initial_load_imbalance_max_mean", 0.0) or 0.0),
+    )
+    stats.pricing_empty_initial_blocks_max = max(
+        stats.pricing_empty_initial_blocks_max,
+        int(record.get("pricing_empty_initial_blocks", 0) or 0),
+    )
+    stats.pricing_idle_worker_seconds += float(record.get("pricing_idle_worker_seconds", 0.0) or 0.0)
+    stats.pricing_dynamic_split_candidates += int(record.get("pricing_dynamic_split_candidates", 0) or 0)
+    stats.pricing_dynamic_splits_performed += int(record.get("pricing_dynamic_splits_performed", 0) or 0)
+    stats.pricing_dynamic_split_rejected_close_to_closure += int(
+        record.get("pricing_dynamic_split_rejected_close_to_closure", 0) or 0
+    )
+    stats.pricing_dynamic_split_rejected_small_queue += int(
+        record.get("pricing_dynamic_split_rejected_small_queue", 0) or 0
+    )
+    stats.pricing_dynamic_split_rejected_short_elapsed += int(
+        record.get("pricing_dynamic_split_rejected_short_elapsed", 0) or 0
+    )
+    stats.pricing_dynamic_split_rejected_low_workload += int(
+        record.get("pricing_dynamic_split_rejected_low_workload", 0) or 0
+    )
+    stats.pricing_dynamic_child_tasks_created += int(record.get("pricing_dynamic_child_tasks_created", 0) or 0)
+    stats.pricing_dynamic_labels_transferred += int(
+        record.get("pricing_labels_transferred_to_idle_workers", 0) or 0
+    )
+    stats.pricing_dynamic_split_overhead_seconds += float(
+        record.get("pricing_split_overhead_time", 0.0) or 0.0
+    )
+    stats.pricing_leaf_tasks_closed += int(record.get("pricing_leaf_tasks_closed", 0) or 0)
+    stats.pricing_leaf_tasks_stale += int(record.get("pricing_leaf_tasks_stale_discarded", 0) or 0)
+    stats.pricing_best_active_task_gap_max = max(
+        stats.pricing_best_active_task_gap_max,
+        float(record.get("pricing_best_active_task_gap", 0.0) or 0.0),
+    )
+    stats.pricing_open_labels_by_task_max = max(
+        stats.pricing_open_labels_by_task_max,
+        int(record.get("pricing_open_labels_by_task_max", 0) or 0),
+    )
+    stats.pricing_epoch_invalidations_dual += int(record.get("epoch_invalidations_due_to_dual_change", 0) or 0)
+    stats.pricing_epoch_invalidations_sr += int(record.get("epoch_invalidations_due_to_sr_change", 0) or 0)
+    stats.pricing_epoch_invalidations_residual_branch += int(
+        (record.get("epoch_invalidations_due_to_branch_change", 0) or 0)
+        + (record.get("epoch_invalidations_due_to_residual_change", 0) or 0)
+    )
+    stats.pricing_epoch_invalidations_active_columns += int(
+        record.get("epoch_invalidations_due_to_route_insert", 0) or 0
+    )
+    stats.pricing_stale_task_reuse_attempts += int(record.get("stale_task_reuse_attempts", 0) or 0)
+    stats.pricing_stale_task_reuse_blocked += int(record.get("stale_task_reuse_blocked", 0) or 0)
+    stats.pricing_cross_task_dominance_attempts += int(
+        record.get("cross_task_dominance_attempts", 0) or 0
+    )
+    stats.pricing_cross_task_dominance_blocked += int(
+        record.get("cross_task_dominance_blocked", 0) or 0
     )
     stats.pricing_local_worker_candidate_quota_max = max(
         stats.pricing_local_worker_candidate_quota_max,
@@ -2653,6 +2924,88 @@ def _record_pricing_diagnostic_dict(
     stats.pricing_dominance_bucket_pairs_considered += int(record.get("dominance_bucket_pairs_considered", 0) or 0)
     stats.pricing_dominance_bucket_pairs_rejected += int(record.get("dominance_bucket_pairs_rejected", 0) or 0)
     stats.pricing_dominance_bucket_candidate_pairs += int(record.get("dominance_bucket_candidate_pairs", 0) or 0)
+    stats.pricing_dominance_bucket_queries += int(record.get("dominance_bucket_queries", 0) or 0)
+    stats.pricing_dominance_bucket_skipped_by_mask += int(record.get("dominance_bucket_skipped_by_mask", 0) or 0)
+    stats.pricing_dominance_bucket_skipped_by_scalar += int(record.get("dominance_bucket_skipped_by_scalar", 0) or 0)
+    stats.pricing_dominance_bucket_skipped_by_branch += int(record.get("dominance_bucket_skipped_by_branch", 0) or 0)
+    stats.pricing_dominance_bucket_skipped_by_deadline += int(record.get("dominance_bucket_skipped_by_deadline", 0) or 0)
+    stats.pricing_dominance_bucket_skipped_by_return_credit += int(
+        record.get("dominance_bucket_skipped_by_return_credit", 0) or 0
+    )
+    stats.pricing_dom_frontier_queries += int(record.get("dom_frontier_queries", 0) or 0)
+    stats.pricing_dom_frontier_keys_scanned += int(record.get("dom_frontier_keys_scanned", 0) or 0)
+    stats.pricing_dom_frontier_keys_skipped_by_mask += int(record.get("dom_frontier_keys_skipped_by_mask", 0) or 0)
+    stats.pricing_dom_frontier_keys_skipped_by_branch += int(record.get("dom_frontier_keys_skipped_by_branch", 0) or 0)
+    stats.pricing_dom_frontier_keys_skipped_by_deadline += int(record.get("dom_frontier_keys_skipped_by_deadline", 0) or 0)
+    stats.pricing_dom_frontier_keys_skipped_by_return_credit += int(
+        record.get("dom_frontier_keys_skipped_by_return_credit", 0) or 0
+    )
+    stats.pricing_frontier_cells_created = max(
+        stats.pricing_frontier_cells_created,
+        int(record.get("frontier_cells_created", 0) or 0),
+    )
+    stats.pricing_frontier_cells_split = max(
+        stats.pricing_frontier_cells_split,
+        int(record.get("frontier_cells_split", 0) or 0),
+    )
+    stats.pricing_frontier_cell_lb_closed += int(record.get("frontier_cell_lb_closed", 0) or 0)
+    stats.pricing_frontier_cell_lb_invalidations += int(record.get("frontier_cell_lb_invalidations", 0) or 0)
+    stats.pricing_mask_trie_subset_queries += int(record.get("mask_trie_subset_queries", 0) or 0)
+    stats.pricing_mask_trie_superset_queries += int(record.get("mask_trie_superset_queries", 0) or 0)
+    stats.pricing_mask_trie_returned_items += int(record.get("mask_trie_returned_items", 0) or 0)
+    stats.pricing_mask_subset_queries += int(record.get("mask_subset_queries", 0) or 0)
+    stats.pricing_mask_superset_queries += int(record.get("mask_superset_queries", 0) or 0)
+    stats.pricing_mask_query_cache_hits += int(record.get("mask_query_cache_hits", 0) or 0)
+    stats.pricing_mask_query_cache_misses += int(record.get("mask_query_cache_misses", 0) or 0)
+    stats.pricing_cell_splits += int(record.get("cell_splits", 0) or 0)
+    stats.pricing_cell_pair_products_before_split += int(record.get("cell_pair_products_before_split", 0) or 0)
+    stats.pricing_cell_pairs_considered += int(record.get("cell_pairs_considered", 0) or 0)
+    stats.pricing_cell_pairs_rejected_by_mask += int(record.get("cell_pairs_rejected_by_mask", 0) or 0)
+    stats.pricing_cell_pairs_rejected_by_envelope += int(record.get("cell_pairs_rejected_by_envelope", 0) or 0)
+    stats.pricing_cell_pairs_rejected_by_lb += int(record.get("cell_pairs_rejected_by_lb", 0) or 0)
+    stats.pricing_cell_pairs_rejected_by_closure_lb += int(record.get("cell_pairs_rejected_by_closure_lb", 0) or 0)
+    stats.pricing_label_pairs_materialized += int(record.get("label_pairs_materialized", 0) or 0)
+    stats.pricing_labels_certified_by_cell_lb += int(record.get("labels_certified_by_cell_lb", 0) or 0)
+    stats.pricing_full_same_node_tests += int(record.get("full_same_node_tests", 0) or 0)
+    stats.pricing_full_physical_location_tests += int(record.get("full_physical_location_tests", 0) or 0)
+    stats.pricing_labels_deleted_same_node += int(record.get("labels_deleted_same_node", 0) or 0)
+    stats.pricing_labels_deleted_physical_location += int(record.get("labels_deleted_physical_location", 0) or 0)
+    stats.pricing_closure_queue_pushes += int(record.get("closure_queue_pushes", 0) or 0)
+    stats.pricing_closure_queue_pops += int(record.get("closure_queue_pops", 0) or 0)
+    stats.pricing_certification_tasks_exhausted_by_cell_lb += int(
+        record.get("certification_tasks_exhausted_by_cell_lb", 0) or 0
+    )
+    stats.pricing_certification_tasks_closed_by_cell_lb += int(
+        record.get("certification_tasks_closed_by_cell_lb", 0) or 0
+    )
+    stats.pricing_certification_tasks_exhausted_by_label_search += int(
+        record.get("certification_tasks_exhausted_by_label_search", 0) or 0
+    )
+    stats.pricing_resource_reward_bound_calls += int(record.get("resource_reward_bound_calls", 0) or 0)
+    stats.pricing_resource_reward_bound_time += float(record.get("resource_reward_bound_time", 0.0) or 0.0)
+    stats.pricing_resource_reward_bound_fallbacks += int(record.get("resource_reward_bound_fallbacks", 0) or 0)
+    stats.pricing_physdom_cell_pairs_considered += int(record.get("physdom_cell_pairs_considered", 0) or 0)
+    stats.pricing_physdom_cell_pairs_rejected_by_mask += int(
+        record.get("physdom_cell_pairs_rejected_by_mask", 0) or 0
+    )
+    stats.pricing_physdom_cell_pairs_rejected_by_envelope += int(
+        record.get("physdom_cell_pairs_rejected_by_envelope", 0) or 0
+    )
+    stats.pricing_physdom_label_pairs_materialized += int(record.get("physdom_label_pairs_materialized", 0) or 0)
+    stats.pricing_physdom_full_tests += int(record.get("physdom_full_tests", 0) or 0)
+    stats.pricing_physdom_deletions += int(record.get("physdom_deletions", 0) or 0)
+    stats.pricing_physdom_time += float(record.get("physdom_time", 0.0) or 0.0)
+    stats.pricing_return_credit_incompatible_pairs += int(record.get("return_credit_incompatible_pairs", 0) or 0)
+    stats.pricing_dom_pairs_avoided_before_materialization += int(
+        record.get("dom_pairs_avoided_before_materialization", 0) or 0
+    )
+    stats.pricing_dom_candidate_pairs_materialized += int(record.get("dom_candidate_pairs_materialized", 0) or 0)
+    stats.pricing_dom_full_tests_same_node += int(record.get("dom_full_tests_same_node", 0) or 0)
+    stats.pricing_dom_full_tests_physical_location += int(record.get("dom_full_tests_physical_location", 0) or 0)
+    stats.pricing_dom_labels_deleted_same_node += int(record.get("dom_labels_deleted_same_node", 0) or 0)
+    stats.pricing_dom_labels_deleted_physical_location += int(
+        record.get("dom_labels_deleted_physical_location", 0) or 0
+    )
     stats.pricing_dominance_compatible_keys_generated += int(record.get("dominance_compatible_keys_generated", 0) or 0)
     stats.pricing_dominance_compatible_key_lookups += int(record.get("dominance_compatible_key_lookups", 0) or 0)
     stats.pricing_dominance_bucket_scans_avoided += int(record.get("dominance_bucket_scans_avoided", 0) or 0)
@@ -2821,6 +3174,10 @@ def _record_rmp_compatibility_failures(stats: BPCStats, reasons: tuple[str, ...]
             stats.rmp_compatibility_failure_service_deadline_version += 1
         elif reason == "objective_scale_version":
             stats.rmp_compatibility_failure_objective_scale_version += 1
+        elif reason == "active_column_version":
+            stats.rmp_compatibility_failure_active_column_version += 1
+        elif reason == "rmp_structure_version":
+            stats.rmp_compatibility_failure_rmp_structure_version += 1
         else:
             raise RuntimeError(f"unknown RMP compatibility failure reason {reason}")
 
@@ -2893,20 +3250,46 @@ def _child_certification_signature(node: NodeState, duals: PricingDuals) -> tupl
     def q(value: float) -> int:
         return round(value / dual_tol_key)
 
+    residual_signature = tuple(sorted(node.residual_customers))
+    active_sr_signature = tuple(sorted(node.active_sr))
+    branch_signature = tuple(sorted(node.restrictions.__dict__.items(), key=lambda item: item[0]))
+    fixed_route_signature = tuple(route.path for route in node.fixed_routes)
+    active_column_version = (tuple(sorted(node.column_paths)), tuple(sorted(node.inactive_column_paths)))
+    rmp_structure_version = (
+        ("residual_customer_mask", residual_signature),
+        ("active_sr_set_hash", active_sr_signature),
+        ("active_sr_version", node.active_sr_version),
+        ("fixed_route_signature", fixed_route_signature),
+        ("active_column_version", active_column_version),
+        ("fleet_limit", node.fleet_limit),
+        ("fixed_cost", node.fixed_cost),
+    )
+    dual_signature = (
+        tuple(sorted((customer, q(value)) for customer, value in duals.mu.items())),
+        q(duals.kappa),
+        tuple(sorted((triplet, q(value)) for triplet, value in duals.nu.items())),
+    )
     return (
-        ("residual", tuple(sorted(node.residual_customers))),
-        ("fixed_routes", tuple(route.path for route in node.fixed_routes)),
+        ("true_dual_hash", dual_signature),
+        ("active_sr_set_hash", active_sr_signature),
+        ("residual_customer_mask", residual_signature),
+        ("branch_state_signature", branch_signature),
+        ("fixed_route_signature", fixed_route_signature),
+        ("active_column_version", active_column_version),
+        ("rmp_structure_version", rmp_structure_version),
+        ("residual", residual_signature),
+        ("fixed_routes", fixed_route_signature),
         ("fixed_cost", node.fixed_cost),
         ("fleet_limit", node.fleet_limit),
         ("active_sr_version", node.active_sr_version),
-        ("active_sr", tuple(sorted(node.active_sr))),
-        ("branch", tuple(sorted(node.restrictions.__dict__.items(), key=lambda item: item[0]))),
-        ("active_columns", tuple(sorted(node.column_paths))),
-        ("inactive_columns", tuple(sorted(node.inactive_column_paths))),
+        ("active_sr", active_sr_signature),
+        ("branch", branch_signature),
+        ("active_columns", active_column_version[0]),
+        ("inactive_columns", active_column_version[1]),
         ("objective_scale_version", 0),
-        ("dual_mu", tuple(sorted((customer, q(value)) for customer, value in duals.mu.items()))),
-        ("dual_kappa", q(duals.kappa)),
-        ("dual_nu", tuple(sorted((triplet, q(value)) for triplet, value in duals.nu.items()))),
+        ("dual_mu", dual_signature[0]),
+        ("dual_kappa", dual_signature[1]),
+        ("dual_nu", dual_signature[2]),
     )
 
 
@@ -2917,22 +3300,24 @@ def _record_child_certification_epoch_discard(
 ) -> None:
     old = dict(old_signature)
     new = dict(new_signature)
-    if old.get("dual_mu") != new.get("dual_mu") or old.get("dual_kappa") != new.get("dual_kappa") or old.get("dual_nu") != new.get("dual_nu"):
+    if old.get("true_dual_hash") != new.get("true_dual_hash"):
         stats.child_certification_state_discarded_by_dual += 1
-    if old.get("active_sr_version") != new.get("active_sr_version") or old.get("active_sr") != new.get("active_sr"):
+    if old.get("active_sr_version") != new.get("active_sr_version") or old.get("active_sr_set_hash") != new.get("active_sr_set_hash"):
         stats.child_certification_state_discarded_by_sr += 1
-    if old.get("residual") != new.get("residual"):
+    if old.get("residual_customer_mask") != new.get("residual_customer_mask"):
         stats.child_certification_state_discarded_by_residual += 1
-    if old.get("branch") != new.get("branch"):
+    if old.get("branch_state_signature") != new.get("branch_state_signature"):
         stats.child_certification_state_discarded_by_branch += 1
     if (
-        old.get("fixed_routes") != new.get("fixed_routes")
+        old.get("fixed_route_signature") != new.get("fixed_route_signature")
         or old.get("fixed_cost") != new.get("fixed_cost")
         or old.get("fleet_limit") != new.get("fleet_limit")
     ):
         stats.child_certification_state_discarded_by_fixed_routes += 1
-    if old.get("active_columns") != new.get("active_columns") or old.get("inactive_columns") != new.get("inactive_columns"):
+    if old.get("active_column_version") != new.get("active_column_version"):
         stats.child_certification_state_discarded_by_active_columns += 1
+    if old.get("rmp_structure_version") != new.get("rmp_structure_version"):
+        stats.child_certification_state_discarded_by_rmp_structure += 1
 
 
 def _record_branch_decision(stats: BPCStats, branch_type: str) -> None:
@@ -3329,23 +3714,24 @@ def _extract_root_routes(
             stats.root_compact_conditional_triggered = True
             stats.root_compact_conditional_reason = ",".join(trigger_reasons)
             budget = (
-                solver_config.root_compact_wall_time_limit
+                solver_config.root_compact_solve_time_limit
                 if solver_config.root_compact_after_constructive == "conditional_wall_budget"
                 else solver_config.root_compact_time_limit_after_constructive
             )
         else:
-            budget = (
-                solver_config.root_compact_time_limit_after_constructive
-                if solver_config.root_compact_after_constructive == "small_budget"
-                else solver_config.root_extraction_time_limit
-            )
+            if solver_config.root_compact_after_constructive == "small_budget":
+                budget = solver_config.root_compact_time_limit_after_constructive
+            elif solver_config.root_compact_after_constructive == "full_budget":
+                budget = solver_config.root_compact_solve_time_limit
+            else:
+                budget = solver_config.root_extraction_time_limit
     else:
         budget = solver_config.root_compact_time_limit_without_constructive
     stats.root_compact_budget_seconds = budget
-    stats.root_compact_wall_budget_seconds = budget
+    stats.root_compact_wall_budget_seconds = 0.0
     solve_budget = (
-        min(budget, solver_config.root_compact_solve_time_limit)
-        if solver_config.root_compact_after_constructive == "conditional_wall_budget"
+        solver_config.root_compact_solve_time_limit
+        if solver_config.root_compact_after_constructive in {"conditional_wall_budget", "full_budget"}
         else budget
     )
     stats.root_compact_solve_budget_seconds = solve_budget
@@ -3358,7 +3744,6 @@ def _extract_root_routes(
         stats.root_compact_skipped_reason = "insufficient_remaining_time"
         return set()
     stats.root_compact_attempted = True
-    budget_deadline = time.time() + budget
     log_file = None
     if solver_config.gurobi_log_dir is not None:
         log_file = str(Path(solver_config.gurobi_log_dir) / "root_compact.log")
@@ -3369,19 +3754,15 @@ def _extract_root_routes(
         threads=solver_config.threads,
         require_optimal=False,
         log_file=log_file,
-        wall_deadline=budget_deadline if solver_config.root_compact_after_constructive == "conditional_wall_budget" else None,
+        objective=objective,
     )
     stats.root_model_build_time += solution.timing.model_build_time
     stats.root_model_solve_time += solution.timing.solve_time
     stats.root_route_decode_time += solution.timing.route_decode_time
     stats.root_compact_status = solution.status if solution.status != "unknown" else ("success" if solution.route_paths else "timeout")
-    stats.root_compact_wall_budget_hit = solution.status.startswith("budget_exhausted")
+    stats.root_compact_wall_budget_hit = False
     extracted = set()
     for path in solution.route_paths:
-        if time.time() >= budget_deadline:
-            stats.root_compact_status = "timeout"
-            stats.root_compact_wall_budget_hit = True
-            break
         decode_start = time.time()
         route = route_from_path(len(routes), path, graph, objective)
         stats.root_compact_decode_verification_time += time.time() - decode_start

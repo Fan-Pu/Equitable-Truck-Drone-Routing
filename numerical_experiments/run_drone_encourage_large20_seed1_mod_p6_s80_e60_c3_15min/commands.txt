@@ -1,0 +1,1 @@
+D:\ProgramData\anaconda3\python.exe -m thvrpd.experiments --worker --case-file numerical_experiments\run_drone_encourage_large20_seed1_mod_p6_s80_e60_c3_15min\large_full_PS_seed_1\case_config.json

@@ -8,7 +8,7 @@ from gurobipy import GRB
 
 from .config import ObjectiveWeights
 from .instance import InstanceData
-from .objective import build_objective_data
+from .objective import ObjectiveData, build_objective_data
 from .solverlog import configure_gurobi_logging
 from .transform import build_transformed_graph, duplicate_node
 
@@ -30,6 +30,7 @@ class CompactSolution:
     mip_gap: float | None = None
     status_code: int | None = None
     node_count: float | None = None
+    iteration_count: float | None = None
 
 
 def solve_compact_miqp(
@@ -52,9 +53,11 @@ def solve_compact_solution(
     require_optimal: bool = True,
     log_file: str | None = None,
     wall_deadline: float | None = None,
+    objective: ObjectiveData | None = None,
 ) -> CompactSolution:
     build_start = time.time()
-    objective = build_objective_data(instance, weights)
+    if objective is None:
+        objective = build_objective_data(instance, weights)
     model = gp.Model("THVRPD_compact")
     configure_gurobi_logging(model, log_file)
     model.Params.TimeLimit = time_limit
@@ -194,6 +197,7 @@ def solve_compact_solution(
     mip_gap = model.MIPGap if model.SolCount > 0 else None
     status_code = int(model.Status)
     node_count = model.NodeCount
+    iteration_count = model.IterCount
     if require_optimal and model.Status != GRB.OPTIMAL:
         raise RuntimeError(f"compact model status {model.Status}")
     if model.SolCount == 0:
@@ -206,6 +210,7 @@ def solve_compact_solution(
             mip_gap,
             status_code,
             node_count,
+            iteration_count,
         )
     if wall_deadline is not None and time.time() >= wall_deadline:
         return CompactSolution(
@@ -217,6 +222,7 @@ def solve_compact_solution(
             mip_gap,
             status_code,
             node_count,
+            iteration_count,
         )
     decode_start = time.time()
     route_paths = _extract_route_paths(instance, x, y, used, trucks, drones)
@@ -231,6 +237,7 @@ def solve_compact_solution(
         mip_gap,
         status_code,
         node_count,
+        iteration_count,
     )
 
 

@@ -3,14 +3,14 @@ from __future__ import annotations
 import json
 import tomllib
 from dataclasses import replace
-from math import isinf
+from math import ceil, isinf
 from pathlib import Path
 
 import pytest
 
 from thvrpd.config import InstanceConfig, ObjectiveWeights
 from thvrpd.experiments import DEFAULT_SEEDS, SCALES, _merge_timeout_stats, _read_pricing_diagnostics, _summary_row
-from thvrpd.instance import tiny_instance
+from thvrpd.instance import generate_instance, tiny_instance
 from thvrpd.objective import build_objective_data
 from thvrpd.routes import ServiceEnvelopeViolation, route_from_path
 from thvrpd.service_windows import load_manual_service_deadline_bounds
@@ -195,6 +195,73 @@ def test_instance_config_rejects_zero_hubs() -> None:
         InstanceConfig(seed=1, num_trucks=1, num_customers=1, distribution="PS", drones_per_truck=1, num_hubs=0)
 
 
+def test_instance_config_rejects_invalid_arc_probabilities() -> None:
+    with pytest.raises(ValueError, match="arc probabilities"):
+        InstanceConfig(
+            seed=1,
+            num_trucks=1,
+            num_customers=1,
+            distribution="PS",
+            drones_per_truck=1,
+            truck_arc_probability=-0.1,
+        )
+    with pytest.raises(ValueError, match="arc probabilities"):
+        InstanceConfig(
+            seed=1,
+            num_trucks=1,
+            num_customers=1,
+            distribution="PS",
+            drones_per_truck=1,
+            hub_arc_probability=1.1,
+        )
+
+
+def test_instance_config_default_arc_probabilities_are_sparse_large_defaults() -> None:
+    config = InstanceConfig(seed=1, num_trucks=5, num_customers=25, distribution="PS", drones_per_truck=4)
+    assert config.truck_arc_probability == pytest.approx(0.05)
+    assert config.hub_arc_probability == pytest.approx(0.18)
+    assert config.mandatory_drone_customer_fraction == pytest.approx(0.16)
+    assert config.max_drone_access_customers_per_hub == 2
+    assert config.max_drone_launch_hubs_per_customer == 1
+    assert config.min_drone_service_time_saving == pytest.approx(0.0)
+    assert config.retain_optional_drone_arcs is False
+    assert config.drone_payload == pytest.approx(6.0)
+    assert config.drone_speed == pytest.approx(100.0)
+    assert config.drone_endurance == pytest.approx(75.0)
+    assert config.drone_cost == pytest.approx(1.0)
+
+
+def test_drone_required_generator_removes_truck_service_and_builds_witness() -> None:
+    config = InstanceConfig(seed=1, num_trucks=5, num_customers=25, distribution="PS", drones_per_truck=4)
+    instance = generate_instance(config)
+    mandatory = set(instance.mandatory_drone_customers)
+    assert len(mandatory) == ceil(config.mandatory_drone_customer_fraction * config.num_customers)
+    assert all(customer in instance.customers for customer in mandatory)
+    assert all(customer not in arc for customer in mandatory for arc in instance.truck_arcs)
+    assert all(any((hub, customer) in instance.drone_arcs for hub in instance.hubs) for customer in mandatory)
+    assert {customer for _, customer in instance.drone_arcs} == mandatory
+    assert all(
+        sum(1 for hub in instance.hubs if (hub, customer) in instance.drone_arcs) == 1
+        for customer in mandatory
+    )
+    assert all(
+        sum(1 for _, customer in instance.drone_arcs if _ == hub) <= config.max_drone_access_customers_per_hub
+        for hub in instance.hubs
+    )
+    witness_covered = set()
+    for route in instance.witness_routes:
+        witness_covered.update(node for node in route if node in instance.customers)
+    for route_blocks in instance.witness_route_drone_blocks:
+        for _, block in route_blocks:
+            assert len(block) <= config.drones_per_truck
+            witness_covered.update(block)
+    assert witness_covered == set(instance.customers)
+    assert len(instance.witness_routes) <= config.num_trucks
+    assert sum(len(block) for route_blocks in instance.witness_route_drone_blocks for _, block in route_blocks) >= len(mandatory)
+    assert all(instance.demand[customer] <= config.drone_payload for _, customer in instance.drone_arcs)
+    assert all(instance.drone_trip_time[arc] <= config.drone_endurance for arc in instance.drone_arcs)
+
+
 def test_instance_rejects_nonpositive_customer_demand() -> None:
     base = tiny_instance()
     demand = dict(base.demand)
@@ -333,6 +400,7 @@ def test_experiment_summary_exposes_memory_metrics() -> None:
         {
             "case_id": "small_full_PS_seed_1",
             "instance_config": {"num_customers": 5, "num_trucks": 2, "num_hubs": 2, "drones_per_truck": 4},
+            "solver_config": {"pricing_tolerance": 0.05},
             "runtime_seconds": 10.0,
             "runtime": 7.5,
             "lower_bound_shifted": 0.25,
@@ -426,6 +494,7 @@ def test_experiment_summary_exposes_memory_metrics() -> None:
     assert row["python_current_allocated_mb"] == 1.25
     assert row["python_peak_allocated_mb"] == 3.5
     assert row["pricing_diagnostics_elapsed_seconds"] == 2.75
+    assert row["pricing_tolerance"] == 0.05
     assert row["pricing_max_call_elapsed_seconds"] == 1.5
     assert row["pricing_labels_purged"] == 6
     assert row["pricing_backward_dominance_tests"] == 5
@@ -552,6 +621,13 @@ def test_timeout_pricing_diagnostics_split_seed_and_repair_modes(tmp_path) -> No
 
 def test_experiment_defaults_match_prompt_scales_and_seed_count() -> None:
     assert DEFAULT_SEEDS == [1, 2, 3]
-    assert SCALES["small"] == {"num_customers": 5, "num_trucks": 2, "num_hubs": 2, "drones_per_truck": 4}
-    assert SCALES["medium"] == {"num_customers": 15, "num_trucks": 5, "num_hubs": 2, "drones_per_truck": 4}
-    assert SCALES["large"] == {"num_customers": 25, "num_trucks": 8, "num_hubs": 2, "drones_per_truck": 4}
+    common_graph = {"truck_arc_probability": 0.05, "hub_arc_probability": 0.18}
+    assert SCALES["small"] == {"num_customers": 5, "num_trucks": 2, "num_hubs": 2, "drones_per_truck": 4, **common_graph}
+    assert SCALES["medium"] == {"num_customers": 15, "num_trucks": 5, "num_hubs": 2, "drones_per_truck": 4, **common_graph}
+    assert SCALES["large"] == {
+        "num_customers": 25,
+        "num_trucks": 5,
+        "num_hubs": 2,
+        "drones_per_truck": 4,
+        **common_graph,
+    }

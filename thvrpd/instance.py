@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from math import hypot, isclose, isfinite
+from dataclasses import dataclass, field
+from math import ceil, hypot, isclose, isfinite
 import random
 
 import networkx as nx
@@ -30,6 +30,10 @@ class InstanceData:
     drone_trip_time: dict[Arc, float]
     demand: dict[Node, float]
     locations: dict[Node, tuple[float, float]]
+    mandatory_drone_customers: tuple[Node, ...] = ()
+    drone_arc_saving: dict[Arc, float] = field(default_factory=dict)
+    witness_routes: tuple[tuple[Node, ...], ...] = ()
+    witness_route_drone_blocks: tuple[tuple[tuple[Node, tuple[Node, ...]], ...], ...] = ()
 
     def __post_init__(self) -> None:
         physical = set(self.customers) | set(self.hubs)
@@ -88,7 +92,20 @@ class InstanceData:
                 raise ValueError(f"round-trip drone time must equal outbound plus return time: {(h, customer)}")
             if self.demand[customer] > self.drone_payload or self.drone_trip_time[(h, customer)] > self.drone_endurance:
                 raise ValueError(f"infeasible drone sortie retained in drone arc set: {(h, customer)}")
+        mandatory = set(self.mandatory_drone_customers)
+        if not mandatory.issubset(self.customers):
+            raise ValueError("mandatory drone customers must be original customers")
+        if len(mandatory) != len(self.mandatory_drone_customers):
+            raise ValueError("mandatory drone customers must be unique")
         self._validate_customer_service_reachability()
+        if mandatory:
+            graph = self.truck_graph()
+            for customer in self.mandatory_drone_customers:
+                truck_reachable = nx.has_path(graph, self.depot_source, customer) and nx.has_path(graph, customer, self.depot_sink)
+                if truck_reachable:
+                    raise ValueError(f"mandatory drone customer retains truck-service representation: {customer}")
+                if not any((hub, customer) in self.drone_arcs for hub in self.hubs):
+                    raise ValueError(f"mandatory drone customer has no retained drone arc: {customer}")
 
     @property
     def truck_payload(self) -> float:
@@ -201,6 +218,31 @@ def generate_instance(config: InstanceConfig) -> InstanceData:
                 drone_time[(customer, hub)] = one_way
                 drone_trip_time[(hub, customer)] = trip
 
+    (
+        truck_arcs,
+        truck_time,
+        drone_arcs,
+        drone_time,
+        drone_trip_time,
+        mandatory_drone_customers,
+        drone_arc_saving,
+        witness_routes,
+        witness_route_drone_blocks,
+    ) = _apply_drone_required_graph_policy(
+        config=config,
+        depot_source=depot_source,
+        depot_sink=depot_sink,
+        customers=customers,
+        hubs=hubs,
+        locations=locations,
+        demand=demand,
+        truck_arcs=truck_arcs,
+        truck_time=truck_time,
+        drone_arcs=drone_arcs,
+        drone_time=drone_time,
+        drone_trip_time=drone_trip_time,
+    )
+
     return InstanceData(
         config=config,
         depot_source=depot_source,
@@ -215,6 +257,10 @@ def generate_instance(config: InstanceConfig) -> InstanceData:
         drone_trip_time=drone_trip_time,
         demand=demand,
         locations=locations,
+        mandatory_drone_customers=mandatory_drone_customers,
+        drone_arc_saving=drone_arc_saving,
+        witness_routes=witness_routes,
+        witness_route_drone_blocks=witness_route_drone_blocks,
     )
 
 
@@ -295,6 +341,285 @@ def _sample_customers(config: InstanceConfig, np_rng: np.random.Generator) -> np
     sparse_config = InstanceConfig(**{**config.__dict__, "num_customers": config.num_customers - n_cluster, "distribution": "PS"})
     cluster_config = InstanceConfig(**{**config.__dict__, "num_customers": n_cluster, "distribution": "PC"})
     return np.vstack((_sample_customers(sparse_config, np_rng), _sample_customers(cluster_config, np_rng)))
+
+
+def _apply_drone_required_graph_policy(
+    *,
+    config: InstanceConfig,
+    depot_source: Node,
+    depot_sink: Node,
+    customers: tuple[Node, ...],
+    hubs: tuple[Node, ...],
+    locations: dict[Node, tuple[float, float]],
+    demand: dict[Node, float],
+    truck_arcs: set[Arc],
+    truck_time: dict[Arc, float],
+    drone_arcs: set[Arc],
+    drone_time: dict[Arc, float],
+    drone_trip_time: dict[Arc, float],
+) -> tuple[
+    set[Arc],
+    dict[Arc, float],
+    set[Arc],
+    dict[Arc, float],
+    dict[Arc, float],
+    tuple[Node, ...],
+    dict[Arc, float],
+    tuple[tuple[Node, ...], ...],
+    tuple[tuple[tuple[Node, tuple[Node, ...]], ...], ...],
+]:
+    if config.mandatory_drone_customer_fraction <= 0.0:
+        saving = _drone_arc_savings(depot_source, customers, hubs, truck_arcs, truck_time, drone_arcs, drone_time)
+        return (
+            truck_arcs,
+            truck_time,
+            drone_arcs,
+            drone_time,
+            drone_trip_time,
+            (),
+            {arc: saving[arc] for arc in sorted(drone_arcs)},
+            (),
+            (),
+        )
+
+    savings = _drone_arc_savings(depot_source, customers, hubs, truck_arcs, truck_time, drone_arcs, drone_time)
+    mandatory_count = int(ceil(config.mandatory_drone_customer_fraction * len(customers)))
+    hub_slots = {hub: config.max_drone_access_customers_per_hub for hub in hubs}
+    pair_candidates = sorted(
+        (
+            (savings[(hub, customer)], -drone_trip_time[(hub, customer)], hub, customer)
+            for hub, customer in drone_arcs
+        ),
+        key=lambda item: (-item[0], item[1], item[2], item[3]),
+    )
+    protected_hub_for_customer: dict[Node, Node] = {}
+    for _, _, hub, customer in pair_candidates:
+        if len(protected_hub_for_customer) >= mandatory_count:
+            break
+        if customer in protected_hub_for_customer or hub_slots[hub] <= 0:
+            continue
+        protected_hub_for_customer[customer] = hub
+        hub_slots[hub] -= 1
+    if len(protected_hub_for_customer) < mandatory_count:
+        raise ValueError(
+            f"not enough hub-capacitated drone-feasible customers for mandatory drone policy: "
+            f"{len(protected_hub_for_customer)} < {mandatory_count}"
+        )
+    mandatory_drone_customers = tuple(sorted(protected_hub_for_customer))
+    mandatory_set = set(mandatory_drone_customers)
+    protected_arcs = {(protected_hub_for_customer[customer], customer) for customer in mandatory_drone_customers}
+
+    truck_arcs = {arc for arc in truck_arcs if arc[0] not in mandatory_set and arc[1] not in mandatory_set}
+    truck_time = {arc: value for arc, value in truck_time.items() if arc in truck_arcs}
+
+    retained_drone_arcs = _retained_drone_arcs(config, customers, hubs, drone_arcs, drone_trip_time, savings, protected_arcs)
+    drone_time = {
+        arc: value
+        for arc, value in drone_time.items()
+        if arc in retained_drone_arcs or (arc[1], arc[0]) in retained_drone_arcs
+    }
+    drone_trip_time = {arc: value for arc, value in drone_trip_time.items() if arc in retained_drone_arcs}
+
+    witness_routes, witness_route_drone_blocks = _build_drone_required_witness(
+        config=config,
+        depot_source=depot_source,
+        depot_sink=depot_sink,
+        customers=customers,
+        hubs=hubs,
+        locations=locations,
+        demand=demand,
+        truck_arcs=truck_arcs,
+        truck_time=truck_time,
+        mandatory_drone_customers=mandatory_drone_customers,
+        protected_hub_for_customer=protected_hub_for_customer,
+    )
+    return (
+        truck_arcs,
+        truck_time,
+        retained_drone_arcs,
+        drone_time,
+        drone_trip_time,
+        mandatory_drone_customers,
+        {arc: savings[arc] for arc in sorted(retained_drone_arcs)},
+        witness_routes,
+        witness_route_drone_blocks,
+    )
+
+
+def _drone_arc_savings(
+    depot_source: Node,
+    customers: tuple[Node, ...],
+    hubs: tuple[Node, ...],
+    truck_arcs: set[Arc],
+    truck_time: dict[Arc, float],
+    drone_arcs: set[Arc],
+    drone_time: dict[Arc, float],
+) -> dict[Arc, float]:
+    graph = nx.DiGraph()
+    graph.add_weighted_edges_from((i, j, truck_time[(i, j)]) for i, j in truck_arcs)
+    lengths = dict(nx.all_pairs_dijkstra_path_length(graph, weight="weight"))
+    savings: dict[Arc, float] = {}
+    for hub in hubs:
+        for customer in customers:
+            if (hub, customer) not in drone_arcs:
+                continue
+            truck_service = lengths.get(depot_source, {}).get(customer, float("inf"))
+            drone_service = lengths.get(depot_source, {}).get(hub, float("inf")) + drone_time[(hub, customer)]
+            savings[(hub, customer)] = truck_service - drone_service
+    return savings
+
+
+def _retained_drone_arcs(
+    config: InstanceConfig,
+    customers: tuple[Node, ...],
+    hubs: tuple[Node, ...],
+    drone_arcs: set[Arc],
+    drone_trip_time: dict[Arc, float],
+    savings: dict[Arc, float],
+    protected_arcs: set[Arc],
+) -> set[Arc]:
+    if not config.retain_optional_drone_arcs:
+        return set(protected_arcs)
+    retained = set(protected_arcs)
+    eligible = {
+        arc
+        for arc in drone_arcs
+        if arc in protected_arcs or savings[arc] >= config.min_drone_service_time_saving
+    }
+    for hub in hubs:
+        protected_for_hub = sorted(arc for arc in protected_arcs if arc[0] == hub)
+        retained.update(protected_for_hub)
+        room = config.max_drone_access_customers_per_hub - len(protected_for_hub)
+        if room <= 0:
+            continue
+        optional = sorted(
+            (arc for arc in eligible if arc[0] == hub and arc not in protected_arcs),
+            key=lambda arc: (-savings[arc], drone_trip_time[arc], arc[0], arc[1]),
+        )
+        retained.update(optional[:room])
+    for customer in customers:
+        protected_for_customer = sorted(arc for arc in protected_arcs if arc[1] == customer)
+        retained.update(protected_for_customer)
+        room = config.max_drone_launch_hubs_per_customer - len(protected_for_customer)
+        if room < 0:
+            continue
+        retained_for_customer = sorted(
+            (arc for arc in retained if arc[1] == customer and arc not in protected_arcs),
+            key=lambda arc: (-savings[arc], drone_trip_time[arc], arc[0], arc[1]),
+        )
+        allowed_optional = set(retained_for_customer[:room])
+        retained.difference_update(
+            arc
+            for arc in list(retained)
+            if arc[1] == customer and arc not in protected_arcs and arc not in allowed_optional
+        )
+    if not protected_arcs.issubset(retained):
+        raise ValueError("protected mandatory drone arcs were removed by drone-arc caps")
+    return retained
+
+
+def _build_drone_required_witness(
+    *,
+    config: InstanceConfig,
+    depot_source: Node,
+    depot_sink: Node,
+    customers: tuple[Node, ...],
+    hubs: tuple[Node, ...],
+    locations: dict[Node, tuple[float, float]],
+    demand: dict[Node, float],
+    truck_arcs: set[Arc],
+    truck_time: dict[Arc, float],
+    mandatory_drone_customers: tuple[Node, ...],
+    protected_hub_for_customer: dict[Node, Node],
+) -> tuple[tuple[Node, ...], tuple[tuple[tuple[Node, tuple[Node, ...]], ...], ...]]:
+    groups: list[dict[str, object]] = []
+    mandatory_by_hub = {
+        hub: tuple(customer for customer in mandatory_drone_customers if protected_hub_for_customer[customer] == hub)
+        for hub in hubs
+    }
+    for hub in hubs:
+        customers_for_hub = mandatory_by_hub[hub]
+        for start in range(0, len(customers_for_hub), config.drones_per_truck):
+            block = tuple(customers_for_hub[start:start + config.drones_per_truck])
+            groups.append(
+                {
+                    "physical": [hub],
+                    "drone_blocks": [(hub, block)],
+                    "payload": sum(demand[customer] for customer in block),
+                }
+            )
+    nonmandatory = [customer for customer in customers if customer not in mandatory_drone_customers]
+    for customer in sorted(nonmandatory, key=lambda node: (-demand[node], node)):
+        feasible_groups = [
+            (float(group["payload"]), index)
+            for index, group in enumerate(groups)
+            if float(group["payload"]) + demand[customer] <= config.truck_payload + CAPACITY_TOLERANCE
+        ]
+        if feasible_groups:
+            _, index = min(feasible_groups)
+        else:
+            if len(groups) >= config.num_trucks:
+                raise ValueError("drone-required witness exceeds truck fleet or payload capacity")
+            index = len(groups)
+            groups.append({"physical": [], "drone_blocks": [], "payload": 0.0})
+        group = groups[index]
+        physical = group["physical"]
+        if not isinstance(physical, list):
+            raise TypeError("witness physical path must be a list")
+        physical.append(customer)
+        group["payload"] = float(group["payload"]) + demand[customer]
+    if len(groups) > config.num_trucks:
+        raise ValueError("drone-required witness route count exceeds truck fleet size")
+    witness_routes: list[tuple[Node, ...]] = []
+    witness_route_drone_blocks: list[tuple[tuple[Node, tuple[Node, ...]], ...]] = []
+    for group in groups:
+        physical = tuple(group["physical"])
+        if not physical:
+            continue
+        if float(group["payload"]) > config.truck_payload + CAPACITY_TOLERANCE:
+            raise ValueError("drone-required witness route exceeds truck payload")
+        route_nodes = (depot_source,) + physical + (depot_sink,)
+        for i, j in zip(route_nodes, route_nodes[1:]):
+            _add_truck_arc(config, locations, i, j, truck_arcs, truck_time)
+        witness_routes.append(physical)
+        blocks = group["drone_blocks"]
+        if not isinstance(blocks, list):
+            raise TypeError("witness drone blocks must be a list")
+        witness_route_drone_blocks.append(tuple((hub, tuple(block)) for hub, block in blocks))
+    covered = set()
+    for route in witness_routes:
+        covered.update(customer for customer in route if customer in customers)
+    for blocks in witness_route_drone_blocks:
+        for _, block in blocks:
+            covered.update(block)
+    if covered != set(customers):
+        raise ValueError("drone-required witness does not cover every customer")
+    return tuple(witness_routes), tuple(witness_route_drone_blocks)
+
+
+def instance_generation_metadata(instance: InstanceData) -> dict[str, object]:
+    savings = list(instance.drone_arc_saving.values())
+    witness_drone_sorties = sum(len(block) for route_blocks in instance.witness_route_drone_blocks for _, block in route_blocks)
+    return {
+        "truck_arcs": len(instance.truck_arcs),
+        "drone_arcs": len(instance.drone_arcs),
+        "mandatory_drone_customers": list(instance.mandatory_drone_customers),
+        "mandatory_drone_customer_count": len(instance.mandatory_drone_customers),
+        "retained_drone_arc_saving_min": min(savings) if savings else None,
+        "retained_drone_arc_saving_mean": sum(savings) / len(savings) if savings else None,
+        "retained_drone_arc_saving_max": max(savings) if savings else None,
+        "witness_route_count": len(instance.witness_routes),
+        "witness_drone_sorties": witness_drone_sorties,
+        "witness_routes": [list(route) for route in instance.witness_routes],
+        "witness_route_drone_blocks": [
+            [{"hub": hub, "customers": list(block)} for hub, block in route_blocks]
+            for route_blocks in instance.witness_route_drone_blocks
+        ],
+        "retained_drone_arc_savings": [
+            {"hub": hub, "customer": customer, "saving": saving}
+            for (hub, customer), saving in sorted(instance.drone_arc_saving.items())
+        ],
+    }
 
 
 def _choose_hubs_by_kmeans(seed: int, customer_locations: np.ndarray, count: int) -> np.ndarray:

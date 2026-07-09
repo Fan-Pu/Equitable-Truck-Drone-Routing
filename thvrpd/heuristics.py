@@ -256,6 +256,12 @@ def run_route_pool_heuristic(
                 productive_candidate_multiplier=solver_config.productive_candidate_multiplier,
                 source_neighbor_task_size=solver_config.source_neighbor_task_size,
                 pricing_diversity_batch_fraction=solver_config.pricing_diversity_batch_fraction,
+                enable_mask_trie_frontier=solver_config.enable_mask_trie_frontier,
+                max_frontier_cell_size=solver_config.max_frontier_cell_size,
+                max_frontier_pair_product=solver_config.max_frontier_pair_product,
+                max_frontier_split_depth=solver_config.max_frontier_split_depth,
+                enable_resource_restricted_closure_bound=solver_config.enable_resource_restricted_closure_bound,
+                resource_bound_method=solver_config.resource_bound_method,
             )
         except PricingTimeLimitReached as exc:
             if deadline is not None and time.time() >= deadline:
