@@ -13,6 +13,7 @@ import traceback
 import tracemalloc
 from typing import Any
 
+from .config import GENERIC_CASE_DEFAULTS, MEDIUM_CASE_DEFAULTS
 from .metrics import solution_service_metrics
 from .service_windows import load_manual_service_deadline_bounds
 
@@ -28,11 +29,10 @@ SCALES = {
     },
     "medium": {
         "num_customers": 15,
-        "num_trucks": 5,
+        "num_trucks": 3,
         "num_hubs": 2,
         "drones_per_truck": 4,
-        "truck_arc_probability": 0.05,
-        "hub_arc_probability": 0.18,
+        **MEDIUM_CASE_DEFAULTS,
     },
     "large": {
         "num_customers": 25,
@@ -54,8 +54,8 @@ def main() -> None:
     parser.add_argument("--distributions", nargs="+", choices=["PS", "PC", "mixed"], default=["PS"])
     parser.add_argument("--scales", nargs="+", choices=sorted(SCALES), default=["small", "medium", "large"])
     parser.add_argument("--weights", nargs=3, type=float, default=[0.4, 0.3, 0.3])
-    parser.add_argument("--truck-arc-probability", type=float, default=0.05)
-    parser.add_argument("--hub-arc-probability", type=float, default=0.18)
+    parser.add_argument("--truck-arc-probability", type=float)
+    parser.add_argument("--hub-arc-probability", type=float)
     parser.add_argument("--truck-speed", type=float, default=40.0)
     parser.add_argument("--drone-speed", type=float, default=100.0)
     parser.add_argument("--truck-payload", type=float, default=50.0)
@@ -63,17 +63,17 @@ def main() -> None:
     parser.add_argument("--drone-endurance", type=float, default=75.0)
     parser.add_argument("--truck-cost", type=float, default=20.0)
     parser.add_argument("--drone-cost", type=float, default=1.0)
-    parser.add_argument("--mandatory-drone-customer-fraction", type=float, default=0.16)
-    parser.add_argument("--max-drone-access-customers-per-hub", type=int, default=2)
-    parser.add_argument("--max-drone-launch-hubs-per-customer", type=int, default=1)
-    parser.add_argument("--min-drone-service-time-saving", type=float, default=0.0)
-    parser.add_argument("--retain-optional-drone-arcs", action="store_true")
-    parser.add_argument("--service-deadline-mode", choices=["none", "manual", "random_absolute"], default="none")
+    parser.add_argument("--mandatory-drone-customer-fraction", type=float)
+    parser.add_argument("--max-drone-access-customers-per-hub", type=int)
+    parser.add_argument("--max-drone-launch-hubs-per-customer", type=int)
+    parser.add_argument("--min-drone-service-time-saving", type=float)
+    parser.add_argument("--retain-optional-drone-arcs", action=argparse.BooleanOptionalAction, default=None)
+    parser.add_argument("--service-deadline-mode", choices=["none", "manual", "random_absolute"])
     parser.add_argument("--service-deadline-file", type=Path)
     parser.add_argument("--service-deadline-fraction", type=float, default=0.60, help=legacy_help)
-    parser.add_argument("--service-deadline-offset-min", type=float, default=45.0)
-    parser.add_argument("--service-deadline-offset-max", type=float, default=120.0)
-    parser.add_argument("--service-deadline-witness-slack", type=float, default=5.0)
+    parser.add_argument("--service-deadline-offset-min", type=float)
+    parser.add_argument("--service-deadline-offset-max", type=float)
+    parser.add_argument("--service-deadline-witness-slack", type=float)
     parser.add_argument("--service-deadline-random-seed", type=int)
     parser.add_argument(
         "--service-deadline-witness-method",
@@ -84,7 +84,7 @@ def main() -> None:
     parser.add_argument("--threads", type=int, default=1)
     parser.add_argument("--case-time-limit", type=float, default=900.0)
     parser.add_argument("--external-timeout-grace", type=float, default=10.0)
-    parser.add_argument("--pricing-tolerance", type=float, default=0.05)
+    parser.add_argument("--pricing-tolerance", type=float)
     parser.add_argument("--pricing-batch-size", type=int, default=64)
     parser.add_argument("--min-pricing-batch-size", type=int, default=32)
     parser.add_argument("--max-root-pricing-batch-size", type=int, default=256)
@@ -141,6 +141,7 @@ def main() -> None:
     parser.add_argument("--enable-active-coefficient-cache", action="store_true", default=True)
     parser.add_argument("--disable-sr-aging", action="store_true")
     parser.add_argument("--disable-postroot-sr-cut-removal", action="store_true")
+    parser.add_argument("--sr-cut-add-batch-size", type=int, default=32)
     parser.add_argument("--sr-inactive-age-threshold", type=int, default=1)
     parser.add_argument("--sr-removal-batch-size", type=int, default=32)
     parser.add_argument("--sr-max-removals-per-node", type=int, default=32)
@@ -241,10 +242,10 @@ def main() -> None:
     parser.add_argument("--farkas-batch-size", type=int, default=16)
     parser.add_argument("--seed-batch-size", type=int, default=16)
     parser.add_argument("--repair-batch-size", type=int, default=16)
-    parser.add_argument("--pricing-parallel-workers", type=int, default=2)
-    parser.add_argument("--pricing-worker-backend", choices=["thread", "process"], default="thread")
+    parser.add_argument("--pricing-parallel-workers", type=int)
+    parser.add_argument("--pricing-worker-backend", choices=["thread", "process"])
     parser.add_argument("--prefix-task-depth-root", type=int, default=1)
-    parser.add_argument("--prefix-task-depth-child", type=int, default=1)
+    parser.add_argument("--prefix-task-depth-child", type=int)
     parser.add_argument("--prefix-task-min-branching-for-depth2", type=int, default=4)
     parser.add_argument("--logging-mode", choices=["audit", "light"], default="audit")
     parser.add_argument("--progress-snapshot-period", type=int, default=1)
@@ -692,17 +693,15 @@ def _case_spec(
     enable_pricing_pruning: bool,
     root_extraction_time_limit: float,
 ) -> dict[str, Any]:
+    def profile_value(name: str) -> Any:
+        explicit_value = getattr(args, name)
+        if explicit_value is not None:
+            return explicit_value
+        return scale_config.get(name, GENERIC_CASE_DEFAULTS[name])
+
     total_drones = scale_config["num_trucks"] * scale_config["drones_per_truck"]
-    truck_arc_probability = (
-        args.truck_arc_probability
-        if args.truck_arc_probability is not None
-        else scale_config.get("truck_arc_probability", 0.05)
-    )
-    hub_arc_probability = (
-        args.hub_arc_probability
-        if args.hub_arc_probability is not None
-        else scale_config.get("hub_arc_probability", 0.18)
-    )
+    truck_arc_probability = profile_value("truck_arc_probability")
+    hub_arc_probability = profile_value("hub_arc_probability")
     case_id = f"{scale}_{variant}_{distribution}_seed_{seed}"
     return {
         "case_id": case_id,
@@ -730,17 +729,17 @@ def _case_spec(
             "drone_endurance": args.drone_endurance,
             "truck_cost": args.truck_cost,
             "drone_cost": args.drone_cost,
-            "mandatory_drone_customer_fraction": args.mandatory_drone_customer_fraction,
-            "max_drone_access_customers_per_hub": args.max_drone_access_customers_per_hub,
-            "max_drone_launch_hubs_per_customer": args.max_drone_launch_hubs_per_customer,
-            "min_drone_service_time_saving": args.min_drone_service_time_saving,
-            "retain_optional_drone_arcs": args.retain_optional_drone_arcs,
-            "service_deadline_mode": args.service_deadline_mode,
+            "mandatory_drone_customer_fraction": profile_value("mandatory_drone_customer_fraction"),
+            "max_drone_access_customers_per_hub": profile_value("max_drone_access_customers_per_hub"),
+            "max_drone_launch_hubs_per_customer": profile_value("max_drone_launch_hubs_per_customer"),
+            "min_drone_service_time_saving": profile_value("min_drone_service_time_saving"),
+            "retain_optional_drone_arcs": profile_value("retain_optional_drone_arcs"),
+            "service_deadline_mode": profile_value("service_deadline_mode"),
             "service_deadline_fraction": args.service_deadline_fraction,
             "service_deadline_manual_bounds": args.service_deadline_manual_bounds,
-            "service_deadline_offset_min": args.service_deadline_offset_min,
-            "service_deadline_offset_max": args.service_deadline_offset_max,
-            "service_deadline_witness_slack": args.service_deadline_witness_slack,
+            "service_deadline_offset_min": profile_value("service_deadline_offset_min"),
+            "service_deadline_offset_max": profile_value("service_deadline_offset_max"),
+            "service_deadline_witness_slack": profile_value("service_deadline_witness_slack"),
             "service_deadline_random_seed": args.service_deadline_random_seed,
             "service_deadline_witness_method": args.service_deadline_witness_method,
             "service_deadline_witness_time_limit": args.service_deadline_witness_time_limit,
@@ -748,7 +747,7 @@ def _case_spec(
         "solver_config": {
             "threads": args.threads,
             "time_limit": args.case_time_limit,
-            "pricing_tolerance": args.pricing_tolerance,
+            "pricing_tolerance": profile_value("pricing_tolerance"),
             "root_extraction_time_limit": root_extraction_time_limit,
             "enable_pricing_pruning": enable_pricing_pruning,
             "pricing_batch_size": args.pricing_batch_size,
@@ -803,6 +802,7 @@ def _case_spec(
             "enable_active_coefficient_cache": args.enable_active_coefficient_cache,
             "enable_sr_aging": not args.disable_sr_aging,
             "enable_postroot_sr_cut_removal": not args.disable_postroot_sr_cut_removal,
+            "sr_cut_add_batch_size": args.sr_cut_add_batch_size,
             "sr_inactive_age_threshold": args.sr_inactive_age_threshold,
             "sr_removal_batch_size": args.sr_removal_batch_size,
             "sr_max_removals_per_node": args.sr_max_removals_per_node,
@@ -899,10 +899,10 @@ def _case_spec(
             "seed_batch_size": args.seed_batch_size,
             "repair_batch_size": args.repair_batch_size,
             "enable_bidirectional_pricing": False,
-            "pricing_parallel_workers": args.pricing_parallel_workers,
-            "pricing_worker_backend": args.pricing_worker_backend,
+            "pricing_parallel_workers": profile_value("pricing_parallel_workers"),
+            "pricing_worker_backend": profile_value("pricing_worker_backend"),
             "prefix_task_depth_root": args.prefix_task_depth_root,
-            "prefix_task_depth_child": args.prefix_task_depth_child,
+            "prefix_task_depth_child": profile_value("prefix_task_depth_child"),
             "prefix_task_min_branching_for_depth2": args.prefix_task_min_branching_for_depth2,
             "logging_mode": args.logging_mode,
             "progress_snapshot_period": args.progress_snapshot_period,

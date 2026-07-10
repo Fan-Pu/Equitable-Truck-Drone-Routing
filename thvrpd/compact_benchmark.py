@@ -8,11 +8,12 @@ import time
 from typing import Any
 
 from .compact import solve_compact_solution
-from .config import InstanceConfig, ObjectiveWeights
+from .config import InstanceConfig, ObjectiveWeights, case_defaults
 from .instance import generate_instance, instance_generation_metadata
 from .metrics import solution_service_metrics
 from .objective import build_objective_data
 from .routes import Route, route_from_path
+from .service_windows import load_manual_service_deadline_bounds
 from .transform import build_transformed_graph
 
 
@@ -50,8 +51,8 @@ def main() -> None:
     parser.add_argument("--weights", nargs=3, type=float, default=[0.4, 0.3, 0.3])
     parser.add_argument("--time-limit", type=float, default=1200.0)
     parser.add_argument("--threads", type=int, default=1)
-    parser.add_argument("--truck-arc-probability", type=float, default=0.05)
-    parser.add_argument("--hub-arc-probability", type=float, default=0.18)
+    parser.add_argument("--truck-arc-probability", type=float)
+    parser.add_argument("--hub-arc-probability", type=float)
     parser.add_argument("--truck-speed", type=float, default=40.0)
     parser.add_argument("--drone-speed", type=float, default=100.0)
     parser.add_argument("--truck-payload", type=float, default=50.0)
@@ -59,16 +60,17 @@ def main() -> None:
     parser.add_argument("--drone-endurance", type=float, default=75.0)
     parser.add_argument("--truck-cost", type=float, default=20.0)
     parser.add_argument("--drone-cost", type=float, default=1.0)
-    parser.add_argument("--mandatory-drone-customer-fraction", type=float, default=0.16)
-    parser.add_argument("--max-drone-access-customers-per-hub", type=int, default=2)
-    parser.add_argument("--max-drone-launch-hubs-per-customer", type=int, default=1)
-    parser.add_argument("--min-drone-service-time-saving", type=float, default=0.0)
-    parser.add_argument("--retain-optional-drone-arcs", action="store_true")
-    parser.add_argument("--service-deadline-mode", choices=["none", "manual", "random_absolute"], default="none")
+    parser.add_argument("--mandatory-drone-customer-fraction", type=float)
+    parser.add_argument("--max-drone-access-customers-per-hub", type=int)
+    parser.add_argument("--max-drone-launch-hubs-per-customer", type=int)
+    parser.add_argument("--min-drone-service-time-saving", type=float)
+    parser.add_argument("--retain-optional-drone-arcs", action=argparse.BooleanOptionalAction, default=None)
+    parser.add_argument("--service-deadline-mode", choices=["none", "manual", "random_absolute"])
+    parser.add_argument("--service-deadline-file", type=Path)
     parser.add_argument("--service-deadline-fraction", type=float, default=0.60)
-    parser.add_argument("--service-deadline-offset-min", type=float, default=45.0)
-    parser.add_argument("--service-deadline-offset-max", type=float, default=120.0)
-    parser.add_argument("--service-deadline-witness-slack", type=float, default=5.0)
+    parser.add_argument("--service-deadline-offset-min", type=float)
+    parser.add_argument("--service-deadline-offset-max", type=float)
+    parser.add_argument("--service-deadline-witness-slack", type=float)
     parser.add_argument("--service-deadline-random-seed", type=int)
     parser.add_argument(
         "--service-deadline-witness-method",
@@ -78,6 +80,16 @@ def main() -> None:
     parser.add_argument("--service-deadline-witness-time-limit", type=float, default=30.0)
     args = parser.parse_args()
 
+    defaults = case_defaults(
+        num_customers=args.num_customers,
+        num_trucks=args.num_trucks,
+        num_hubs=args.num_hubs,
+        drones_per_truck=args.drones_per_truck,
+    )
+    for name, value in defaults.items():
+        if hasattr(args, name) and getattr(args, name) is None:
+            setattr(args, name, value)
+
     output_dir = args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
     log_dir = output_dir / "gurobi_logs"
@@ -85,6 +97,7 @@ def main() -> None:
     log_file = log_dir / "compact_arc.log"
 
     weights = ObjectiveWeights(*args.weights)
+    manual_deadlines = load_manual_service_deadline_bounds(args.service_deadline_file) if args.service_deadline_file else None
     instance_config = InstanceConfig(
         seed=args.seed,
         num_trucks=args.num_trucks,
@@ -108,6 +121,7 @@ def main() -> None:
         retain_optional_drone_arcs=args.retain_optional_drone_arcs,
         service_deadline_mode=args.service_deadline_mode,
         service_deadline_fraction=args.service_deadline_fraction,
+        service_deadline_manual_bounds=manual_deadlines,
         service_deadline_offset_min=args.service_deadline_offset_min,
         service_deadline_offset_max=args.service_deadline_offset_max,
         service_deadline_witness_slack=args.service_deadline_witness_slack,
@@ -148,6 +162,8 @@ def main() -> None:
         "timing": asdict(solution.timing),
         "instance_config": asdict(instance_config),
         "objective_weights": asdict(weights),
+        "normalization_bounds": asdict(objective.bounds),
+        "objective_coefficients": asdict(objective.coeffs),
         "instance_metadata": instance_generation_metadata(instance),
         "transformed_nodes": len(graph.nodes),
         "transformed_arcs": len(graph.arcs),

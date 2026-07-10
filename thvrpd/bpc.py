@@ -1948,10 +1948,11 @@ def _solve_node(
                 stats.child_certification_epochs_completed += 1
         sr_start = time.time()
         violated_activities = rmp.violated_sr_cut_activities(result.z_values, solver_config.cut_tolerance)
-        violated = set(violated_activities)
+        selected_activities = _select_sr_cut_batch(violated_activities, solver_config.sr_cut_add_batch_size)
+        violated = set(selected_activities)
         _record_sr_separation_time(stats, node, time.time() - sr_start)
         if violated:
-            added_cuts = _activate_sr_cuts(node, violated_activities, stats)
+            added_cuts = _activate_sr_cuts(node, selected_activities, stats)
             stats.sr_cuts_added += added_cuts
             if node.depth == 0:
                 stats.sr_cuts_added_root += added_cuts
@@ -2222,6 +2223,17 @@ def _activate_sr_cuts(
     if violated_activities:
         node.active_sr_version += 1
     return new_count
+
+
+def _select_sr_cut_batch(
+    violated_activities: dict[tuple[str, str, str], float],
+    batch_size: int,
+) -> dict[tuple[str, str, str], float]:
+    ordered = sorted(
+        violated_activities.items(),
+        key=lambda item: (-item[1], item[0]),
+    )
+    return dict(ordered[:batch_size])
 
 
 def _remove_inactive_sr_cuts_after_closure(

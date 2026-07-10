@@ -28,6 +28,7 @@ from thvrpd.bpc import (
     _prune_side_pool,
     _record_branch_decision,
     _record_productive_slice_timeout,
+    _select_sr_cut_batch,
     _construct_root_incumbent_routes,
     _deactivate_inactive_node_columns,
     _diversify_constructive_drone_routes,
@@ -987,6 +988,18 @@ def test_source_neighbor_partition_disjoint_exhaustive() -> None:
 
     empty_blocks = _partition_source_neighbors(tuple(), 3)
     assert empty_blocks == (tuple(), tuple(), tuple())
+
+
+def test_sr_cut_batch_selects_most_violated_triplets_deterministically() -> None:
+    activities = {
+        ("C1", "C2", "C3"): 1.10,
+        ("C1", "C2", "C4"): 1.40,
+        ("C1", "C3", "C4"): 1.40,
+        ("C2", "C3", "C4"): 1.20,
+    }
+    selected = _select_sr_cut_batch(activities, 2)
+    assert list(selected) == [("C1", "C2", "C4"), ("C1", "C3", "C4")]
+    assert set(activities) - set(selected) == {("C1", "C2", "C3"), ("C2", "C3", "C4")}
 
 
 def test_balanced_source_neighbor_partition_is_disjoint_and_load_balanced() -> None:

@@ -8,7 +8,13 @@ from pathlib import Path
 
 import pytest
 
-from thvrpd.config import InstanceConfig, ObjectiveWeights
+from thvrpd.config import (
+    GENERIC_CASE_DEFAULTS,
+    MEDIUM_CASE_DEFAULTS,
+    InstanceConfig,
+    ObjectiveWeights,
+    case_defaults,
+)
 from thvrpd.experiments import DEFAULT_SEEDS, SCALES, _merge_timeout_stats, _read_pricing_diagnostics, _summary_row
 from thvrpd.instance import generate_instance, tiny_instance
 from thvrpd.objective import build_objective_data
@@ -82,6 +88,15 @@ def test_manual_service_deadline_file_loader_json_and_csv(tmp_path: Path) -> Non
     csv_path = tmp_path / "deadlines.csv"
     csv_path.write_text("customer,deadline\nC1,11\nC2,22.25\n", encoding="utf-8")
     assert load_manual_service_deadline_bounds(csv_path) == {"C1": 11.0, "C2": 22.25}
+
+
+def test_manual_service_deadline_loader_accepts_bpc_result_record(tmp_path: Path) -> None:
+    result_path = tmp_path / "result.json"
+    result_path.write_text(
+        json.dumps({"normalization_bounds": {"service_deadline": {"C1": 12.0, "C2": 23.5}}}),
+        encoding="utf-8",
+    )
+    assert load_manual_service_deadline_bounds(result_path) == {"C1": 12.0, "C2": 23.5}
 
 
 def test_random_absolute_service_deadlines_are_seeded_and_customer_specific() -> None:
@@ -623,7 +638,13 @@ def test_experiment_defaults_match_prompt_scales_and_seed_count() -> None:
     assert DEFAULT_SEEDS == [1, 2, 3]
     common_graph = {"truck_arc_probability": 0.05, "hub_arc_probability": 0.18}
     assert SCALES["small"] == {"num_customers": 5, "num_trucks": 2, "num_hubs": 2, "drones_per_truck": 4, **common_graph}
-    assert SCALES["medium"] == {"num_customers": 15, "num_trucks": 5, "num_hubs": 2, "drones_per_truck": 4, **common_graph}
+    assert SCALES["medium"] == {
+        "num_customers": 15,
+        "num_trucks": 3,
+        "num_hubs": 2,
+        "drones_per_truck": 4,
+        **MEDIUM_CASE_DEFAULTS,
+    }
     assert SCALES["large"] == {
         "num_customers": 25,
         "num_trucks": 5,
@@ -631,3 +652,28 @@ def test_experiment_defaults_match_prompt_scales_and_seed_count() -> None:
         "drones_per_truck": 4,
         **common_graph,
     }
+
+
+def test_dimension_matched_medium_case_defaults_reproduce_selected_profile() -> None:
+    medium = case_defaults(num_customers=15, num_trucks=3, num_hubs=2, drones_per_truck=4)
+    assert medium == MEDIUM_CASE_DEFAULTS
+    assert medium["truck_arc_probability"] == pytest.approx(0.05)
+    assert medium["hub_arc_probability"] == pytest.approx(0.18)
+    assert medium["max_drone_launch_hubs_per_customer"] == 1
+    assert medium["min_drone_service_time_saving"] == pytest.approx(0.0)
+    assert medium["retain_optional_drone_arcs"] is False
+    assert medium["service_deadline_mode"] == "none"
+    assert medium["service_deadline_offset_min"] == pytest.approx(45.0)
+    assert medium["service_deadline_offset_max"] == pytest.approx(120.0)
+    assert medium["service_deadline_witness_slack"] == pytest.approx(5.0)
+    assert medium["pricing_tolerance"] == pytest.approx(0.05)
+    assert medium["pricing_parallel_workers"] == 6
+    assert medium["pricing_worker_backend"] == "thread"
+    assert medium["prefix_task_depth_child"] == 1
+
+    generic = case_defaults(num_customers=25, num_trucks=5, num_hubs=2, drones_per_truck=4)
+    assert generic == GENERIC_CASE_DEFAULTS
+    assert generic["pricing_parallel_workers"] == 6
+
+    small = case_defaults(num_customers=5, num_trucks=2, num_hubs=2, drones_per_truck=4)
+    assert small["pricing_parallel_workers"] == 6

@@ -10,6 +10,12 @@ def load_manual_service_deadline_bounds(path: Path) -> dict[str, float]:
         payload = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(payload, dict) and "deadlines" in payload:
             payload = payload["deadlines"]
+        elif (
+            isinstance(payload, dict)
+            and isinstance(payload.get("normalization_bounds"), dict)
+            and "service_deadline" in payload["normalization_bounds"]
+        ):
+            payload = payload["normalization_bounds"]["service_deadline"]
         if not isinstance(payload, dict):
             raise ValueError("manual service deadline JSON must be a customer-to-bound object")
         return {str(customer): float(bound) for customer, bound in payload.items()}

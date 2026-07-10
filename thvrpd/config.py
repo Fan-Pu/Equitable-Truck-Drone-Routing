@@ -4,6 +4,55 @@ from dataclasses import dataclass
 from math import isclose, isfinite
 
 
+MEDIUM_CASE_DIMENSIONS = {
+    "num_customers": 15,
+    "num_trucks": 3,
+    "num_hubs": 2,
+    "drones_per_truck": 4,
+}
+
+GENERIC_CASE_DEFAULTS = {
+    "truck_arc_probability": 0.05,
+    "hub_arc_probability": 0.18,
+    "mandatory_drone_customer_fraction": 0.16,
+    "max_drone_access_customers_per_hub": 2,
+    "max_drone_launch_hubs_per_customer": 1,
+    "min_drone_service_time_saving": 0.0,
+    "retain_optional_drone_arcs": False,
+    "service_deadline_mode": "none",
+    "service_deadline_offset_min": 45.0,
+    "service_deadline_offset_max": 120.0,
+    "service_deadline_witness_slack": 5.0,
+    "pricing_tolerance": 0.05,
+    "pricing_parallel_workers": 6,
+    "pricing_worker_backend": "thread",
+    "prefix_task_depth_child": 1,
+}
+
+MEDIUM_CASE_DEFAULTS = {
+    **GENERIC_CASE_DEFAULTS,
+    "pricing_parallel_workers": 6,
+}
+
+
+def case_defaults(
+    *,
+    num_customers: int,
+    num_trucks: int,
+    num_hubs: int,
+    drones_per_truck: int,
+) -> dict[str, float | int | bool | str]:
+    dimensions = {
+        "num_customers": num_customers,
+        "num_trucks": num_trucks,
+        "num_hubs": num_hubs,
+        "drones_per_truck": drones_per_truck,
+    }
+    if dimensions == MEDIUM_CASE_DIMENSIONS:
+        return dict(MEDIUM_CASE_DEFAULTS)
+    return dict(GENERIC_CASE_DEFAULTS)
+
+
 @dataclass(frozen=True)
 class ObjectiveWeights:
     delay: float
@@ -174,6 +223,7 @@ class SolverConfig:
     enable_active_coefficient_cache: bool = True
     enable_sr_aging: bool = True
     enable_postroot_sr_cut_removal: bool = True
+    sr_cut_add_batch_size: int = 32
     sr_inactive_age_threshold: int = 1
     sr_removal_batch_size: int = 32
     sr_max_removals_per_node: int = 32
@@ -319,6 +369,7 @@ class SolverConfig:
             self.dynamic_split_label_threshold,
             self.dynamic_refinement_depth,
             self.checkpoint_extension_period,
+            self.sr_cut_add_batch_size,
             self.sr_inactive_age_threshold,
             self.sr_removal_batch_size,
             self.sr_max_removals_per_node,
