@@ -1,0 +1,15 @@
+{
+  "case_id": "medium_PS_seed2",
+  "solver": "bpc",
+  "attempt": "attempt_001",
+  "started_at": "2026-08-31 22:26:02",
+  "ended_at": "2026-08-31 22:27:30",
+  "exit_code": 0,
+  "completed": true,
+  "instance_snapshot_sha256": "92974c600c7ecb34827bbb2d172d04ab703dc5685d41ec34689e2366748edffc",
+  "instance_snapshot_verified": true,
+  "result_file": "D:\\GitHub\\Equitable-Truck-Drone-Routing\\numerical_experiments\\small_medium_dense16_bpc_compact_1800s_campaign\\cases\\medium_PS_seed2\\bpc\\attempt_001\\thvrpd-seed=2.json",
+  "stdout_file": "D:\\GitHub\\Equitable-Truck-Drone-Routing\\numerical_experiments\\small_medium_dense16_bpc_compact_1800s_campaign\\cases\\medium_PS_seed2\\bpc\\attempt_001\\runner_stdout.log",
+  "stderr_file": "D:\\GitHub\\Equitable-Truck-Drone-Routing\\numerical_experiments\\small_medium_dense16_bpc_compact_1800s_campaign\\cases\\medium_PS_seed2\\bpc\\attempt_001\\runner_stderr.log",
+  "resource_usage_file": "D:\\GitHub\\Equitable-Truck-Drone-Routing\\numerical_experiments\\small_medium_dense16_bpc_compact_1800s_campaign\\cases\\medium_PS_seed2\\bpc\\attempt_001\\resource_usage.json"
+}

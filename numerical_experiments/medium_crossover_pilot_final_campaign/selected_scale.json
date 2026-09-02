@@ -1,0 +1,30 @@
+{
+  "selected_at": "2026-08-31 22:23:39",
+  "selection_rule": "smallest pilot with lower BPC median runtime, at least as many BPC optimal solves, and no worse BPC median gap; default to n=25 if none qualifies",
+  "selected": {
+    "dimensions": {
+      "num_customers": 20,
+      "num_trucks": 4,
+      "num_hubs": 3,
+      "drones_per_truck": 4
+    },
+    "case_count": 4,
+    "bpc_median_runtime": 54.16833519935608,
+    "mip_median_runtime": 317.2818925380707,
+    "bpc_optimal_count": 4,
+    "mip_optimal_count": 2,
+    "bpc_median_gap": 0.0,
+    "mip_median_gap": 0.21726917091183312,
+    "qualifies": true
+  },
+  "held_out_case_order": [
+    "medium_PS_seed1",
+    "medium_PS_seed2",
+    "medium_PS_seed3",
+    "medium_PS_seed4",
+    "medium_PC_seed5",
+    "medium_PC_seed6",
+    "medium_PC_seed7",
+    "medium_PC_seed8"
+  ]
+}

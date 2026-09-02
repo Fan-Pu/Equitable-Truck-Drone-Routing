@@ -1,0 +1,52 @@
+{
+  "pilots": [
+    {
+      "dimensions": {
+        "num_customers": 15,
+        "num_trucks": 3,
+        "num_hubs": 2,
+        "drones_per_truck": 4
+      },
+      "case_count": 4,
+      "bpc_median_runtime": 15.4532310962677,
+      "mip_median_runtime": 1.9279515743255615,
+      "bpc_optimal_count": 4,
+      "mip_optimal_count": 4,
+      "bpc_median_gap": 0.0,
+      "mip_median_gap": 0.0,
+      "qualifies": false
+    },
+    {
+      "dimensions": {
+        "num_customers": 20,
+        "num_trucks": 4,
+        "num_hubs": 3,
+        "drones_per_truck": 4
+      },
+      "case_count": 4,
+      "bpc_median_runtime": 54.16833519935608,
+      "mip_median_runtime": 317.2818925380707,
+      "bpc_optimal_count": 4,
+      "mip_optimal_count": 2,
+      "bpc_median_gap": 0.0,
+      "mip_median_gap": 0.21726917091183312,
+      "qualifies": true
+    },
+    {
+      "dimensions": {
+        "num_customers": 25,
+        "num_trucks": 5,
+        "num_hubs": 3,
+        "drones_per_truck": 4
+      },
+      "case_count": 4,
+      "bpc_median_runtime": 132.39986312389374,
+      "mip_median_runtime": 600.1928347349167,
+      "bpc_optimal_count": 4,
+      "mip_optimal_count": 0,
+      "bpc_median_gap": 0.0,
+      "mip_median_gap": 1.508876051184903,
+      "qualifies": true
+    }
+  ]
+}

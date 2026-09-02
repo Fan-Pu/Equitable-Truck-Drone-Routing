@@ -1,17 +1,24 @@
-from __future__ import annotations
+﻿from __future__ import annotations
+from concurrent.futures import ThreadPoolExecutor
 
-from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field, replace
+
 from heapq import heappop, heappush
+
 from itertools import count
+
 from math import ceil, isfinite
-import multiprocessing
-from threading import Event
+
+import multiprocessing as mp
+import os
+import pickle
+from queue import Empty
 import time
 
 import networkx as nx
 
 from .branching import BranchRestrictions
+
 from .columns import (
     COST_SIGNATURE_TOLERANCE,
     PAPER_DOMINANCE_TOLERANCE,
@@ -19,25 +26,27 @@ from .columns import (
     RouteSignatureCache,
     route_coefficient_signature,
     route_signature,
-    route_signature_from_resources,
 )
-from .objective import ObjectiveData
-from .routes import PAYLOAD_TOLERANCE, Route, ServiceEnvelopeViolation, is_customer_representation, route_from_path
-from .transform import TransformedGraph, duplicate_customer, duplicate_hub, is_duplicate, served_customer
 
+from .objective import ObjectiveData
+
+from .routes import PAYLOAD_TOLERANCE, Route, ServiceEnvelopeViolation, is_customer_representation, route_from_path
+
+from .transform import TransformedGraph, duplicate_customer, is_duplicate, served_customer
 
 PRICING_STATUS_NEGATIVE_BATCH = "NEGATIVE_BATCH"
-PRICING_STATUS_EXHAUSTED_NO_NEGATIVE = "EXHAUSTED_NO_NEGATIVE"
-PRICING_STATUS_TIME_LIMIT_WITH_COLUMNS = "TIME_LIMIT_WITH_COLUMNS"
-PRICING_STATUS_TIME_LIMIT_NO_COLUMNS = "TIME_LIMIT_NO_COLUMNS"
 
+PRICING_STATUS_EXHAUSTED_NO_NEGATIVE = "EXHAUSTED_NO_NEGATIVE"
+
+PRICING_STATUS_TIME_LIMIT_WITH_COLUMNS = "TIME_LIMIT_WITH_COLUMNS"
+
+PRICING_STATUS_TIME_LIMIT_NO_COLUMNS = "TIME_LIMIT_NO_COLUMNS"
 
 @dataclass(frozen=True)
 class PricingDuals:
     mu: dict[str, float]
     kappa: float
     nu: dict[tuple[str, str, str], float] = field(default_factory=dict)
-
 
 @dataclass(frozen=True)
 class PricingEpoch:
@@ -47,9 +56,42 @@ class PricingEpoch:
     residual_customer_mask: int
     branch_signature: tuple
     fixed_route_signature: tuple
-    active_column_version: int
-    rmp_structure_version: int
-    objective_window_version: tuple[object, ...]
+    active_column_version: tuple
+    rmp_structure_version: tuple
+    objective_scale_version: tuple[object, ...]
+    service_window_version: tuple[object, ...]
+
+@dataclass(frozen=True)
+class PricingEpochContext:
+    active_sr_version: int = 0
+    fixed_route_signature: tuple[tuple[str, ...], ...] = tuple()
+    active_column_version: tuple = tuple()
+    rmp_structure_version: tuple = tuple()
+
+@dataclass(frozen=True)
+class PricingSchedulerConfig:
+    customer_weight: float = 1.0
+    out_degree_weight: float = 0.25
+    drone_pad_weight: float = 0.5
+    deadline_weight: float = 0.5
+    split_open_labels_min: int = 2000
+    split_gap_factor: float = 1.0
+    split_elapsed_min: float = 5.0
+    split_work_min: int = 2000
+    refinement_depth: int = 2
+    checkpoint_extension_period: int = 5000
+
+
+def _task_closure_gap(completion_lower_bound: float) -> float:
+    return max(0.0, -completion_lower_bound)
+
+
+def _closure_gap_exceeds_split_threshold(
+    closure_gap: float,
+    pricing_tolerance: float,
+    split_gap_factor: float,
+) -> bool:
+    return closure_gap > split_gap_factor * pricing_tolerance
 
 
 @dataclass(frozen=True)
@@ -59,8 +101,6 @@ class PricingResult:
     best_route: Route | None
     best_reduced_cost: float | None
     diagnostics: "PricingDiagnostics"
-    side_pool_routes: tuple[Route, ...] = tuple()
-    side_pool_reduced_costs: tuple[float, ...] = tuple()
 
     @property
     def route(self) -> Route | None:
@@ -69,7 +109,6 @@ class PricingResult:
     @property
     def reduced_cost(self) -> float | None:
         return self.reduced_costs[0] if self.reduced_costs else self.best_reduced_cost
-
 
 @dataclass(frozen=True)
 class PricingDiagnostics:
@@ -88,44 +127,81 @@ class PricingDiagnostics:
     standard_bound_pruned: int = 0
     farkas_bound_pruned: int = 0
     elapsed_seconds: float = 0.0
-    pricing_engine: str = "forward_labeling"
+    pricing_engine: str = "source_neighbor_parallel_forward"
     forward_labels_generated: int = 0
-    backward_labels_generated: int = 0
-    backward_dominance_tests: int = 0
-    backward_labels_dominated: int = 0
-    backward_cost_function_build_time_seconds: float = 0.0
-    backward_cost_function_eval_time_seconds: float = 0.0
-    join_sr_correction_time_seconds: float = 0.0
-    join_active_block_time_seconds: float = 0.0
-    joined_reduced_cost_evaluations: int = 0
-    backward_dominance_cost_tests: int = 0
-    backward_dominance_cost_rejected: int = 0
-    backward_exclusive_resource_violations: int = 0
-    join_pairs_tested: int = 0
-    joined_routes_accepted: int = 0
     forward_labeling_time_seconds: float = 0.0
-    backward_labeling_time_seconds: float = 0.0
-    join_time_seconds: float = 0.0
     parallel_labeling_used: bool = False
     parallel_workers: int = 1
     parallel_calls: int = 0
-    signature_cache_hits: int = 0
-    signature_cache_misses: int = 0
-    core_signature_cache_hits: int = 0
-    core_signature_cache_misses: int = 0
-    active_signature_cache_hits: int = 0
-    active_signature_cache_misses: int = 0
-    sr_coeff_cache_hits: int = 0
-    sr_coeff_cache_misses: int = 0
-    active_sr_key_cache_hits: int = 0
-    active_sr_key_cache_misses: int = 0
-    active_sr_coeffs_computed: int = 0
-    triplet_masks_built: int = 0
-    dominance_prefilter_pairs: int = 0
-    dominance_prefilter_rejected: int = 0
+    pricing_mode: str = "productive"
+    pricing_status: str = PRICING_STATUS_EXHAUSTED_NO_NEGATIVE
+    productive_calls: int = 0
+    certification_calls: int = 0
+    negative_routes_verified: int = 0
+    negative_routes_inserted: int = 0
+    pricing_worker_backend: str = "serial"
+    process_cpu_time_seconds: float = 0.0
+    cpu_core_equivalent: float = 0.0
+    worker_id: int | None = None
+    source_neighbor_count: int = 0
+    source_neighbor_block_sizes: tuple[int, ...] = tuple()
+    source_neighbor_task_count: int = 0
+    source_neighbor_task_sizes: tuple[int, ...] = tuple()
+    core_subspace_count: int = 0
+    core_empty_blocks: int = 0
+    min_core_reduced_cost: float | None = None
+    root_closed_by_all_cores: bool = False
+    certification_worker_calls: int = 0
+    productive_worker_calls: int = 0
+    certification_core_closed_count: int = 0
+    certification_core_unresolved_count: int = 0
+    per_worker_elapsed_seconds: tuple[tuple[int, float], ...] = tuple()
+    per_worker_cpu_time_seconds: tuple[tuple[int, float], ...] = tuple()
+    per_worker_labels_generated: tuple[tuple[int, int], ...] = tuple()
+    per_worker_labels_dominated: tuple[tuple[int, int], ...] = tuple()
+    per_worker_labels_pruned: tuple[tuple[int, int], ...] = tuple()
+    per_worker_completed_labels: tuple[tuple[int, int], ...] = tuple()
+    per_worker_verified_negative_routes: tuple[tuple[int, int], ...] = tuple()
+    pricing_pool_startup_time_seconds: float = 0.0
+    pricing_pool_startup_count: int = 0
+    pricing_pool_reused_calls: int = 0
+    pricing_task_submission_time_seconds: float = 0.0
+    pricing_worker_payload_count: int = 0
+    pricing_worker_response_count: int = 0
+    pricing_candidate_paths_before_merge: int = 0
+    pricing_candidate_paths_after_merge: int = 0
+    pricing_decoded_routes_in_main: int = 0
+    pricing_verified_routes_in_main: int = 0
+    pricing_batch_target: int = 0
+    pricing_returned_batch_size: int = 0
+    prefix_task_depth: int = 1
+    extensions_attempted: int = 0
+    extensions_rejected_by_deadline: int = 0
+    together_branch_reachability_pruned: int = 0
+    deadline_reachability_removed: int = 0
+    reward_set_size_before_deadline: int = 0
+    reward_set_size_after_deadline: int = 0
+    deadline_reward_bound_calls: int = 0
+    deadline_dominance_prefilter_skips: int = 0
+    routes_rejected_by_deadline_in_master: int = 0
+    forward_dominance_tests: int = 0
+    forward_same_node_dominance_tests: int = 0
+    forward_physical_location_dominance_tests: int = 0
+    forward_physical_location_dominance_rejections: int = 0
+    forward_return_time_credit_checks: int = 0
+    forward_return_time_credit_checks_skipped: int = 0
+    forward_branch_language_failures: int = 0
+    forward_branch_interface_failures: int = 0
+    forward_mask_scalar_prefilter_failures: int = 0
+    dom_gate_pairs_seen: int = 0
+    dom_gate_mask_failures: int = 0
+    dom_gate_scalar_failures: int = 0
+    dom_gate_branch_failures: int = 0
+    dom_gate_deadline_failures: int = 0
     dominance_bucket_pairs_considered: int = 0
     dominance_bucket_pairs_rejected: int = 0
     dominance_bucket_candidate_pairs: int = 0
+    dominance_bucket_scans_avoided: int = 0
     dominance_bucket_queries: int = 0
     dominance_bucket_skipped_by_mask: int = 0
     dominance_bucket_skipped_by_scalar: int = 0
@@ -140,9 +216,6 @@ class PricingDiagnostics:
     dom_frontier_keys_skipped_by_return_credit: int = 0
     frontier_cells_created: int = 0
     frontier_cells_split: int = 0
-    frontier_cell_lb_min_at_stop: float | None = None
-    frontier_cell_lb_closed: int = 0
-    frontier_cell_lb_invalidations: int = 0
     mask_trie_subset_queries: int = 0
     mask_trie_superset_queries: int = 0
     mask_trie_returned_items: int = 0
@@ -155,24 +228,12 @@ class PricingDiagnostics:
     cell_pairs_considered: int = 0
     cell_pairs_rejected_by_mask: int = 0
     cell_pairs_rejected_by_envelope: int = 0
-    cell_pairs_rejected_by_lb: int = 0
-    cell_pairs_rejected_by_closure_lb: int = 0
     label_pairs_materialized: int = 0
-    labels_certified_by_cell_lb: int = 0
     full_same_node_tests: int = 0
     full_physical_location_tests: int = 0
     labels_deleted_same_node: int = 0
     labels_deleted_physical_location: int = 0
-    closure_queue_pushes: int = 0
-    closure_queue_pops: int = 0
-    closure_queue_min_key_at_stop: float | None = None
-    certification_tasks_exhausted_by_cell_lb: int = 0
-    certification_tasks_closed_by_cell_lb: int = 0
     certification_tasks_exhausted_by_label_search: int = 0
-    resource_reward_bound_calls: int = 0
-    resource_reward_bound_time: float = 0.0
-    resource_reward_bound_fallbacks: int = 0
-    pricing_mode_productive_or_certification: str = "productive"
     physdom_cell_pairs_considered: int = 0
     physdom_cell_pairs_rejected_by_mask: int = 0
     physdom_cell_pairs_rejected_by_envelope: int = 0
@@ -188,221 +249,6 @@ class PricingDiagnostics:
     dom_full_tests_physical_location: int = 0
     dom_labels_deleted_same_node: int = 0
     dom_labels_deleted_physical_location: int = 0
-    dominance_compatible_keys_generated: int = 0
-    dominance_compatible_key_lookups: int = 0
-    dominance_bucket_scans_avoided: int = 0
-    dominance_key_generation_time_seconds: float = 0.0
-    backward_full_dominance_tests: int = 0
-    join_prefilter_pairs: int = 0
-    join_prefilter_rejected: int = 0
-    join_bucket_pairs_considered: int = 0
-    join_bucket_pairs_rejected: int = 0
-    join_bucket_candidate_pairs: int = 0
-    join_compatible_keys_generated: int = 0
-    join_compatible_key_lookups: int = 0
-    join_bucket_scans_avoided: int = 0
-    join_key_generation_time_seconds: float = 0.0
-    join_key_cache_hits: int = 0
-    join_key_cache_misses: int = 0
-    join_graph_build_time_seconds: float = 0.0
-    join_subbucket_pairs_considered: int = 0
-    join_subbucket_pairs_rejected: int = 0
-    join_small_bypass_calls: int = 0
-    join_local_bypass_calls: int = 0
-    join_cumulative_bypass_calls: int = 0
-    join_indexed_activation_count: int = 0
-    join_work_estimate: int = 0
-    join_candidate_pairs_accepted: int = 0
-    join_activation_mode: str = "none"
-    join_label_pairs_materialized: int = 0
-    join_full_decodes: int = 0
-    lazy_rejected_before_decode: int = 0
-    fully_decoded_routes: int = 0
-    duplicate_equivalent_rejected: int = 0
-    cost_dominated_rejected: int = 0
-    signature_build_time_seconds: float = 0.0
-    sr_coeff_build_time_seconds: float = 0.0
-    duplicate_lookup_time_seconds: float = 0.0
-    route_decode_time_seconds: float = 0.0
-    reduced_cost_verification_time_seconds: float = 0.0
-    dominance_key_cache_hits: int = 0
-    dominance_key_cache_misses: int = 0
-    dominance_small_bypass_calls: int = 0
-    dominance_bypass_calls: int = 0
-    dominance_indexed_activation_count: int = 0
-    dominance_work_estimate: int = 0
-    dominance_activation_mode: str = "none"
-    sticky_indexed_join_activations: int = 0
-    sticky_indexed_dominance_activations: int = 0
-    join_stage_reject_key: int = 0
-    join_stage_reject_branch: int = 0
-    join_stage_reject_customer: int = 0
-    join_stage_reject_truck_node: int = 0
-    join_stage_reject_payload: int = 0
-    join_stage_reject_block: int = 0
-    join_stage_reject_reduced_cost: int = 0
-    dominance_stage_reject_key: int = 0
-    dominance_stage_reject_branch: int = 0
-    dominance_stage_reject_customer: int = 0
-    dominance_stage_reject_truck_node: int = 0
-    dominance_stage_reject_payload: int = 0
-    dominance_stage_reject_block: int = 0
-    dominance_stage_reject_time: int = 0
-    dominance_stage_reject_cost: int = 0
-    pricing_mode: str = "productive"
-    pricing_yield_ratio: float = 0.0
-    side_pool_routes_returned: int = 0
-    side_pool_reduced_cost_min: float | None = None
-    side_pool_candidates_seen: int = 0
-    side_pool_routes_retained: int = 0
-    side_pool_routes_rejected_by_budget: int = 0
-    join_pairs_key_compatible: int = 0
-    join_pairs_after_bitset_filters: int = 0
-    join_lower_envelope_rejects: int = 0
-    join_bucket_lower_envelope_rejects: int = 0
-    join_subbucket_lower_envelope_rejects: int = 0
-    join_pair_lower_envelope_rejects: int = 0
-    join_queue_pushes: int = 0
-    join_queue_pops: int = 0
-    join_generator_queue_pushes: int = 0
-    join_generator_queue_pops: int = 0
-    join_generator_splits: int = 0
-    join_materialized_pairs: int = 0
-    join_exact_rc_evals: int = 0
-    join_exact_rc_time_seconds: float = 0.0
-    interface_cache_hits: int = 0
-    interface_cache_misses: int = 0
-    suffix_profile_cache_hits: int = 0
-    suffix_profile_cache_misses: int = 0
-    interface_profile_cache_hits: int = 0
-    interface_profile_cache_misses: int = 0
-    pricing_status: str = "unspecified"
-    productive_calls: int = 0
-    certification_calls: int = 0
-    negative_routes_verified: int = 0
-    negative_routes_inserted: int = 0
-    pricing_worker_backend: str = "serial"
-    process_cpu_time_seconds: float = 0.0
-    cpu_core_equivalent: float = 0.0
-    worker_id: int | None = None
-    source_neighbor_count: int = 0
-    source_neighbor_block_sizes: tuple[int, ...] = tuple()
-    first_hit_worker_id: int | None = None
-    first_hit_exits: int = 0
-    interrupted_worker_calls: int = 0
-    certification_worker_calls: int = 0
-    productive_worker_calls: int = 0
-    per_worker_elapsed_seconds: tuple[tuple[int, float], ...] = tuple()
-    per_worker_cpu_time_seconds: tuple[tuple[int, float], ...] = tuple()
-    per_worker_labels_generated: tuple[tuple[int, int], ...] = tuple()
-    per_worker_labels_dominated: tuple[tuple[int, int], ...] = tuple()
-    per_worker_labels_pruned: tuple[tuple[int, int], ...] = tuple()
-    per_worker_completed_labels: tuple[tuple[int, int], ...] = tuple()
-    per_worker_verified_negative_routes: tuple[tuple[int, int], ...] = tuple()
-    pricing_pool_startup_time_seconds: float = 0.0
-    pricing_pool_startup_count: int = 0
-    pricing_pool_reused_calls: int = 0
-    pricing_pool_shutdown_time_seconds: float = 0.0
-    pricing_task_submission_time_seconds: float = 0.0
-    pricing_worker_payload_count: int = 0
-    pricing_worker_response_count: int = 0
-    pricing_candidate_paths_before_merge: int = 0
-    pricing_candidate_paths_after_merge: int = 0
-    pricing_decoded_routes_in_main: int = 0
-    pricing_verified_routes_in_main: int = 0
-    pricing_batch_target: int = 0
-    pricing_returned_batch_size: int = 0
-    pricing_first_hit_enabled: bool = False
-    pricing_stale_response_rejections: int = 0
-    pricing_worker_cpu_time_seconds: float = 0.0
-    pricing_main_process_cpu_time_seconds: float = 0.0
-    pricing_main_merge_time_seconds: float = 0.0
-    core_subspace_count: int = 0
-    core_empty_blocks: int = 0
-    core_best_reduced_costs: tuple[tuple[int, float], ...] = tuple()
-    min_core_reduced_cost: float | None = None
-    productive_first_hit_core_id: int | None = None
-    productive_interrupted_cores: int = 0
-    certification_core_closed_count: int = 0
-    certification_core_unresolved_count: int = 0
-    root_closed_by_all_cores: bool = False
-    stale_worker_results_discarded: int = 0
-    number_of_productive_restarts: int = 0
-    number_of_certification_calls: int = 0
-    number_of_certification_failures_due_to_negative_column: int = 0
-    number_of_certification_timeouts_unresolved: int = 0
-    productive_slice_seconds: float = 0.0
-    productive_slice_deadline_used: bool = False
-    productive_time_limit_with_columns: int = 0
-    productive_time_limit_no_columns: int = 0
-    adaptive_slice_seconds: float = 0.0
-    productive_yield_window_rate: float = 0.0
-    stabilized_dual_enabled: bool = False
-    stabilized_candidates_returned: int = 0
-    true_dual_rejected_candidates: int = 0
-    mean_worker_rc_minus_true_rc: float = 0.0
-    max_abs_worker_true_rc_discrepancy: float = 0.0
-    prefix_task_depth: int = 1
-    source_neighbor_task_count: int = 0
-    source_neighbor_task_sizes: tuple[int, ...] = tuple()
-    local_worker_candidate_quota: int = 0
-    diversity_quota: int = 0
-    diversity_selected_routes: int = 0
-    diversity_selected_customers: int = 0
-    verified_candidates_by_source_neighbor: tuple[tuple[str, int], ...] = tuple()
-    selected_candidates_by_source_neighbor: tuple[tuple[str, int], ...] = tuple()
-    pricing_initial_source_neighbors: int = 0
-    pricing_initial_task_count: int = 0
-    pricing_initial_block_loads: tuple[float, ...] = tuple()
-    pricing_initial_load_imbalance_max_mean: float = 0.0
-    pricing_empty_initial_blocks: int = 0
-    pricing_idle_worker_seconds: float = 0.0
-    pricing_dynamic_split_candidates: int = 0
-    pricing_dynamic_splits_performed: int = 0
-    pricing_dynamic_split_rejected_close_to_closure: int = 0
-    pricing_dynamic_split_rejected_small_queue: int = 0
-    pricing_dynamic_split_rejected_short_elapsed: int = 0
-    pricing_dynamic_split_rejected_low_workload: int = 0
-    pricing_dynamic_child_tasks_created: int = 0
-    pricing_labels_transferred_to_idle_workers: int = 0
-    pricing_split_overhead_time: float = 0.0
-    pricing_leaf_tasks_closed: int = 0
-    pricing_leaf_tasks_stale_discarded: int = 0
-    pricing_best_active_task_gap: float = 0.0
-    pricing_open_labels_by_task_max: int = 0
-    worker_busy_time_by_id: tuple[tuple[int, float], ...] = tuple()
-    worker_idle_time_by_id: tuple[tuple[int, float], ...] = tuple()
-    worker_task_count_by_id: tuple[tuple[int, int], ...] = tuple()
-    epoch_invalidations_due_to_route_insert: int = 0
-    epoch_invalidations_due_to_dual_change: int = 0
-    epoch_invalidations_due_to_sr_change: int = 0
-    epoch_invalidations_due_to_branch_change: int = 0
-    epoch_invalidations_due_to_residual_change: int = 0
-    stale_task_reuse_attempts: int = 0
-    stale_task_reuse_blocked: int = 0
-    cross_task_dominance_attempts: int = 0
-    cross_task_dominance_blocked: int = 0
-    extensions_attempted: int = 0
-    extensions_rejected_by_deadline: int = 0
-    deadline_reachability_removed: int = 0
-    reward_set_size_before_deadline: int = 0
-    reward_set_size_after_deadline: int = 0
-    deadline_reward_bound_calls: int = 0
-    deadline_dominance_prefilter_skips: int = 0
-    routes_rejected_by_deadline_in_master: int = 0
-    forward_dominance_tests: int = 0
-    forward_same_node_dominance_tests: int = 0
-    forward_physical_location_dominance_tests: int = 0
-    forward_physical_location_dominance_rejections: int = 0
-    forward_return_time_credit_checks: int = 0
-    forward_return_time_credit_checks_skipped: int = 0
-    forward_branch_language_failures: int = 0
-    forward_mask_scalar_prefilter_failures: int = 0
-    dom_gate_pairs_seen: int = 0
-    dom_gate_mask_failures: int = 0
-    dom_gate_scalar_failures: int = 0
-    dom_gate_branch_failures: int = 0
-    dom_gate_deadline_failures: int = 0
     labels_dominated_same_node: int = 0
     labels_dominated_physical: int = 0
     dom_prefilter_pairs: int = 0
@@ -415,13 +261,40 @@ class PricingDiagnostics:
     dom_full_rejections: int = 0
     physical_location_full_tests: int = 0
     physical_location_rejections: int = 0
-
+    balanced_process_dynamic: bool = False
+    initial_block_scores: tuple[float, ...] = tuple()
+    initial_load_imbalance_max_mean: float = 0.0
+    per_worker_busy_seconds: tuple[tuple[int, float], ...] = tuple()
+    per_worker_idle_seconds: tuple[tuple[int, float], ...] = tuple()
+    per_worker_task_counts: tuple[tuple[int, int], ...] = tuple()
+    idle_work_requests: int = 0
+    dynamic_split_candidates: int = 0
+    dynamic_splits_performed: int = 0
+    dynamic_split_rejected_near_closure: int = 0
+    dynamic_split_rejected_small_frontier: int = 0
+    dynamic_split_rejected_elapsed: int = 0
+    dynamic_split_rejected_low_work: int = 0
+    dynamic_child_tasks_created: int = 0
+    dynamic_labels_transferred: int = 0
+    dynamic_bytes_transferred: int = 0
+    dynamic_split_control_seconds: float = 0.0
+    leaf_tasks_created: int = 0
+    leaf_tasks_closed: int = 0
+    pending_transfer_peak: int = 0
+    stale_worker_results_discarded: int = 0
+    pricing_epoch_invalidations: int = 0
+    productive_first_hit_worker: int | None = None
+    candidate_verification_seconds: float = 0.0
+    master_control_seconds: float = 0.0
+    candidate_checkpoints: int = 0
+    candidate_worker_resumptions: int = 0
+    global_verified_candidates: int = 0
+    global_batch_limit_cancellations: int = 0
 
 class PricingTimeLimitReached(RuntimeError):
     def __init__(self, diagnostics: PricingDiagnostics) -> None:
         super().__init__("pricing label search reached the global time limit before exact completion")
         self.diagnostics = diagnostics
-
 
 def _validate_inequality_dual_signs(duals: PricingDuals, tolerance: float = 1e-9) -> None:
     sign_tolerance = max(tolerance, 1e-9)
@@ -432,7 +305,6 @@ def _validate_inequality_dual_signs(duals: PricingDuals, tolerance: float = 1e-9
             f"(kappa={duals.kappa}, positive_sr={positive_sr})"
         )
 
-
 @dataclass(frozen=True)
 class _RewardItem:
     customer: str
@@ -440,16 +312,15 @@ class _RewardItem:
     reward: float
     density: float
 
-
 @dataclass(frozen=True)
 class _PricingBounds:
     reward_items_by_location: dict[str, tuple[_RewardItem, ...]]
-
 
 @dataclass
 class _DeadlinePricingCounters:
     extensions_attempted: int = 0
     extensions_rejected_by_deadline: int = 0
+    together_branch_reachability_pruned: int = 0
     deadline_reachability_removed: int = 0
     reward_set_size_before_deadline: int = 0
     reward_set_size_after_deadline: int = 0
@@ -463,6 +334,7 @@ class _DeadlinePricingCounters:
     forward_return_time_credit_checks: int = 0
     forward_return_time_credit_checks_skipped: int = 0
     forward_branch_language_failures: int = 0
+    forward_branch_interface_failures: int = 0
     forward_mask_scalar_prefilter_failures: int = 0
     dom_gate_pairs_seen: int = 0
     dom_gate_mask_failures: int = 0
@@ -487,9 +359,6 @@ class _DeadlinePricingCounters:
     dom_frontier_keys_skipped_by_return_credit: int = 0
     frontier_cells_created: int = 0
     frontier_cells_split: int = 0
-    frontier_cell_lb_min_at_stop: float | None = None
-    frontier_cell_lb_closed: int = 0
-    frontier_cell_lb_invalidations: int = 0
     mask_trie_subset_queries: int = 0
     mask_trie_superset_queries: int = 0
     mask_trie_returned_items: int = 0
@@ -502,23 +371,12 @@ class _DeadlinePricingCounters:
     cell_pairs_considered: int = 0
     cell_pairs_rejected_by_mask: int = 0
     cell_pairs_rejected_by_envelope: int = 0
-    cell_pairs_rejected_by_lb: int = 0
-    cell_pairs_rejected_by_closure_lb: int = 0
     label_pairs_materialized: int = 0
-    labels_certified_by_cell_lb: int = 0
     full_same_node_tests: int = 0
     full_physical_location_tests: int = 0
     labels_deleted_same_node: int = 0
     labels_deleted_physical_location: int = 0
-    closure_queue_pushes: int = 0
-    closure_queue_pops: int = 0
-    closure_queue_min_key_at_stop: float | None = None
-    certification_tasks_exhausted_by_cell_lb: int = 0
-    certification_tasks_closed_by_cell_lb: int = 0
     certification_tasks_exhausted_by_label_search: int = 0
-    resource_reward_bound_calls: int = 0
-    resource_reward_bound_time: float = 0.0
-    resource_reward_bound_fallbacks: int = 0
     pricing_mode_productive_or_certification: str = "productive"
     physdom_cell_pairs_considered: int = 0
     physdom_cell_pairs_rejected_by_mask: int = 0
@@ -553,8 +411,6 @@ class _DeadlinePricingCounters:
     max_frontier_cell_size: int = 512
     max_frontier_pair_product: int = 2000
     max_frontier_split_depth: int = 6
-    enable_resource_restricted_closure_bound: bool = True
-
 
 @dataclass(frozen=True)
 class _Label:
@@ -578,6 +434,31 @@ class _Label:
     branch_state: "_BranchState | None" = None
 
 
+@dataclass
+class _DominanceExtensionContext:
+    objective: ObjectiveData
+    residual_customers: frozenset[str]
+    restrictions: BranchRestrictions
+    feasible_first_successors: dict[_Label, tuple[str, ...]] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class _ForwardSearchCheckpoint:
+    open_labels: tuple[_Label, ...]
+    completion_lower_bound: float
+    best_path: tuple[str, ...] | None
+    best_reduced_cost: float
+    result: PricingResult
+
+
+@dataclass(frozen=True)
+class _ForwardCandidateCheckpoint:
+    open_labels: tuple[_Label, ...]
+    completion_lower_bound: float
+    best_path: tuple[str, ...] | None
+    best_reduced_cost: float
+    result: PricingResult
+
 @dataclass(frozen=True)
 class _ForwardDomKey:
     endpoint: str
@@ -585,7 +466,6 @@ class _ForwardDomKey:
     active_pad: str | None
     block_position: int
     branch_state_key: "_BranchState"
-
 
 @dataclass(frozen=True)
 class _ForwardFrontierKey:
@@ -600,13 +480,11 @@ class _ForwardFrontierKey:
     time_bin: int
     wait_bin: int
 
-
 @dataclass
 class _MaskTrieNode:
     zero: "_MaskTrieNode | None" = None
     one: "_MaskTrieNode | None" = None
     payloads: list[_ForwardFrontierKey] = field(default_factory=list)
-
 
 class MaskContainmentTrie:
     def __init__(self, bit_count: int) -> None:
@@ -662,11 +540,9 @@ class MaskContainmentTrie:
         visit(self.root, 0)
         return tuple(out)
 
-
 @dataclass
 class _ForwardFrontierCell:
     labels: list[_Label] = field(default_factory=list)
-    lower_bounds: list[float] = field(default_factory=list)
     min_payload: float = float("inf")
     max_payload: float = float("-inf")
     min_active_drone_count: int = 10**9
@@ -677,13 +553,10 @@ class _ForwardFrontierCell:
     max_wait: float = float("-inf")
     min_reduced_cost: float = float("inf")
     max_reduced_cost: float = float("-inf")
-    cell_lb: float = float("inf")
-    max_cell_lb: float = float("-inf")
 
-    def add(self, label: _Label, lower_bound: float) -> None:
+    def add(self, label: _Label) -> None:
         resource_time = _frontier_time_resource(label)
         self.labels.append(label)
-        self.lower_bounds.append(lower_bound)
         self.min_payload = min(self.min_payload, label.truck_load)
         self.max_payload = max(self.max_payload, label.truck_load)
         self.min_active_drone_count = min(self.min_active_drone_count, label.block_count)
@@ -694,9 +567,6 @@ class _ForwardFrontierCell:
         self.max_wait = max(self.max_wait, label.active_wait)
         self.min_reduced_cost = min(self.min_reduced_cost, label.reduced_cost)
         self.max_reduced_cost = max(self.max_reduced_cost, label.reduced_cost)
-        self.cell_lb = min(self.cell_lb, lower_bound)
-        self.max_cell_lb = max(self.max_cell_lb, lower_bound)
-
 
 @dataclass
 class _ForwardFrontierLocationIndex:
@@ -713,14 +583,17 @@ class _ForwardFrontierLocationIndex:
     def key_count(self) -> int:
         return len(self.buckets)
 
-
 @dataclass(frozen=True)
 class _WorkerPricingTask:
     call_id: int
     dual_id: int
     epoch: PricingEpoch
     worker_id: int
-    source_neighbor_block: tuple[str, ...]
+    task_id: int
+    generation: int
+    source_prefixes: tuple[tuple[str, ...], ...]
+    task_root_prefix: tuple[str, ...]
+    initial_open_labels: tuple[_Label, ...] | None
     residual_customers: frozenset[str]
     restrictions: BranchRestrictions
     duals: PricingDuals
@@ -733,34 +606,6 @@ class _WorkerPricingTask:
     deadline: float | None
     known_signature_costs: dict[RouteCoefficientSignature, float]
     pricing_mode: str
-    pricing_yield_ratio: float
-    stop_event: object | None
-    pricing_worker_backend: str
-    source_neighbor_count: int
-    source_neighbor_block_sizes: tuple[int, ...]
-    source_neighbor_block_loads: tuple[float, ...]
-    source_neighbor_load_imbalance: float
-    source_neighbor_empty_initial_blocks: int
-    pricing_initial_task_count: int
-    dynamic_split_candidates: int
-    dynamic_splits_performed: int
-    dynamic_split_rejected_close_to_closure: int
-    dynamic_split_rejected_small_queue: int
-    dynamic_split_rejected_short_elapsed: int
-    dynamic_split_rejected_low_workload: int
-    dynamic_child_tasks_created: int
-    labels_transferred_to_idle_workers: int
-    split_overhead_time: float
-    parallel_workers: int
-    source_neighbor_task_count: int
-    source_neighbor_task_sizes: tuple[int, ...]
-    local_worker_candidate_quota: int
-    source_prefixes: tuple[tuple[str, ...], ...] = tuple()
-    max_frontier_cell_size: int = 512
-    max_frontier_pair_product: int = 2000
-    max_frontier_split_depth: int = 6
-    enable_resource_restricted_closure_bound: bool = True
-
 
 @dataclass(frozen=True)
 class _WorkerPricingResult:
@@ -768,84 +613,344 @@ class _WorkerPricingResult:
     dual_id: int
     epoch: PricingEpoch
     worker_id: int
+    task_id: int
+    generation: int
     route_paths: tuple[tuple[str, ...], ...]
     reduced_costs: tuple[float, ...]
     best_path: tuple[str, ...] | None
     best_reduced_cost: float | None
     diagnostics: PricingDiagnostics
 
+@dataclass(frozen=True)
+class _ProcessWorkerCommand:
+    kind: str
+    task: _WorkerPricingTask | None = None
+    epoch: PricingEpoch | None = None
+    task_id: int | None = None
+    generation: int | None = None
+    child_limit: int = 0
 
 @dataclass(frozen=True)
-class _KCoreBalanceConfig:
-    enabled: bool = True
-    alpha_reachable_customers: float = 1.0
-    alpha_out_degree: float = 0.25
-    alpha_drone_pads: float = 0.5
-    alpha_deadline_customers: float = 0.5
+class _ProcessWorkerEvent:
+    kind: str
+    worker_id: int
+    epoch: PricingEpoch | None = None
+    task_id: int | None = None
+    generation: int | None = None
+    result: _WorkerPricingResult | None = None
+    open_label_count: int = 0
+    completion_lower_bound: float | None = None
+    closure_gap: float | None = None
+    remaining_work: int = 0
+    task_elapsed_seconds: float = 0.0
+    child_groups: tuple[tuple[tuple[str, ...], tuple[_Label, ...]], ...] = tuple()
+    retained_label_count: int = 0
+    process_id: int = 0
 
-
-@dataclass(frozen=True)
-class _DynamicRefinementConfig:
-    enabled: bool = True
-    split_label_threshold: int = 2_000
-    split_gap_multiplier: float = 10.0
-    split_time_threshold: float = 5.0
-    split_work_threshold: float = 2_000.0
-    refinement_depth: int = 2
-    checkpoint_extension_period: int = 5_000
-
-
-@dataclass(frozen=True)
-class _SourceNeighborPartition:
-    blocks: tuple[tuple[str, ...], ...]
-    loads: tuple[float, ...]
-    scores: tuple[tuple[str, float], ...]
-
-    @property
-    def imbalance_max_mean(self) -> float:
-        if not self.loads:
-            return 0.0
-        mean_load = sum(self.loads) / len(self.loads)
-        if mean_load <= 0.0:
-            return 0.0
-        return max(self.loads) / mean_load
-
+@dataclass
+class _ProcessLocalTaskState:
+    task: _WorkerPricingTask
+    open_labels: tuple[_Label, ...] | None
+    best_path: tuple[str, ...] | None
+    best_reduced_cost: float
+    started_at: float
+    initialized: bool = False
+    recent_extensions: int = 0
+    recent_dominance_tests: int = 0
 
 @dataclass(frozen=True)
 class _PricingTaskPlan:
-    source_neighbor_blocks: tuple[tuple[str, ...], ...]
-    source_prefix_blocks: tuple[tuple[tuple[str, ...], ...], ...]
-    task_size_units: tuple[int, ...]
-    initial_block_sizes: tuple[int, ...]
-    initial_block_loads: tuple[float, ...]
-    initial_load_imbalance: float
-    initial_empty_blocks: int
-    dynamic_split_candidates: int = 0
-    dynamic_splits_performed: int = 0
-    dynamic_split_rejected_close_to_closure: int = 0
-    dynamic_split_rejected_small_queue: int = 0
-    dynamic_split_rejected_short_elapsed: int = 0
-    dynamic_split_rejected_low_workload: int = 0
-    dynamic_child_tasks_created: int = 0
-    labels_transferred_to_idle_workers: int = 0
-    split_overhead_time: float = 0.0
+    prefixes: tuple[tuple[str, ...], ...]
+    source_neighbors: tuple[str, ...]
 
+@dataclass(frozen=True)
+class _BalancedTaskPlan:
+    source_neighbors: tuple[str, ...]
+    blocks: tuple[tuple[str, ...], ...]
+    block_scores: tuple[float, ...]
+    successor_scores: tuple[tuple[str, float], ...]
 
-_PROCESS_WORKER_GRAPH: TransformedGraph | None = None
-_PROCESS_WORKER_OBJECTIVE: ObjectiveData | None = None
+def _worker_pricing_result(
+    task: _WorkerPricingTask,
+    result: PricingResult,
+    worker_id: int,
+    cpu_seconds: float,
+) -> _WorkerPricingResult:
+    result = _with_runtime_diagnostics(
+        result,
+        pricing_worker_backend="worker_process",
+        process_cpu_time_seconds=cpu_seconds,
+        worker_id=worker_id,
+        source_neighbor_count=len({prefix[0] for prefix in task.source_prefixes if prefix}),
+        source_neighbor_block_sizes=(len(task.source_prefixes),),
+        parallel_workers=1,
+        source_neighbor_task_count=1,
+        source_neighbor_task_sizes=(len(task.source_prefixes),),
+    )
+    return _WorkerPricingResult(
+        call_id=task.call_id,
+        dual_id=task.dual_id,
+        epoch=task.epoch,
+        worker_id=worker_id,
+        task_id=task.task_id,
+        generation=task.generation,
+        route_paths=tuple(route.path for route in result.routes),
+        reduced_costs=result.reduced_costs,
+        best_path=None if result.best_route is None else result.best_route.path,
+        best_reduced_cost=result.best_reduced_cost,
+        diagnostics=result.diagnostics,
+    )
 
+def _run_balanced_process_worker(
+    worker_id: int,
+    command_queue,
+    result_queue,
+    graph: TransformedGraph,
+    objective: ObjectiveData,
+    scheduler: PricingSchedulerConfig,
+) -> None:
+    result_queue.put(_ProcessWorkerEvent(kind="ready", worker_id=worker_id, process_id=os.getpid()))
+    state: _ProcessLocalTaskState | None = None
+    while True:
+        if state is None:
+            command: _ProcessWorkerCommand = command_queue.get()
+            if command.kind == "shutdown":
+                result_queue.put(_ProcessWorkerEvent(kind="shutdown", worker_id=worker_id, process_id=os.getpid()))
+                return
+            if command.kind == "cancel":
+                result_queue.put(
+                    _ProcessWorkerEvent(
+                        kind="cancelled",
+                        worker_id=worker_id,
+                        epoch=command.epoch,
+                        task_id=command.task_id,
+                        generation=command.generation,
+                        process_id=os.getpid(),
+                    )
+                )
+                continue
+            if command.kind == "split":
+                result_queue.put(
+                    _ProcessWorkerEvent(
+                        kind="split_rejected",
+                        worker_id=worker_id,
+                        epoch=command.epoch,
+                        task_id=command.task_id,
+                        generation=command.generation,
+                        process_id=os.getpid(),
+                    )
+                )
+                continue
+            if command.kind != "start" or command.task is None:
+                raise RuntimeError("idle pricing worker received an invalid command")
+            task = command.task
+            state = _ProcessLocalTaskState(
+                task=task,
+                open_labels=task.initial_open_labels,
+                best_path=None,
+                best_reduced_cost=float("inf"),
+                started_at=time.time(),
+                initialized=task.initial_open_labels is not None,
+            )
+            result_queue.put(
+                _ProcessWorkerEvent(
+                    kind="started",
+                    worker_id=worker_id,
+                    epoch=task.epoch,
+                    task_id=task.task_id,
+                    generation=task.generation,
+                    process_id=os.getpid(),
+                )
+            )
 
-def _initialize_source_neighbor_process_worker(graph: TransformedGraph, objective: ObjectiveData) -> None:
-    global _PROCESS_WORKER_GRAPH, _PROCESS_WORKER_OBJECTIVE
-    _PROCESS_WORKER_GRAPH = graph
-    _PROCESS_WORKER_OBJECTIVE = objective
+        task = state.task
+        cpu_start = time.process_time()
+        try:
+            outcome = _price_route_forward_only(
+                graph=graph,
+                objective=objective,
+                residual_customers=task.residual_customers,
+                restrictions=task.restrictions,
+                duals=task.duals,
+                next_route_id=task.next_route_id,
+                farkas=task.farkas,
+                pricing_tolerance=task.pricing_tolerance,
+                use_standard_acceleration=task.use_standard_acceleration,
+                stop_at_first_negative=task.stop_at_first_negative,
+                batch_size=task.batch_size,
+                deadline=task.deadline,
+                existing_routes=None,
+                existing_column_paths=None,
+                pricing_mode=task.pricing_mode,
+                source_neighbor_block=tuple(sorted({prefix[0] for prefix in task.source_prefixes if prefix})),
+                worker_id=worker_id,
+                known_signature_costs_snapshot=task.known_signature_costs,
+                source_prefixes=tuple() if state.initialized else task.source_prefixes,
+                initial_open_labels=state.open_labels if state.initialized else None,
+                extension_budget=scheduler.checkpoint_extension_period,
+                prior_best_path=state.best_path,
+                prior_best_reduced_cost=state.best_reduced_cost,
+            )
+        except PricingTimeLimitReached as exc:
+            result = PricingResult(tuple(), tuple(), None, exc.diagnostics.best_reduced_cost, exc.diagnostics)
+            worker_result = _worker_pricing_result(task, result, worker_id, time.process_time() - cpu_start)
+            result_queue.put(
+                _ProcessWorkerEvent(
+                    kind="time_limit",
+                    worker_id=worker_id,
+                    epoch=task.epoch,
+                    task_id=task.task_id,
+                    generation=task.generation,
+                    result=worker_result,
+                    task_elapsed_seconds=time.time() - state.started_at,
+                    process_id=os.getpid(),
+                )
+            )
+            state = None
+            continue
 
+        cpu_seconds = time.process_time() - cpu_start
+        if isinstance(outcome, (_ForwardSearchCheckpoint, _ForwardCandidateCheckpoint)):
+            state.open_labels = outcome.open_labels
+            state.best_path = outcome.best_path
+            state.best_reduced_cost = outcome.best_reduced_cost
+            state.initialized = True
+            state.recent_extensions = outcome.result.diagnostics.extensions_attempted
+            state.recent_dominance_tests = outcome.result.diagnostics.forward_dominance_tests
+            if isinstance(outcome, _ForwardCandidateCheckpoint):
+                known_signature_costs = dict(state.task.known_signature_costs)
+                signature_cache = RouteSignatureCache()
+                active_sr = tuple(sorted(task.duals.nu))
+                for route in outcome.result.routes:
+                    signature = route_signature(
+                        route,
+                        graph,
+                        task.residual_customers,
+                        signature_cache,
+                        active_sr,
+                        len(active_sr),
+                    )
+                    coefficient_signature = route_coefficient_signature(signature)
+                    known_signature_costs[coefficient_signature] = min(
+                        known_signature_costs.get(coefficient_signature, float("inf")),
+                        route.cost,
+                    )
+                state.task = replace(state.task, known_signature_costs=known_signature_costs)
+            worker_result = _worker_pricing_result(task, outcome.result, worker_id, cpu_seconds)
+            closure_gap = _task_closure_gap(outcome.completion_lower_bound)
+            remaining_work = len(outcome.open_labels) + state.recent_extensions + state.recent_dominance_tests
+            result_queue.put(
+                _ProcessWorkerEvent(
+                    kind=(
+                        "candidate_checkpoint"
+                        if isinstance(outcome, _ForwardCandidateCheckpoint)
+                        else "checkpoint"
+                    ),
+                    worker_id=worker_id,
+                    epoch=task.epoch,
+                    task_id=task.task_id,
+                    generation=task.generation,
+                    result=worker_result,
+                    open_label_count=len(outcome.open_labels),
+                    completion_lower_bound=outcome.completion_lower_bound,
+                    closure_gap=closure_gap,
+                    remaining_work=remaining_work,
+                    task_elapsed_seconds=time.time() - state.started_at,
+                    process_id=os.getpid(),
+                )
+            )
+            commands: list[_ProcessWorkerCommand] = []
+            if isinstance(outcome, _ForwardCandidateCheckpoint):
+                while True:
+                    command = command_queue.get()
+                    if command.kind == "split":
+                        result_queue.put(
+                            _ProcessWorkerEvent(
+                                kind="split_rejected",
+                                worker_id=worker_id,
+                                epoch=task.epoch,
+                                task_id=task.task_id,
+                                generation=task.generation,
+                                process_id=os.getpid(),
+                            )
+                        )
+                        continue
+                    if command.kind not in {"resume", "cancel"}:
+                        raise RuntimeError("candidate-paused pricing worker received an invalid command")
+                    commands.append(command)
+                    break
+            else:
+                while True:
+                    try:
+                        commands.append(command_queue.get_nowait())
+                    except Empty:
+                        break
+            cancel = next((item for item in commands if item.kind == "cancel"), None)
+            if cancel is not None:
+                result_queue.put(
+                    _ProcessWorkerEvent(
+                        kind="cancelled",
+                        worker_id=worker_id,
+                        epoch=task.epoch,
+                        task_id=task.task_id,
+                        generation=task.generation,
+                        process_id=os.getpid(),
+                    )
+                )
+                state = None
+                continue
+            if any(item.kind == "resume" for item in commands):
+                continue
+            split = next((item for item in commands if item.kind == "split"), None)
+            if split is not None:
+                retained, children = _split_open_label_frontier(
+                    state.open_labels,
+                    task_root_prefix=task.task_root_prefix,
+                    refinement_depth=scheduler.refinement_depth,
+                    child_limit=split.child_limit,
+                )
+                if not children:
+                    result_queue.put(
+                        _ProcessWorkerEvent(
+                            kind="split_rejected",
+                            worker_id=worker_id,
+                            epoch=task.epoch,
+                            task_id=task.task_id,
+                            generation=task.generation,
+                            process_id=os.getpid(),
+                        )
+                    )
+                else:
+                    state.open_labels = retained
+                    result_queue.put(
+                        _ProcessWorkerEvent(
+                            kind="split_offer",
+                            worker_id=worker_id,
+                            epoch=task.epoch,
+                            task_id=task.task_id,
+                            generation=task.generation,
+                            child_groups=children,
+                            retained_label_count=len(retained),
+                            process_id=os.getpid(),
+                        )
+                    )
+            continue
 
-def _process_worker_ready() -> int:
-    if _PROCESS_WORKER_GRAPH is None or _PROCESS_WORKER_OBJECTIVE is None:
-        raise RuntimeError("persistent pricing process worker was not initialized")
-    return 1
-
+        worker_result = _worker_pricing_result(task, outcome, worker_id, cpu_seconds)
+        event_kind = "candidate" if outcome.routes else "closed"
+        result_queue.put(
+            _ProcessWorkerEvent(
+                kind=event_kind,
+                worker_id=worker_id,
+                epoch=task.epoch,
+                task_id=task.task_id,
+                generation=task.generation,
+                result=worker_result,
+                task_elapsed_seconds=time.time() - state.started_at,
+                process_id=os.getpid(),
+            )
+        )
+        state = None
 
 class SourceNeighborPricingPool:
     def __init__(
@@ -853,49 +958,62 @@ class SourceNeighborPricingPool:
         graph: TransformedGraph,
         objective: ObjectiveData,
         parallel_workers: int,
-        source_neighbor_task_size: int = 1,
-        balance_config: _KCoreBalanceConfig | None = None,
-        refinement_config: _DynamicRefinementConfig | None = None,
+        scheduler: PricingSchedulerConfig | None = None,
     ) -> None:
         if parallel_workers <= 0:
             raise ValueError("parallel_workers must be positive")
-        if source_neighbor_task_size <= 0:
-            raise ValueError("source_neighbor_task_size must be positive")
         self.graph = graph
         self.objective = objective
-        self.source_neighbors = _admissible_source_neighbors(graph)
         self.parallel_workers = parallel_workers
-        self.source_neighbor_task_size = source_neighbor_task_size
-        self.balance_config = balance_config or _KCoreBalanceConfig()
-        self.refinement_config = refinement_config or _DynamicRefinementConfig()
+        self.scheduler = scheduler or PricingSchedulerConfig()
         self.call_counter = count(1)
         self.startup_count = 0
         self.reused_calls = 0
         self.shutdown_time_seconds = 0.0
         self.shutdown_count = 0
-        self._manager = multiprocessing.Manager()
         startup = time.time()
-        self._executor = ProcessPoolExecutor(
-            max_workers=self.parallel_workers,
-            initializer=_initialize_source_neighbor_process_worker,
-            initargs=(graph, objective),
-        )
-        ready = [self._executor.submit(_process_worker_ready) for _ in range(self.parallel_workers)]
-        for future in ready:
-            future.result()
+        context = mp.get_context("spawn")
+        self._result_queue = context.Queue()
+        self._command_queues = [context.Queue() for _ in range(self.parallel_workers)]
+        self._processes = [
+            context.Process(
+                target=_run_balanced_process_worker,
+                args=(worker_id, self._command_queues[worker_id], self._result_queue, graph, objective, self.scheduler),
+                name=f"thvrpd-pricing-{worker_id}",
+            )
+            for worker_id in range(self.parallel_workers)
+        ]
+        for process in self._processes:
+            process.start()
+        ready_workers: set[int] = set()
+        while len(ready_workers) < self.parallel_workers:
+            try:
+                event: _ProcessWorkerEvent = self._result_queue.get(timeout=0.5)
+            except Empty:
+                failed = [process for process in self._processes if process.exitcode not in {None, 0}]
+                if failed:
+                    raise RuntimeError(f"pricing worker process failed: {[process.exitcode for process in failed]}")
+                continue
+            if event.kind != "ready":
+                raise RuntimeError("pricing process emitted work before readiness")
+            ready_workers.add(event.worker_id)
         self.startup_time_seconds = time.time() - startup
         self.startup_count = 1
         self._closed = False
-
-    def stop_event(self):
-        return self._manager.Event()
 
     def shutdown(self) -> None:
         if self._closed:
             return
         start = time.time()
-        self._executor.shutdown(wait=True)
-        self._manager.shutdown()
+        for command_queue in self._command_queues:
+            command_queue.put(_ProcessWorkerCommand(kind="shutdown"))
+        shutdown_workers: set[int] = set()
+        while len(shutdown_workers) < self.parallel_workers:
+            event: _ProcessWorkerEvent = self._result_queue.get()
+            if event.kind == "shutdown":
+                shutdown_workers.add(event.worker_id)
+        for process in self._processes:
+            process.join()
         self.shutdown_time_seconds += time.time() - start
         self.shutdown_count += 1
         self._closed = True
@@ -916,42 +1034,21 @@ class SourceNeighborPricingPool:
         existing_routes: dict[tuple[str, ...], Route] | None,
         existing_column_paths: set[tuple[str, ...]] | None,
         pricing_mode: str,
-        pricing_yield_ratio: float,
-        productive_candidate_multiplier: float = 1.5,
-        pricing_diversity_batch_fraction: float = 0.5,
-        source_neighbor_task_size: int | None = None,
-        productive_slice_seconds: float = 0.0,
-        productive_slice_deadline_used: bool = False,
-        adaptive_slice_seconds: float = 0.0,
-        productive_yield_window_rate: float = 0.0,
-        search_duals: PricingDuals | None = None,
-        prefix_task_depth: int = 1,
-        enable_mask_trie_frontier: bool = True,
-        max_frontier_cell_size: int = 512,
-        max_frontier_pair_product: int = 2000,
-        max_frontier_split_depth: int = 6,
-        enable_resource_restricted_closure_bound: bool = True,
-        resource_bound_method: str = "greedy",
+        epoch_context: PricingEpochContext | None = None,
     ) -> PricingResult:
         if self._closed:
             raise RuntimeError("persistent pricing process pool is closed")
-        if productive_candidate_multiplier <= 0:
-            raise ValueError("productive_candidate_multiplier must be positive")
-        if not 0.0 <= pricing_diversity_batch_fraction <= 1.0:
-            raise ValueError("pricing_diversity_batch_fraction must be in [0, 1]")
-        call_start_time = time.time()
         call_id = next(self.call_counter)
         dual_id = call_id
-        worker_duals = search_duals or duals
         pricing_epoch = _pricing_epoch(
             self.objective,
             residual_customers,
             restrictions,
-            worker_duals,
+            duals,
             existing_routes,
             existing_column_paths,
+            epoch_context,
         )
-        stabilized_dual_enabled = search_duals is not None
         self.reused_calls += 1
         known_signature_costs = _known_signature_costs(
             existing_routes,
@@ -960,144 +1057,324 @@ class SourceNeighborPricingPool:
             residual_customers,
             RouteSignatureCache(),
         )
-        first_hit_enabled = pricing_mode != "closure" and (stop_at_first_negative or batch_size == 1)
-        task_size = self.source_neighbor_task_size if source_neighbor_task_size is None else source_neighbor_task_size
-        if task_size <= 0:
-            raise ValueError("source neighbor task size must be positive")
-        task_plan = _build_balanced_dynamic_task_plan(
+        task_plan = _balanced_source_neighbor_plan(
             self.graph,
             self.objective,
             residual_customers,
             restrictions,
-            self.source_neighbors,
+            duals,
             self.parallel_workers,
-            prefix_task_depth=prefix_task_depth,
-            balance_config=self.balance_config,
-            refinement_config=self.refinement_config,
-            pricing_tolerance=pricing_tolerance,
+            self.scheduler,
         )
-        task_blocks = task_plan.source_neighbor_blocks
-        prefix_task_blocks = task_plan.source_prefix_blocks
-        task_size_units = task_plan.task_size_units
-        local_candidate_quota = (
+        worker_batch_size = (
             1
-            if first_hit_enabled
-            else max(1, ceil(batch_size * productive_candidate_multiplier / max(len(task_blocks), 1)))
+            if stop_at_first_negative
+            else max(1, ceil(batch_size / self.parallel_workers))
         )
-        worker_batch_size = 1 if first_hit_enabled else local_candidate_quota
-        stop_event = self.stop_event() if first_hit_enabled else None
-        tasks = [
-            _WorkerPricingTask(
+        tasks: dict[int, _WorkerPricingTask] = {}
+        for worker_id, block in enumerate(task_plan.blocks):
+            if not block:
+                continue
+            tasks[worker_id] = _WorkerPricingTask(
                 call_id=call_id,
                 dual_id=dual_id,
                 epoch=pricing_epoch,
-                worker_id=task_id,
-                source_neighbor_block=block,
+                worker_id=worker_id,
+                task_id=worker_id,
+                generation=0,
+                source_prefixes=tuple((neighbor,) for neighbor in block),
+                task_root_prefix=(block[0],) if len(block) == 1 else tuple(),
+                initial_open_labels=None,
                 residual_customers=residual_customers,
                 restrictions=restrictions,
-                duals=worker_duals,
+                duals=duals,
                 next_route_id=next_route_id,
                 farkas=farkas,
                 pricing_tolerance=pricing_tolerance,
                 use_standard_acceleration=use_standard_acceleration,
-                stop_at_first_negative=first_hit_enabled,
+                stop_at_first_negative=stop_at_first_negative,
                 batch_size=worker_batch_size,
                 deadline=deadline,
                 known_signature_costs=known_signature_costs,
                 pricing_mode=pricing_mode,
-                pricing_yield_ratio=pricing_yield_ratio,
-                stop_event=stop_event,
-                pricing_worker_backend="process",
-                source_neighbor_count=len(self.source_neighbors),
-                source_neighbor_block_sizes=task_plan.initial_block_sizes,
-                source_neighbor_block_loads=task_plan.initial_block_loads,
-                source_neighbor_load_imbalance=task_plan.initial_load_imbalance,
-                source_neighbor_empty_initial_blocks=task_plan.initial_empty_blocks,
-                pricing_initial_task_count=len(task_blocks),
-                dynamic_split_candidates=task_plan.dynamic_split_candidates,
-                dynamic_splits_performed=task_plan.dynamic_splits_performed,
-                dynamic_split_rejected_close_to_closure=task_plan.dynamic_split_rejected_close_to_closure,
-                dynamic_split_rejected_small_queue=task_plan.dynamic_split_rejected_small_queue,
-                dynamic_split_rejected_short_elapsed=task_plan.dynamic_split_rejected_short_elapsed,
-                dynamic_split_rejected_low_workload=task_plan.dynamic_split_rejected_low_workload,
-                dynamic_child_tasks_created=task_plan.dynamic_child_tasks_created,
-                labels_transferred_to_idle_workers=task_plan.labels_transferred_to_idle_workers,
-                split_overhead_time=task_plan.split_overhead_time,
-                parallel_workers=self.parallel_workers,
-                source_neighbor_task_count=len(task_blocks),
-                source_neighbor_task_sizes=task_size_units,
-                local_worker_candidate_quota=local_candidate_quota,
-                source_prefixes=prefix_task_blocks[task_id],
-                max_frontier_cell_size=max_frontier_cell_size,
-                max_frontier_pair_product=max_frontier_pair_product,
-                max_frontier_split_depth=max_frontier_split_depth,
-                enable_resource_restricted_closure_bound=enable_resource_restricted_closure_bound,
             )
-            for task_id, block in enumerate(task_blocks)
-        ]
-        submit_start = time.time()
-        futures = [self._executor.submit(_run_persistent_forward_pricing_worker, task) for task in tasks]
-        submission_time = time.time() - submit_start
-        results: list[_WorkerPricingResult] = []
-        selected: _WorkerPricingResult | None = None
-        if first_hit_enabled:
-            pending = set(futures)
-            while pending:
-                done, pending = wait(pending, return_when=FIRST_COMPLETED)
-                for future in sorted(done, key=lambda item: id(item)):
-                    result = future.result()
-                    results.append(result)
-                    if result.route_paths:
-                        selected = result
-                        stop_event.set()
-                        if pending:
-                            done_remaining, pending = wait(pending)
-                            results.extend(future_item.result() for future_item in done_remaining)
-                        return _merge_compact_worker_results(
-                            results,
-                            self.graph,
-                            self.objective,
-                            residual_customers,
-                            restrictions,
-                            duals,
-                            next_route_id,
-                            farkas,
-                            pricing_tolerance,
-                            existing_routes,
-                            existing_column_paths,
-                            pricing_mode,
-                            pricing_yield_ratio,
-                            "process",
-                            len(self.source_neighbors),
-                            task_plan.initial_block_sizes,
-                            self.parallel_workers,
-                            selected=selected,
-                            force_time_limit=False,
-                            call_id=call_id,
-                            dual_id=dual_id,
-                            expected_epoch=pricing_epoch,
-                            submission_time_seconds=submission_time,
-                            pool_startup_time_seconds=self.startup_time_seconds if call_id == 1 else 0.0,
-                            pool_startup_count=1 if call_id == 1 else 0,
-                            pool_reused_calls=1,
-                            first_hit_enabled=first_hit_enabled,
-                            batch_target=batch_size,
-                            productive_slice_seconds=productive_slice_seconds,
-                            productive_slice_deadline_used=productive_slice_deadline_used,
-                            adaptive_slice_seconds=adaptive_slice_seconds,
-                            productive_yield_window_rate=productive_yield_window_rate,
-                            stabilized_dual_enabled=stabilized_dual_enabled,
-                            prefix_task_depth=prefix_task_depth,
-                            pricing_diversity_batch_fraction=pricing_diversity_batch_fraction,
-                            worker_reduced_costs_are_true=not stabilized_dual_enabled,
-                            call_start_time=call_start_time,
+        call_start = time.time()
+        master_cpu_start = time.process_time()
+        leaf_status = {worker_id: ("running" if worker_id in tasks else "closed") for worker_id in range(self.parallel_workers)}
+        worker_task = {worker_id: (worker_id if worker_id in tasks else None) for worker_id in range(self.parallel_workers)}
+        idle_workers = {worker_id for worker_id in range(self.parallel_workers) if worker_id not in tasks}
+        task_by_id = dict(tasks)
+        next_task_id = self.parallel_workers
+        all_results: list[_WorkerPricingResult] = []
+        summaries: dict[int, _ProcessWorkerEvent] = {}
+        pending_split_donors: set[int] = set()
+        pending_children: set[int] = set()
+        worker_busy = {worker_id: 0.0 for worker_id in range(self.parallel_workers)}
+        worker_idle_started = {worker_id: call_start for worker_id in idle_workers}
+        worker_idle = {worker_id: 0.0 for worker_id in range(self.parallel_workers)}
+        worker_task_counts = {worker_id: 0 for worker_id in range(self.parallel_workers)}
+        idle_work_requests = 0
+        split_candidates = 0
+        splits_performed = 0
+        rejected_near = 0
+        rejected_small = 0
+        rejected_elapsed = 0
+        rejected_work = 0
+        labels_transferred = 0
+        bytes_transferred = 0
+        split_control_seconds = 0.0
+        stale_results = 0
+        pending_peak = 0
+        first_hit_worker: int | None = None
+        force_time_limit = False
+        batch_target_reached = False
+        cancel_waiting: set[int] = set()
+        verified_candidate_routes: dict[tuple[str, ...], Route] = {}
+        verification_routes = dict(existing_routes or {})
+        verification_paths = set(existing_column_paths or set())
+        candidate_verification_seconds = 0.0
+        candidate_checkpoints = 0
+        candidate_worker_resumptions = 0
+        global_batch_limit_cancellations = 0
+
+        submission_start = time.time()
+        for worker_id, task in tasks.items():
+            self._command_queues[worker_id].put(_ProcessWorkerCommand(kind="start", task=task))
+            worker_task_counts[worker_id] += 1
+        submission_time = time.time() - submission_start
+
+        while True:
+            if batch_target_reached:
+                break
+            if (
+                all(status == "closed" for status in leaf_status.values())
+                and not pending_children
+                and not pending_split_donors
+            ):
+                break
+            if deadline is not None and time.time() >= deadline:
+                force_time_limit = True
+                for worker_id, task_id in worker_task.items():
+                    if task_id is not None:
+                        task = task_by_id[task_id]
+                        self._command_queues[worker_id].put(
+                            _ProcessWorkerCommand(
+                                kind="cancel",
+                                epoch=pricing_epoch,
+                                task_id=task.task_id,
+                                generation=task.generation,
+                            )
                         )
-        else:
-            for future in futures:
-                results.append(future.result())
-        has_time_limit = any(result.diagnostics.pricing_status == PRICING_STATUS_TIME_LIMIT_NO_COLUMNS for result in results)
-        merged = _merge_compact_worker_results(
-            results,
+                        cancel_waiting.add(worker_id)
+                break
+            event: _ProcessWorkerEvent = self._result_queue.get()
+            if event.epoch is not None and event.epoch != pricing_epoch:
+                stale_results += 1
+                continue
+            if event.kind == "started":
+                if event.worker_id in worker_idle_started:
+                    worker_idle[event.worker_id] += time.time() - worker_idle_started.pop(event.worker_id)
+                if event.task_id in pending_children:
+                    pending_children.remove(event.task_id)
+                    leaf_status[event.task_id] = "running"
+                continue
+            if event.result is not None:
+                all_results.append(event.result)
+                worker_busy[event.worker_id] += event.result.diagnostics.elapsed_seconds
+            if event.kind == "checkpoint":
+                if event.task_id is None:
+                    raise RuntimeError("checkpoint missing task id")
+                summaries[event.task_id] = event
+                available = sorted(idle_workers)
+                if available and not pending_split_donors:
+                    idle_work_requests += len(available)
+                    eligible: list[tuple[int, _ProcessWorkerEvent]] = []
+                    for task_id, summary in summaries.items():
+                        if leaf_status.get(task_id) != "running":
+                            continue
+                        if summary.open_label_count < self.scheduler.split_open_labels_min:
+                            rejected_small += 1
+                            continue
+                        if summary.task_elapsed_seconds < self.scheduler.split_elapsed_min:
+                            rejected_elapsed += 1
+                            continue
+                        if summary.remaining_work < self.scheduler.split_work_min:
+                            rejected_work += 1
+                            continue
+                        if (
+                            summary.closure_gap is None
+                            or not _closure_gap_exceeds_split_threshold(
+                                summary.closure_gap,
+                                pricing_tolerance,
+                                self.scheduler.split_gap_factor,
+                            )
+                        ):
+                            rejected_near += 1
+                            continue
+                        eligible.append((task_id, summary))
+                    if eligible:
+                        split_candidates += len(eligible)
+                        donor_id, donor_summary = max(
+                            eligible,
+                            key=lambda item: (
+                                item[1].remaining_work,
+                                float("inf") if item[1].closure_gap is None else item[1].closure_gap,
+                                item[1].open_label_count,
+                                -item[0],
+                            ),
+                        )
+                        donor_worker = next(worker for worker, owned in worker_task.items() if owned == donor_id)
+                        donor = task_by_id[donor_id]
+                        self._command_queues[donor_worker].put(
+                            _ProcessWorkerCommand(
+                                kind="split",
+                                epoch=pricing_epoch,
+                                task_id=donor_id,
+                                generation=donor.generation,
+                                child_limit=len(available),
+                            )
+                        )
+                        pending_split_donors.add(donor_id)
+                continue
+            if event.kind == "split_rejected":
+                if event.task_id is not None:
+                    pending_split_donors.discard(event.task_id)
+                continue
+            if event.kind == "split_offer":
+                if event.task_id is None:
+                    raise RuntimeError("split offer missing task id")
+                control_start = time.time()
+                pending_split_donors.discard(event.task_id)
+                parent = task_by_id[event.task_id]
+                available = sorted(idle_workers)
+                if len(event.child_groups) > len(available):
+                    raise RuntimeError("split offer exceeds reserved idle-worker capacity")
+                for (root_prefix, labels), child_worker in zip(event.child_groups, available):
+                    child_id = next_task_id
+                    next_task_id += 1
+                    child = replace(
+                        parent,
+                        worker_id=child_worker,
+                        task_id=child_id,
+                        generation=parent.generation + 1,
+                        source_prefixes=tuple(),
+                        task_root_prefix=root_prefix,
+                        initial_open_labels=labels,
+                    )
+                    task_by_id[child_id] = child
+                    leaf_status[child_id] = "pending"
+                    pending_children.add(child_id)
+                    worker_task[child_worker] = child_id
+                    idle_workers.remove(child_worker)
+                    self._command_queues[child_worker].put(_ProcessWorkerCommand(kind="start", task=child))
+                    worker_task_counts[child_worker] += 1
+                    labels_transferred += len(labels)
+                    bytes_transferred += len(pickle.dumps(labels, protocol=pickle.HIGHEST_PROTOCOL))
+                splits_performed += 1
+                pending_peak = max(pending_peak, len(pending_children))
+                split_control_seconds += time.time() - control_start
+                continue
+            if event.kind in {"closed", "time_limit"}:
+                if event.task_id is None:
+                    raise RuntimeError("terminal worker event missing task id")
+                leaf_status[event.task_id] = "closed" if event.kind == "closed" else "unresolved"
+                worker_task[event.worker_id] = None
+                idle_workers.add(event.worker_id)
+                worker_idle_started[event.worker_id] = time.time()
+                if event.kind == "time_limit":
+                    force_time_limit = True
+                    break
+                continue
+            if event.kind in {"candidate", "candidate_checkpoint"}:
+                if event.result is None:
+                    raise RuntimeError("candidate event missing pricing result")
+                if event.kind == "candidate_checkpoint":
+                    candidate_checkpoints += 1
+                verification_start = time.time()
+                candidate_check = _merge_worker_results(
+                    [event.result], self.graph, self.objective, residual_customers, restrictions, duals,
+                    next_route_id + len(verified_candidate_routes), farkas, pricing_tolerance,
+                    verification_routes, verification_paths,
+                    pricing_mode, "process", len(task_plan.source_neighbors),
+                    tuple(len(block) for block in task_plan.blocks), self.parallel_workers,
+                    force_time_limit=False, call_id=call_id, dual_id=dual_id,
+                    expected_epoch=pricing_epoch, submission_time_seconds=0.0,
+                    pool_startup_time_seconds=0.0, pool_startup_count=0, pool_reused_calls=0,
+                    batch_target=max(1, batch_size - len(verified_candidate_routes)), prefix_task_depth=1,
+                )
+                candidate_verification_seconds += time.time() - verification_start
+                for route in candidate_check.routes:
+                    verified_candidate_routes[route.path] = route
+                    verification_routes[route.path] = route
+                    verification_paths.add(route.path)
+                if candidate_check.routes and first_hit_worker is None:
+                    first_hit_worker = event.worker_id
+                if len(verified_candidate_routes) >= batch_size:
+                    batch_target_reached = True
+                    global_batch_limit_cancellations += 1
+                    for worker_id, task_id in worker_task.items():
+                        if task_id is None:
+                            continue
+                        task = task_by_id[task_id]
+                        self._command_queues[worker_id].put(
+                            _ProcessWorkerCommand(
+                                kind="cancel", epoch=pricing_epoch,
+                                task_id=task.task_id, generation=task.generation,
+                            )
+                        )
+                        cancel_waiting.add(worker_id)
+                    break
+                if event.kind == "candidate_checkpoint":
+                    self._command_queues[event.worker_id].put(
+                        _ProcessWorkerCommand(
+                            kind="resume",
+                            epoch=pricing_epoch,
+                            task_id=event.task_id,
+                            generation=event.generation,
+                        )
+                    )
+                    candidate_worker_resumptions += 1
+                else:
+                    if event.task_id is None:
+                        raise RuntimeError("terminal candidate event missing task id")
+                    leaf_status[event.task_id] = "closed"
+                    worker_task[event.worker_id] = None
+                    idle_workers.add(event.worker_id)
+                    worker_idle_started[event.worker_id] = time.time()
+                continue
+            if event.kind == "cancelled":
+                worker_task[event.worker_id] = None
+                idle_workers.add(event.worker_id)
+                worker_idle_started[event.worker_id] = time.time()
+                continue
+
+        while cancel_waiting:
+            try:
+                event = self._result_queue.get(timeout=0.5)
+            except Empty:
+                failed = [process for process in self._processes if process.exitcode not in {None, 0}]
+                if failed:
+                    raise RuntimeError(f"pricing worker process failed during cancellation: {[process.exitcode for process in failed]}")
+                continue
+            if event.result is not None:
+                all_results.append(event.result)
+                worker_busy[event.worker_id] += event.result.diagnostics.elapsed_seconds
+            if event.kind == "cancelled":
+                cancel_waiting.discard(event.worker_id)
+                worker_task[event.worker_id] = None
+                idle_workers.add(event.worker_id)
+                worker_idle_started[event.worker_id] = time.time()
+
+        wall_elapsed = time.time() - call_start
+        for worker_id, idle_start in worker_idle_started.items():
+            worker_idle[worker_id] += time.time() - idle_start
+        all_leaf_closed = (
+            all(status == "closed" for status in leaf_status.values())
+            and not pending_children
+            and not pending_split_donors
+        )
+        merged = _merge_worker_results(
+            all_results,
             self.graph,
             self.objective,
             residual_customers,
@@ -1109,13 +1386,11 @@ class SourceNeighborPricingPool:
             existing_routes,
             existing_column_paths,
             pricing_mode,
-            pricing_yield_ratio,
             "process",
-            len(self.source_neighbors),
-            task_plan.initial_block_sizes,
+            len(task_plan.source_neighbors),
+            tuple(len(block) for block in task_plan.blocks),
             self.parallel_workers,
-            selected=None,
-            force_time_limit=has_time_limit,
+            force_time_limit=force_time_limit,
             call_id=call_id,
             dual_id=dual_id,
             expected_epoch=pricing_epoch,
@@ -1123,134 +1398,54 @@ class SourceNeighborPricingPool:
             pool_startup_time_seconds=self.startup_time_seconds if call_id == 1 else 0.0,
             pool_startup_count=1 if call_id == 1 else 0,
             pool_reused_calls=1,
-            first_hit_enabled=first_hit_enabled,
             batch_target=batch_size,
-            productive_slice_seconds=productive_slice_seconds,
-            productive_slice_deadline_used=productive_slice_deadline_used,
-            adaptive_slice_seconds=adaptive_slice_seconds,
-            productive_yield_window_rate=productive_yield_window_rate,
-            stabilized_dual_enabled=stabilized_dual_enabled,
-            prefix_task_depth=prefix_task_depth,
-            pricing_diversity_batch_fraction=pricing_diversity_batch_fraction,
-            worker_reduced_costs_are_true=not stabilized_dual_enabled,
-            call_start_time=call_start_time,
+            prefix_task_depth=1,
+            all_leaf_tasks_closed=all_leaf_closed,
+            leaf_task_count=len(leaf_status),
+            wall_elapsed_seconds=wall_elapsed,
+            dynamic_diagnostics={
+                "balanced_process_dynamic": True,
+                "initial_block_scores": task_plan.block_scores,
+                "initial_load_imbalance_max_mean": (
+                    max(task_plan.block_scores) / (sum(task_plan.block_scores) / len(task_plan.block_scores))
+                    if task_plan.block_scores and sum(task_plan.block_scores) > 0.0 else 0.0
+                ),
+                "per_worker_busy_seconds": tuple(sorted(worker_busy.items())),
+                "per_worker_idle_seconds": tuple(sorted(worker_idle.items())),
+                "per_worker_task_counts": tuple(sorted(worker_task_counts.items())),
+                "idle_work_requests": idle_work_requests,
+                "dynamic_split_candidates": split_candidates,
+                "dynamic_splits_performed": splits_performed,
+                "dynamic_split_rejected_near_closure": rejected_near,
+                "dynamic_split_rejected_small_frontier": rejected_small,
+                "dynamic_split_rejected_elapsed": rejected_elapsed,
+                "dynamic_split_rejected_low_work": rejected_work,
+                "dynamic_child_tasks_created": max(0, len(leaf_status) - self.parallel_workers),
+                "dynamic_labels_transferred": labels_transferred,
+                "dynamic_bytes_transferred": bytes_transferred,
+                "dynamic_split_control_seconds": split_control_seconds,
+                "leaf_tasks_created": len(leaf_status),
+                "leaf_tasks_closed": sum(status == "closed" for status in leaf_status.values()),
+                "pending_transfer_peak": pending_peak,
+                "stale_worker_results_discarded": stale_results,
+                "pricing_epoch_invalidations": 1 if verified_candidate_routes else 0,
+                "productive_first_hit_worker": first_hit_worker,
+                "candidate_verification_seconds": candidate_verification_seconds,
+                "master_control_seconds": time.process_time() - master_cpu_start,
+                "candidate_checkpoints": candidate_checkpoints,
+                "candidate_worker_resumptions": candidate_worker_resumptions,
+                "global_verified_candidates": len(verified_candidate_routes),
+                "global_batch_limit_cancellations": global_batch_limit_cancellations,
+            },
         )
-        if has_time_limit and not merged.routes:
+        if force_time_limit and not merged.routes:
             raise PricingTimeLimitReached(merged.diagnostics)
         return merged
-
-
-@dataclass(frozen=True)
-class _TimeExpr:
-    base: str
-    offset: float
-    wait_floor: float = 0.0
-
-
-@dataclass(frozen=True)
-class _BackwardProfile:
-    service_times: tuple[tuple[str, _TimeExpr], ...]
-    return_time: _TimeExpr
-    drone_sorties: int
-
-
-@dataclass(frozen=True)
-class _BackwardInterface:
-    physical_time: float
-    pad_arrival: float
-    active_wait: float
-
-
-@dataclass(frozen=True)
-class _BackwardCostFunction:
-    profile: _BackwardProfile
-    represented: frozenset[str]
-    sr_counts: tuple[tuple[tuple[str, str, str], int], ...]
-
-    def evaluate(
-        self,
-        interface: _BackwardInterface,
-        graph: TransformedGraph,
-        objective: ObjectiveData,
-        duals: PricingDuals,
-        farkas: bool,
-    ) -> float:
-        if farkas:
-            return (
-                -sum(duals.mu[customer] for customer in self.represented)
-                - _suffix_sr_contribution(dict(self.sr_counts), duals)
-            )
-        value = objective.coeffs.cost * graph.instance.drone_cost * self.profile.drone_sorties
-        for customer, expr in self.profile.service_times:
-            service_time = _evaluate_time_expr_at_interface(expr, interface)
-            value += objective.coeffs.delay * (service_time - objective.bounds.arrival_lb[customer]) ** 2
-            value -= duals.mu[customer]
-        value += objective.coeffs.return_time * _evaluate_time_expr_at_interface(self.profile.return_time, interface)
-        value -= _suffix_sr_contribution(dict(self.sr_counts), duals)
-        return value
-
-
-@dataclass(frozen=True)
-class _BackwardCostLowerEnvelope:
-    represented: frozenset[str]
-
-    def evaluate(self, duals: PricingDuals, farkas: bool) -> float:
-        if farkas:
-            raise ValueError("standard-pricing backward lower envelope is disabled in Farkas pricing")
-        return -sum(max(duals.mu[customer], 0.0) for customer in self.represented)
-
-
-@dataclass(frozen=True)
-class _JoinEvalCacheKey:
-    backward_path: tuple[str, ...]
-    meet_node: str
-    physical_time: float
-    pad_arrival: float
-    active_wait: float
-    active_sr_version: int
-    dual_solution_key: tuple[object, ...]
-    farkas: bool
-    prefix_sr_counts: tuple[tuple[tuple[str, str, str], int], ...]
-    suffix_sr_counts: tuple[tuple[tuple[str, str, str], int], ...]
-
-
-@dataclass
-class _JoinEvalCache:
-    values: dict[_JoinEvalCacheKey, tuple[float, float]] = field(default_factory=dict)
-    hits: int = 0
-    misses: int = 0
-    suffix_profile_hits: int = 0
-    suffix_profile_misses: int = 0
-    interface_profile_hits: int = 0
-    interface_profile_misses: int = 0
-
-
-@dataclass(frozen=True)
-class _BackwardLabel:
-    path: tuple[str, ...]
-    represented: frozenset[str]
-    truck_visited: frozenset[str]
-    truck_load: float
-    used_arcs: frozenset[tuple[str, str]]
-    truck_served: frozenset[str] = frozenset()
-    pad_served: frozenset[tuple[str, str]] = frozenset()
-    sr_counts: tuple[tuple[tuple[str, str, str], int], ...] = tuple()
-    branch_state: _BranchState | None = None
-    profile: _BackwardProfile | None = None
-    cost_function: _BackwardCostFunction | None = None
-    lower_envelope: _BackwardCostLowerEnvelope | None = None
-    leading_block_hub: str | None = None
-    leading_block_count: int = 0
-    leading_block_wait: float = 0.0
-    represented_mask: int = 0
-    truck_node_mask: int = 0
-
 
 @dataclass(frozen=True)
 class _BranchState:
     together: tuple[tuple[bool, bool], ...]
-    required_arcs: tuple[tuple[tuple[str, str], bool, bool], ...]
-
+    conditioned_arcs: tuple[tuple[str, tuple[str, str], bool, bool, bool], ...]
 
 def _mask_for_values(values: frozenset[str] | set[str], universe: tuple[str, ...]) -> int:
     bit_by_value = {value: 1 << index for index, value in enumerate(universe)}
@@ -1259,153 +1454,12 @@ def _mask_for_values(values: frozenset[str] | set[str], universe: tuple[str, ...
         mask |= bit_by_value.get(value, 0)
     return mask
 
-
 def _customer_mask(values: frozenset[str] | set[str], graph: TransformedGraph) -> int:
     return _mask_for_values(values, tuple(graph.instance.customers))
-
 
 def _truck_node_mask(values: frozenset[str] | set[str], graph: TransformedGraph) -> int:
     instance = graph.instance
     return _mask_for_values(values, (instance.depot_source, *instance.hubs, *instance.customers, instance.depot_sink))
-
-
-@dataclass(frozen=True)
-class _ForwardExpansion:
-    labels: tuple[_Label, ...]
-    complete_labels: tuple[_Label, ...]
-    generated: int
-    elapsed_seconds: float
-
-
-@dataclass(frozen=True)
-class _BackwardExpansion:
-    labels: tuple[_BackwardLabel, ...]
-    generated: int
-    elapsed_seconds: float
-    cost_function_build_time_seconds: float = 0.0
-    exclusive_resource_violations: int = 0
-
-
-@dataclass
-class _DominanceCounter:
-    prefilter_pairs: int = 0
-    prefilter_rejected: int = 0
-    full_tests: int = 0
-    bucket_pairs_considered: int = 0
-    bucket_pairs_rejected: int = 0
-    bucket_candidate_pairs: int = 0
-    compatible_keys_generated: int = 0
-    compatible_key_lookups: int = 0
-    bucket_scans_avoided: int = 0
-    key_generation_time_seconds: float = 0.0
-    key_cache_hits: int = 0
-    key_cache_misses: int = 0
-    small_bypass_calls: int = 0
-    indexed_activation_count: int = 0
-    work_estimate: int = 0
-    sticky_indexed: bool = False
-    sticky_indexed_activations: int = 0
-    stage_reject_key: int = 0
-    stage_reject_branch: int = 0
-    stage_reject_customer: int = 0
-    stage_reject_truck_node: int = 0
-    stage_reject_payload: int = 0
-    stage_reject_block: int = 0
-    stage_reject_time: int = 0
-    stage_reject_cost: int = 0
-    cost_function_tests: int = 0
-    cost_function_rejected: int = 0
-
-
-@dataclass(frozen=True)
-class _RouteCandidate:
-    path: tuple[str, ...]
-    reduced_cost: float
-    joined: bool
-    served: frozenset[str]
-    truck_served: frozenset[str]
-    pad_served: frozenset[tuple[str, str]]
-    used_arcs: frozenset[tuple[str, str]]
-
-
-@dataclass
-class _JoinStageCounter:
-    reject_key: int = 0
-    reject_branch: int = 0
-    reject_customer: int = 0
-    reject_truck_node: int = 0
-    reject_payload: int = 0
-    reject_block: int = 0
-    reject_reduced_cost: int = 0
-    sticky_indexed_activations: int = 0
-
-
-@dataclass(frozen=True)
-class _JoinBucketKey:
-    meet_node: str
-    physical_loc: str
-    active_pad: str | None
-    block_pos_class: int
-    branch_state_hash: int
-    payload_bucket: int
-
-
-@dataclass(frozen=True)
-class _JoinLookupKey:
-    meet_node: str
-    physical_loc: str
-    active_pad: str | None
-    block_pos_class: int
-
-
-@dataclass
-class _JoinBucket:
-    key: _JoinBucketKey
-    labels: list[_Label] | list[_BackwardLabel]
-    labels_by_payload: list[_Label] | list[_BackwardLabel]
-    union_customer_set: frozenset[str]
-    intersection_customer_set: frozenset[str]
-    union_truck_node_set: frozenset[str]
-    intersection_truck_node_set: frozenset[str]
-    min_payload: float
-    max_payload: float
-
-
-@dataclass(frozen=True)
-class _JoinSubbucketKey:
-    payload_bin: int
-    active_pad: str | None
-    block_pos_class: int
-    branch_state_hash: int
-    physical_mask_class: int
-
-
-@dataclass
-class _JoinSubbucket:
-    key: _JoinSubbucketKey
-    labels: list[_Label] | list[_BackwardLabel]
-    labels_by_payload: list[_Label] | list[_BackwardLabel]
-    min_payload: float
-    max_payload: float
-
-
-@dataclass(frozen=True)
-class _JoinGenerator:
-    level: str
-    lower_bound: float
-    forward_labels: tuple[_Label, ...]
-    backward_labels: tuple[_BackwardLabel, ...]
-    estimated_pair_count: int
-
-
-@dataclass(frozen=True)
-class _DominanceBucketKey:
-    end_node: str
-    physical_loc: str
-    active_pad: str | None
-    block_pos: int
-    branch_state_hash: int
-
 
 def price_route(
     graph: TransformedGraph,
@@ -1420,79 +1474,22 @@ def price_route(
     stop_at_first_negative: bool = False,
     batch_size: int = 1,
     deadline: float | None = None,
-    enable_bidirectional: bool = True,
-    parallel_workers: int = 2,
+    parallel_workers: int = 1,
     existing_routes: dict[tuple[str, ...], Route] | None = None,
     existing_column_paths: set[tuple[str, ...]] | None = None,
-    small_join_pair_threshold: int = 5_000,
-    small_join_cumulative_threshold: int = 250_000,
-    max_join_bypass_calls: int = 1_000,
-    small_dom_bucket_threshold: int = 100,
-    small_dom_cumulative_threshold: int = 500_000,
-    max_dom_bypass_calls: int = 2_000,
-    join_payload_bin_width: float = 1.0,
-    side_pool_batch_size: int = 0,
     pricing_mode: str = "productive",
-    pricing_yield_ratio: float = 0.0,
-    join_eval_budget: int = 0,
-    pricing_certification_slice_seconds: float = 0.0,
-    enable_join_lower_envelope: bool = True,
-    join_generator_split_threshold: int = 50_000,
-    join_generator_pair_batch_size: int = 10_000,
-    enable_bucket_join_envelope: bool = True,
-    enable_join_profile_cache: bool = True,
-    pricing_worker_backend: str = "thread",
+    pricing_worker_backend: str = "process",
     pricing_process_pool: SourceNeighborPricingPool | None = None,
-    productive_candidate_multiplier: float = 1.5,
-    source_neighbor_task_size: int = 1,
-    pricing_diversity_batch_fraction: float = 0.5,
-    productive_slice_seconds: float = 0.0,
-    productive_slice_deadline_used: bool = False,
-    adaptive_slice_seconds: float = 0.0,
-    productive_yield_window_rate: float = 0.0,
-    search_duals: PricingDuals | None = None,
     prefix_task_depth: int = 1,
-    enable_mask_trie_frontier: bool = True,
-    max_frontier_cell_size: int = 512,
-    max_frontier_pair_product: int = 2000,
-    max_frontier_split_depth: int = 6,
-    enable_resource_restricted_closure_bound: bool = True,
-    resource_bound_method: str = "greedy",
-    enable_balanced_kcore_pricing: bool = True,
-    enable_dynamic_kcore_refinement: bool = True,
-    kcore_balance_alpha_reachable_customers: float = 1.0,
-    kcore_balance_alpha_out_degree: float = 0.25,
-    kcore_balance_alpha_drone_pads: float = 0.5,
-    kcore_balance_alpha_deadline_customers: float = 0.5,
-    dynamic_split_label_threshold: int = 2_000,
-    dynamic_split_gap_multiplier: float = 10.0,
-    dynamic_split_time_threshold: float = 5.0,
-    dynamic_split_work_threshold: float = 2_000.0,
-    dynamic_refinement_depth: int = 2,
-    checkpoint_extension_period: int = 5_000,
+    scheduler_config: PricingSchedulerConfig | None = None,
+    epoch_context: PricingEpochContext | None = None,
 ) -> PricingResult:
     if parallel_workers <= 0:
         raise ValueError("parallel_workers must be positive")
     if pricing_worker_backend not in {"thread", "process"}:
         raise ValueError("pricing_worker_backend must be 'thread' or 'process'")
-    if search_duals is not None and pricing_worker_backend != "process":
-        raise ValueError("dual-stabilized productive search requires the process pricing backend")
-    balance_config = _KCoreBalanceConfig(
-        enabled=enable_balanced_kcore_pricing,
-        alpha_reachable_customers=kcore_balance_alpha_reachable_customers,
-        alpha_out_degree=kcore_balance_alpha_out_degree,
-        alpha_drone_pads=kcore_balance_alpha_drone_pads,
-        alpha_deadline_customers=kcore_balance_alpha_deadline_customers,
-    )
-    refinement_config = _DynamicRefinementConfig(
-        enabled=enable_dynamic_kcore_refinement,
-        split_label_threshold=dynamic_split_label_threshold,
-        split_gap_multiplier=dynamic_split_gap_multiplier,
-        split_time_threshold=dynamic_split_time_threshold,
-        split_work_threshold=dynamic_split_work_threshold,
-        refinement_depth=dynamic_refinement_depth,
-        checkpoint_extension_period=checkpoint_extension_period,
-    )
+    if pricing_mode not in {"productive", "closure"}:
+        raise ValueError("pricing_mode must be 'productive' or 'closure'")
     if pricing_worker_backend == "process" and pricing_process_pool is not None:
         return pricing_process_pool.price(
             residual_customers=residual_customers,
@@ -1508,31 +1505,14 @@ def price_route(
             existing_routes=existing_routes,
             existing_column_paths=existing_column_paths,
             pricing_mode=pricing_mode,
-            pricing_yield_ratio=pricing_yield_ratio,
-            productive_candidate_multiplier=productive_candidate_multiplier,
-            pricing_diversity_batch_fraction=pricing_diversity_batch_fraction,
-            source_neighbor_task_size=source_neighbor_task_size,
-            productive_slice_seconds=productive_slice_seconds,
-            productive_slice_deadline_used=productive_slice_deadline_used,
-            adaptive_slice_seconds=adaptive_slice_seconds,
-            productive_yield_window_rate=productive_yield_window_rate,
-            search_duals=search_duals,
-            prefix_task_depth=prefix_task_depth,
-            enable_mask_trie_frontier=enable_mask_trie_frontier,
-            max_frontier_cell_size=max_frontier_cell_size,
-            max_frontier_pair_product=max_frontier_pair_product,
-            max_frontier_split_depth=max_frontier_split_depth,
-            enable_resource_restricted_closure_bound=enable_resource_restricted_closure_bound,
-            resource_bound_method=resource_bound_method,
+            epoch_context=epoch_context,
         )
     if pricing_worker_backend == "process" and parallel_workers > 1:
         temporary_pool = SourceNeighborPricingPool(
             graph,
             objective,
             parallel_workers,
-            source_neighbor_task_size,
-            balance_config,
-            refinement_config,
+            scheduler_config,
         )
         try:
             return temporary_pool.price(
@@ -1549,22 +1529,7 @@ def price_route(
                 existing_routes=existing_routes,
                 existing_column_paths=existing_column_paths,
                 pricing_mode=pricing_mode,
-                pricing_yield_ratio=pricing_yield_ratio,
-                productive_candidate_multiplier=productive_candidate_multiplier,
-                pricing_diversity_batch_fraction=pricing_diversity_batch_fraction,
-                source_neighbor_task_size=source_neighbor_task_size,
-                productive_slice_seconds=productive_slice_seconds,
-                productive_slice_deadline_used=productive_slice_deadline_used,
-                adaptive_slice_seconds=adaptive_slice_seconds,
-                productive_yield_window_rate=productive_yield_window_rate,
-                search_duals=search_duals,
-                prefix_task_depth=prefix_task_depth,
-                enable_mask_trie_frontier=enable_mask_trie_frontier,
-                max_frontier_cell_size=max_frontier_cell_size,
-                max_frontier_pair_product=max_frontier_pair_product,
-                max_frontier_split_depth=max_frontier_split_depth,
-                enable_resource_restricted_closure_bound=enable_resource_restricted_closure_bound,
-                resource_bound_method=resource_bound_method,
+                epoch_context=epoch_context,
             )
         finally:
             temporary_pool.shutdown()
@@ -1584,20 +1549,11 @@ def price_route(
             deadline=deadline,
             existing_routes=existing_routes,
             existing_column_paths=existing_column_paths,
-            side_pool_batch_size=side_pool_batch_size,
             pricing_mode=pricing_mode,
-            pricing_yield_ratio=pricing_yield_ratio,
             parallel_workers=parallel_workers,
             pricing_worker_backend=pricing_worker_backend,
-            max_frontier_cell_size=max_frontier_cell_size,
-            max_frontier_pair_product=max_frontier_pair_product,
-            max_frontier_split_depth=max_frontier_split_depth,
-            enable_resource_restricted_closure_bound=enable_resource_restricted_closure_bound,
-            adaptive_slice_seconds=adaptive_slice_seconds,
-            productive_yield_window_rate=productive_yield_window_rate,
             prefix_task_depth=prefix_task_depth,
-            balance_config=balance_config,
-            refinement_config=refinement_config,
+            epoch_context=epoch_context,
         )
     cpu_start = time.process_time()
     result = _price_route_forward_only(
@@ -1616,21 +1572,22 @@ def price_route(
         existing_routes=existing_routes,
         existing_column_paths=existing_column_paths,
         pricing_mode=pricing_mode,
-        pricing_yield_ratio=pricing_yield_ratio,
-        max_frontier_cell_size=max_frontier_cell_size,
-        max_frontier_pair_product=max_frontier_pair_product,
-        max_frontier_split_depth=max_frontier_split_depth,
-        enable_resource_restricted_closure_bound=enable_resource_restricted_closure_bound,
     )
-    result = replace(
-        result,
-        diagnostics=replace(
-            result.diagnostics,
-            adaptive_slice_seconds=adaptive_slice_seconds,
-            productive_yield_window_rate=productive_yield_window_rate,
-            prefix_task_depth=prefix_task_depth,
-        ),
-    )
+    if isinstance(result, _ForwardSearchCheckpoint):
+        raise RuntimeError("serial pricing returned an unexpected checkpoint")
+    if pricing_mode == "productive":
+        result = replace(
+            result,
+            diagnostics=replace(
+                result.diagnostics,
+                exact_completion=False,
+                termination_reason="productive_batch_found" if result.routes else "productive_no_columns",
+                certification_mode="not_certified_productive",
+                pricing_status=(
+                    PRICING_STATUS_NEGATIVE_BATCH if result.routes else PRICING_STATUS_EXHAUSTED_NO_NEGATIVE
+                ),
+            ),
+        )
     return _with_runtime_diagnostics(
         result,
         pricing_worker_backend="serial" if pricing_worker_backend == "thread" else pricing_worker_backend,
@@ -1640,7 +1597,6 @@ def price_route(
         source_neighbor_block_sizes=(len(_admissible_source_neighbors(graph)),),
         parallel_workers=1,
     )
-
 
 def run_source_neighbor_parallel_forward_pricing(
     graph: TransformedGraph,
@@ -1657,18 +1613,10 @@ def run_source_neighbor_parallel_forward_pricing(
     deadline: float | None = None,
     existing_routes: dict[tuple[str, ...], Route] | None = None,
     existing_column_paths: set[tuple[str, ...]] | None = None,
-    side_pool_batch_size: int = 0,
     pricing_mode: str = "productive",
-    pricing_yield_ratio: float = 0.0,
-    parallel_workers: int = 2,
+    parallel_workers: int = 1,
     pricing_worker_backend: str = "thread",
-    adaptive_slice_seconds: float = 0.0,
-    productive_yield_window_rate: float = 0.0,
     prefix_task_depth: int = 1,
-    max_frontier_cell_size: int = 512,
-    max_frontier_pair_product: int = 2000,
-    max_frontier_split_depth: int = 6,
-    enable_resource_restricted_closure_bound: bool = True,
 ) -> PricingResult:
     return _price_route_source_neighbor_parallel(
         graph=graph,
@@ -1685,616 +1633,16 @@ def run_source_neighbor_parallel_forward_pricing(
         deadline=deadline,
         existing_routes=existing_routes,
         existing_column_paths=existing_column_paths,
-        side_pool_batch_size=side_pool_batch_size,
         pricing_mode=pricing_mode,
-        pricing_yield_ratio=pricing_yield_ratio,
         parallel_workers=parallel_workers,
         pricing_worker_backend=pricing_worker_backend,
-        adaptive_slice_seconds=adaptive_slice_seconds,
-        productive_yield_window_rate=productive_yield_window_rate,
-        prefix_task_depth=prefix_task_depth,
-        max_frontier_cell_size=max_frontier_cell_size,
-        max_frontier_pair_product=max_frontier_pair_product,
-        max_frontier_split_depth=max_frontier_split_depth,
-        enable_resource_restricted_closure_bound=enable_resource_restricted_closure_bound,
-    )
-
-
-def _price_route_source_neighbor_parallel(
-    graph: TransformedGraph,
-    objective: ObjectiveData,
-    residual_customers: frozenset[str],
-    restrictions: BranchRestrictions,
-    duals: PricingDuals,
-    next_route_id: int,
-    farkas: bool,
-    pricing_tolerance: float,
-    use_standard_acceleration: bool,
-    stop_at_first_negative: bool,
-    batch_size: int,
-    deadline: float | None,
-    existing_routes: dict[tuple[str, ...], Route] | None,
-    existing_column_paths: set[tuple[str, ...]] | None,
-    side_pool_batch_size: int,
-    pricing_mode: str,
-    pricing_yield_ratio: float,
-    parallel_workers: int,
-    pricing_worker_backend: str,
-    adaptive_slice_seconds: float = 0.0,
-    productive_yield_window_rate: float = 0.0,
-    prefix_task_depth: int = 1,
-    max_frontier_cell_size: int = 512,
-    max_frontier_pair_product: int = 2000,
-    max_frontier_split_depth: int = 6,
-    enable_resource_restricted_closure_bound: bool = True,
-    balance_config: _KCoreBalanceConfig | None = None,
-    refinement_config: _DynamicRefinementConfig | None = None,
-) -> PricingResult:
-    if pricing_worker_backend not in {"thread", "process"}:
-        raise ValueError("pricing_worker_backend must be 'thread' or 'process'")
-    source_neighbors = _admissible_source_neighbors(graph)
-    balance = balance_config or _KCoreBalanceConfig()
-    refinement = refinement_config or _DynamicRefinementConfig()
-    task_plan = _build_balanced_dynamic_task_plan(
-        graph,
-        objective,
-        residual_customers,
-        restrictions,
-        source_neighbors,
-        parallel_workers,
-        prefix_task_depth=prefix_task_depth,
-        balance_config=balance,
-        refinement_config=refinement,
-        pricing_tolerance=pricing_tolerance,
-    )
-    blocks = task_plan.source_neighbor_blocks
-    if len(blocks) <= 1:
-        cpu_start = time.process_time()
-        result = _price_route_forward_only(
-            graph=graph,
-            objective=objective,
-            residual_customers=residual_customers,
-            restrictions=restrictions,
-            duals=duals,
-            next_route_id=next_route_id,
-            farkas=farkas,
-            pricing_tolerance=pricing_tolerance,
-            use_standard_acceleration=use_standard_acceleration,
-            stop_at_first_negative=stop_at_first_negative,
-            batch_size=batch_size,
-            deadline=deadline,
-            existing_routes=existing_routes,
-            existing_column_paths=existing_column_paths,
-            pricing_mode=pricing_mode,
-            pricing_yield_ratio=pricing_yield_ratio,
-            source_neighbor_block=blocks[0] if blocks else tuple(),
-            worker_id=0,
-            max_frontier_cell_size=max_frontier_cell_size,
-            max_frontier_pair_product=max_frontier_pair_product,
-            max_frontier_split_depth=max_frontier_split_depth,
-            enable_resource_restricted_closure_bound=enable_resource_restricted_closure_bound,
-            source_prefixes=task_plan.source_prefix_blocks[0] if task_plan.source_prefix_blocks else tuple(),
-        )
-        result = replace(
-            result,
-            diagnostics=replace(
-                result.diagnostics,
-                adaptive_slice_seconds=adaptive_slice_seconds,
-                productive_yield_window_rate=productive_yield_window_rate,
-                prefix_task_depth=prefix_task_depth,
-                pricing_initial_source_neighbors=len(source_neighbors),
-                pricing_initial_task_count=len(blocks),
-                pricing_initial_block_loads=task_plan.initial_block_loads,
-                pricing_initial_load_imbalance_max_mean=task_plan.initial_load_imbalance,
-                pricing_empty_initial_blocks=task_plan.initial_empty_blocks,
-                pricing_dynamic_split_candidates=task_plan.dynamic_split_candidates,
-                pricing_dynamic_splits_performed=task_plan.dynamic_splits_performed,
-                pricing_dynamic_split_rejected_close_to_closure=task_plan.dynamic_split_rejected_close_to_closure,
-                pricing_dynamic_split_rejected_small_queue=task_plan.dynamic_split_rejected_small_queue,
-                pricing_dynamic_split_rejected_short_elapsed=task_plan.dynamic_split_rejected_short_elapsed,
-                pricing_dynamic_split_rejected_low_workload=task_plan.dynamic_split_rejected_low_workload,
-                pricing_dynamic_child_tasks_created=task_plan.dynamic_child_tasks_created,
-                pricing_labels_transferred_to_idle_workers=task_plan.labels_transferred_to_idle_workers,
-                pricing_split_overhead_time=task_plan.split_overhead_time,
-                pricing_leaf_tasks_closed=1 if result.diagnostics.exact_completion and not result.routes else 0,
-                pricing_open_labels_by_task_max=result.diagnostics.max_queue_size,
-            ),
-        )
-        return _with_runtime_diagnostics(
-            result,
-            pricing_worker_backend="serial",
-            process_cpu_time_seconds=time.process_time() - cpu_start,
-            worker_id=0,
-            source_neighbor_count=len(source_neighbors),
-            source_neighbor_block_sizes=task_plan.initial_block_sizes,
-            parallel_workers=1,
-            source_neighbor_task_count=len(blocks),
-            source_neighbor_task_sizes=task_plan.task_size_units,
-        )
-
-    manager = None
-    stop_event = Event()
-    executor_class = ThreadPoolExecutor
-    if pricing_worker_backend == "process":
-        manager = multiprocessing.Manager()
-        stop_event = manager.Event()
-        executor_class = ProcessPoolExecutor
-    first_hit_enabled = pricing_mode != "closure" and (stop_at_first_negative or batch_size == 1)
-    worker_batch_size = 1 if first_hit_enabled else batch_size
-    known_signature_costs = _known_signature_costs(
-        existing_routes,
-        existing_column_paths,
-        graph,
-        residual_customers,
-        RouteSignatureCache(),
-    )
-    pricing_epoch = _pricing_epoch(objective, residual_customers, restrictions, duals, existing_routes, existing_column_paths)
-    worker_args = [
-        (
-            worker_id,
-            pricing_epoch,
-            block,
-            graph,
-            objective,
-            residual_customers,
-            restrictions,
-            duals,
-            next_route_id,
-            farkas,
-            pricing_tolerance,
-            use_standard_acceleration,
-            first_hit_enabled,
-            worker_batch_size,
-            deadline,
-            existing_routes,
-            existing_column_paths,
-            pricing_mode,
-            pricing_yield_ratio,
-            stop_event,
-            pricing_worker_backend,
-            len(source_neighbors),
-            task_plan.initial_block_sizes,
-            len(blocks),
-            known_signature_costs,
-            task_plan.initial_block_loads,
-            task_plan.initial_load_imbalance,
-            task_plan.initial_empty_blocks,
-            len(blocks),
-            task_plan.dynamic_split_candidates,
-            task_plan.dynamic_splits_performed,
-            task_plan.dynamic_split_rejected_close_to_closure,
-            task_plan.dynamic_split_rejected_small_queue,
-            task_plan.dynamic_split_rejected_short_elapsed,
-            task_plan.dynamic_split_rejected_low_workload,
-            task_plan.dynamic_child_tasks_created,
-            task_plan.labels_transferred_to_idle_workers,
-            task_plan.split_overhead_time,
-            task_plan.source_prefix_blocks[worker_id],
-            task_plan.task_size_units[worker_id],
-            max_frontier_cell_size,
-            max_frontier_pair_product,
-            max_frontier_split_depth,
-            enable_resource_restricted_closure_bound,
-        )
-        for worker_id, block in enumerate(blocks)
-    ]
-    results: list[PricingResult] = []
-    parallel_cpu_start = time.process_time()
-    try:
-        with executor_class(max_workers=parallel_workers) as executor:
-            pending = {executor.submit(_run_forward_pricing_worker, args) for args in worker_args}
-            while pending:
-                done, pending = wait(pending, return_when=FIRST_COMPLETED)
-                for future in sorted(done, key=lambda item: id(item)):
-                    result = future.result()
-                    results.append(result)
-                    if first_hit_enabled and result.routes:
-                        stop_event.set()
-                        if pending:
-                            done_remaining, pending = wait(pending)
-                            results.extend(future.result() for future in done_remaining)
-                        return _merge_parallel_forward_results(
-                            results,
-                            graph,
-                            objective,
-                            residual_customers,
-                            restrictions,
-                            duals,
-                            next_route_id,
-                            farkas,
-                            pricing_tolerance,
-                            existing_routes,
-                            existing_column_paths,
-                            pricing_mode,
-                            pricing_yield_ratio,
-                            pricing_worker_backend,
-                            len(source_neighbors),
-                            task_plan.initial_block_sizes,
-                            len(blocks),
-                            selected=result,
-                            process_cpu_time_seconds=time.process_time() - parallel_cpu_start,
-                            adaptive_slice_seconds=adaptive_slice_seconds,
-                            productive_yield_window_rate=productive_yield_window_rate,
-                            prefix_task_depth=prefix_task_depth,
-                        )
-    finally:
-        if manager is not None:
-            manager.shutdown()
-    if any(result.diagnostics.pricing_status == PRICING_STATUS_TIME_LIMIT_NO_COLUMNS for result in results):
-        diagnostic_result = _merge_parallel_forward_results(
-            results,
-            graph,
-            objective,
-            residual_customers,
-            restrictions,
-            duals,
-            next_route_id,
-            farkas,
-            pricing_tolerance,
-            existing_routes,
-            existing_column_paths,
-            pricing_mode,
-            pricing_yield_ratio,
-            pricing_worker_backend,
-            len(source_neighbors),
-            task_plan.initial_block_sizes,
-            len(blocks),
-            selected=None,
-            force_time_limit=True,
-            process_cpu_time_seconds=time.process_time() - parallel_cpu_start,
-            adaptive_slice_seconds=adaptive_slice_seconds,
-            productive_yield_window_rate=productive_yield_window_rate,
-            prefix_task_depth=prefix_task_depth,
-        )
-        raise PricingTimeLimitReached(diagnostic_result.diagnostics)
-    return _merge_parallel_forward_results(
-        results,
-        graph,
-        objective,
-        residual_customers,
-        restrictions,
-        duals,
-        next_route_id,
-        farkas,
-        pricing_tolerance,
-        existing_routes,
-        existing_column_paths,
-        pricing_mode,
-        pricing_yield_ratio,
-        pricing_worker_backend,
-        len(source_neighbors),
-        task_plan.initial_block_sizes,
-        len(blocks),
-        selected=None,
-        process_cpu_time_seconds=time.process_time() - parallel_cpu_start,
-        adaptive_slice_seconds=adaptive_slice_seconds,
-        productive_yield_window_rate=productive_yield_window_rate,
         prefix_task_depth=prefix_task_depth,
     )
-
-
-def _run_forward_pricing_worker(args: tuple) -> PricingResult:
-    (
-        worker_id,
-        pricing_epoch,
-        source_neighbor_block,
-        graph,
-        objective,
-        residual_customers,
-        restrictions,
-        duals,
-        next_route_id,
-        farkas,
-        pricing_tolerance,
-        use_standard_acceleration,
-        stop_at_first_negative,
-        batch_size,
-        deadline,
-        existing_routes,
-        existing_column_paths,
-        pricing_mode,
-        pricing_yield_ratio,
-        stop_event,
-        pricing_worker_backend,
-        source_neighbor_count,
-        source_neighbor_block_sizes,
-        parallel_workers,
-        known_signature_costs,
-        source_neighbor_block_loads,
-        source_neighbor_load_imbalance,
-        source_neighbor_empty_initial_blocks,
-        pricing_initial_task_count,
-        dynamic_split_candidates,
-        dynamic_splits_performed,
-        dynamic_split_rejected_close_to_closure,
-        dynamic_split_rejected_small_queue,
-        dynamic_split_rejected_short_elapsed,
-        dynamic_split_rejected_low_workload,
-        dynamic_child_tasks_created,
-        labels_transferred_to_idle_workers,
-        split_overhead_time,
-        source_prefixes,
-        source_neighbor_task_size,
-        max_frontier_cell_size,
-        max_frontier_pair_product,
-        max_frontier_split_depth,
-        enable_resource_restricted_closure_bound,
-    ) = args
-    cpu_start = time.process_time()
-    try:
-        result = _price_route_forward_only(
-            graph=graph,
-            objective=objective,
-            residual_customers=residual_customers,
-            restrictions=restrictions,
-            duals=duals,
-            next_route_id=next_route_id,
-            farkas=farkas,
-            pricing_tolerance=pricing_tolerance,
-            use_standard_acceleration=use_standard_acceleration,
-            stop_at_first_negative=stop_at_first_negative,
-            batch_size=batch_size,
-            deadline=deadline,
-            existing_routes=existing_routes,
-            existing_column_paths=existing_column_paths,
-            pricing_mode=pricing_mode,
-            pricing_yield_ratio=pricing_yield_ratio,
-            source_neighbor_block=tuple(source_neighbor_block),
-            worker_id=worker_id,
-            stop_event=stop_event,
-            known_signature_costs_snapshot=known_signature_costs,
-            source_prefixes=tuple(source_prefixes),
-            max_frontier_cell_size=max_frontier_cell_size,
-            max_frontier_pair_product=max_frontier_pair_product,
-            max_frontier_split_depth=max_frontier_split_depth,
-            enable_resource_restricted_closure_bound=enable_resource_restricted_closure_bound,
-        )
-    except PricingTimeLimitReached as exc:
-        result = PricingResult(tuple(), tuple(), None, None, exc.diagnostics)
-    result = _with_runtime_diagnostics(
-        result,
-        pricing_worker_backend=pricing_worker_backend,
-        process_cpu_time_seconds=time.process_time() - cpu_start,
-        worker_id=worker_id,
-        source_neighbor_count=source_neighbor_count,
-        source_neighbor_block_sizes=tuple(source_neighbor_block_sizes),
-        parallel_workers=parallel_workers,
-        source_neighbor_task_count=pricing_initial_task_count,
-        source_neighbor_task_sizes=(source_neighbor_task_size,),
-    )
-    return replace(
-        result,
-        diagnostics=replace(
-            result.diagnostics,
-            pricing_initial_source_neighbors=source_neighbor_count,
-            pricing_initial_task_count=pricing_initial_task_count,
-            pricing_initial_block_loads=tuple(source_neighbor_block_loads),
-            pricing_initial_load_imbalance_max_mean=source_neighbor_load_imbalance,
-            pricing_empty_initial_blocks=source_neighbor_empty_initial_blocks,
-            pricing_dynamic_split_candidates=dynamic_split_candidates,
-            pricing_dynamic_splits_performed=dynamic_splits_performed,
-            pricing_dynamic_split_rejected_close_to_closure=dynamic_split_rejected_close_to_closure,
-            pricing_dynamic_split_rejected_small_queue=dynamic_split_rejected_small_queue,
-            pricing_dynamic_split_rejected_short_elapsed=dynamic_split_rejected_short_elapsed,
-            pricing_dynamic_split_rejected_low_workload=dynamic_split_rejected_low_workload,
-            pricing_dynamic_child_tasks_created=dynamic_child_tasks_created,
-            pricing_labels_transferred_to_idle_workers=labels_transferred_to_idle_workers,
-            pricing_split_overhead_time=split_overhead_time,
-            pricing_leaf_tasks_closed=1 if result.diagnostics.exact_completion and not result.routes else 0,
-            pricing_open_labels_by_task_max=result.diagnostics.max_queue_size,
-        ),
-    )
-
-
-def _run_persistent_forward_pricing_worker(task: _WorkerPricingTask) -> _WorkerPricingResult:
-    if _PROCESS_WORKER_GRAPH is None or _PROCESS_WORKER_OBJECTIVE is None:
-        raise RuntimeError("persistent pricing process worker was not initialized")
-    cpu_start = time.process_time()
-    try:
-        result = _price_route_forward_only(
-            graph=_PROCESS_WORKER_GRAPH,
-            objective=_PROCESS_WORKER_OBJECTIVE,
-            residual_customers=task.residual_customers,
-            restrictions=task.restrictions,
-            duals=task.duals,
-            next_route_id=task.next_route_id,
-            farkas=task.farkas,
-            pricing_tolerance=task.pricing_tolerance,
-            use_standard_acceleration=task.use_standard_acceleration,
-            stop_at_first_negative=task.stop_at_first_negative,
-            batch_size=task.batch_size,
-            deadline=task.deadline,
-            existing_routes=None,
-            existing_column_paths=None,
-            pricing_mode=task.pricing_mode,
-            pricing_yield_ratio=task.pricing_yield_ratio,
-            source_neighbor_block=tuple(task.source_neighbor_block),
-            worker_id=task.worker_id,
-            stop_event=task.stop_event,
-            known_signature_costs_snapshot=task.known_signature_costs,
-            source_prefixes=task.source_prefixes,
-            max_frontier_cell_size=task.max_frontier_cell_size,
-            max_frontier_pair_product=task.max_frontier_pair_product,
-            max_frontier_split_depth=task.max_frontier_split_depth,
-            enable_resource_restricted_closure_bound=task.enable_resource_restricted_closure_bound,
-        )
-    except PricingTimeLimitReached as exc:
-        result = PricingResult(tuple(), tuple(), None, None, exc.diagnostics)
-    result = _with_runtime_diagnostics(
-        result,
-        pricing_worker_backend=task.pricing_worker_backend,
-        process_cpu_time_seconds=time.process_time() - cpu_start,
-        worker_id=task.worker_id,
-        source_neighbor_count=task.source_neighbor_count,
-        source_neighbor_block_sizes=tuple(task.source_neighbor_block_sizes),
-        parallel_workers=task.parallel_workers,
-        source_neighbor_task_count=task.source_neighbor_task_count,
-        source_neighbor_task_sizes=tuple(task.source_neighbor_task_sizes),
-        local_worker_candidate_quota=task.local_worker_candidate_quota,
-    )
-    result = replace(
-        result,
-        diagnostics=replace(
-            result.diagnostics,
-            pricing_initial_source_neighbors=task.source_neighbor_count,
-            pricing_initial_task_count=task.pricing_initial_task_count,
-            pricing_initial_block_loads=tuple(task.source_neighbor_block_loads),
-            pricing_initial_load_imbalance_max_mean=task.source_neighbor_load_imbalance,
-            pricing_empty_initial_blocks=task.source_neighbor_empty_initial_blocks,
-            pricing_dynamic_split_candidates=task.dynamic_split_candidates,
-            pricing_dynamic_splits_performed=task.dynamic_splits_performed,
-            pricing_dynamic_split_rejected_close_to_closure=task.dynamic_split_rejected_close_to_closure,
-            pricing_dynamic_split_rejected_small_queue=task.dynamic_split_rejected_small_queue,
-            pricing_dynamic_split_rejected_short_elapsed=task.dynamic_split_rejected_short_elapsed,
-            pricing_dynamic_split_rejected_low_workload=task.dynamic_split_rejected_low_workload,
-            pricing_dynamic_child_tasks_created=task.dynamic_child_tasks_created,
-            pricing_labels_transferred_to_idle_workers=task.labels_transferred_to_idle_workers,
-            pricing_split_overhead_time=task.split_overhead_time,
-            pricing_leaf_tasks_closed=1 if result.diagnostics.exact_completion and not result.routes else 0,
-            pricing_open_labels_by_task_max=result.diagnostics.max_queue_size,
-        ),
-    )
-    return _WorkerPricingResult(
-        call_id=task.call_id,
-        dual_id=task.dual_id,
-        epoch=task.epoch,
-        worker_id=task.worker_id,
-        route_paths=tuple(route.path for route in result.routes),
-        reduced_costs=tuple(result.reduced_costs),
-        best_path=None if result.best_route is None else result.best_route.path,
-        best_reduced_cost=result.best_reduced_cost,
-        diagnostics=result.diagnostics,
-    )
-
 
 def _admissible_source_neighbors(graph: TransformedGraph) -> tuple[str, ...]:
     source = graph.instance.depot_source
     sink = graph.instance.depot_sink
     return tuple(sorted(node for node in graph.out_arcs[source] if node != sink))
-
-
-def _node_order_key(graph: TransformedGraph, node: str) -> tuple[int, str]:
-    try:
-        return (graph.nodes.index(node), node)
-    except ValueError:
-        return (len(graph.nodes), node)
-
-
-def _reachable_transformed_nodes(graph: TransformedGraph, start: str) -> frozenset[str]:
-    seen: set[str] = set()
-    stack = [start]
-    while stack:
-        node = stack.pop()
-        if node in seen:
-            continue
-        seen.add(node)
-        stack.extend(next_node for next_node in graph.out_arcs.get(node, tuple()) if next_node not in seen)
-    return frozenset(seen)
-
-
-def _source_neighbor_workload_score(
-    neighbor: str,
-    graph: TransformedGraph,
-    objective: ObjectiveData,
-    residual_customers: frozenset[str],
-    balance_config: _KCoreBalanceConfig,
-) -> float:
-    reachable_nodes = _reachable_transformed_nodes(graph, neighbor)
-    instance = graph.instance
-    reachable_customers = {
-        served_customer(node)
-        for node in reachable_nodes
-        if is_customer_representation(node, instance) and served_customer(node) in residual_customers
-    }
-    reachable_drone_pads = {
-        duplicate_hub(node)
-        for node in reachable_nodes
-        if is_duplicate(node) and duplicate_customer(node) in residual_customers
-    }
-    deadline_customers = {
-        customer
-        for customer in reachable_customers
-        if objective.bounds.service_ub.get(customer, float("inf")) < float("inf")
-    }
-    return (
-        1.0
-        + balance_config.alpha_reachable_customers * len(reachable_customers)
-        + balance_config.alpha_out_degree * len(graph.out_arcs.get(neighbor, tuple()))
-        + balance_config.alpha_drone_pads * len(reachable_drone_pads)
-        + balance_config.alpha_deadline_customers * len(deadline_customers)
-    )
-
-
-def _balanced_source_neighbor_partition(
-    neighbors: tuple[str, ...],
-    workers: int,
-    *,
-    graph: TransformedGraph | None = None,
-    objective: ObjectiveData | None = None,
-    residual_customers: frozenset[str] | None = None,
-    balance_config: _KCoreBalanceConfig | None = None,
-) -> _SourceNeighborPartition:
-    if workers <= 0:
-        raise ValueError("workers must be positive")
-    balance = balance_config or _KCoreBalanceConfig()
-    if not neighbors:
-        return _SourceNeighborPartition(tuple(tuple() for _ in range(workers)), tuple(0.0 for _ in range(workers)), tuple())
-    if not balance.enabled or graph is None or objective is None or residual_customers is None:
-        blocks: list[list[str]] = [[] for _ in range(workers)]
-        loads = [0.0 for _ in range(workers)]
-        for neighbor in sorted(neighbors):
-            core_id = min(range(workers), key=lambda index: (loads[index], index))
-            blocks[core_id].append(neighbor)
-            loads[core_id] += 1.0
-        return _SourceNeighborPartition(
-            tuple(tuple(block) for block in blocks),
-            tuple(loads),
-            tuple((neighbor, 1.0) for neighbor in sorted(neighbors)),
-        )
-    blocks: list[list[str]] = [[] for _ in range(workers)]
-    loads = [0.0 for _ in range(workers)]
-    scores = tuple(
-        sorted(
-            (
-                (neighbor, _source_neighbor_workload_score(neighbor, graph, objective, residual_customers, balance))
-                for neighbor in neighbors
-            ),
-            key=lambda item: (-item[1], _node_order_key(graph, item[0])),
-        )
-    )
-    for neighbor, score in scores:
-        core_id = min(range(workers), key=lambda index: (loads[index], index))
-        blocks[core_id].append(neighbor)
-        loads[core_id] += score
-    return _SourceNeighborPartition(tuple(tuple(block) for block in blocks), tuple(loads), scores)
-
-
-def _partition_source_neighbors(
-    neighbors: tuple[str, ...],
-    workers: int,
-    *,
-    graph: TransformedGraph | None = None,
-    objective: ObjectiveData | None = None,
-    residual_customers: frozenset[str] | None = None,
-    balance_config: _KCoreBalanceConfig | None = None,
-) -> tuple[tuple[str, ...], ...]:
-    return _balanced_source_neighbor_partition(
-        neighbors,
-        workers,
-        graph=graph,
-        objective=objective,
-        residual_customers=residual_customers,
-        balance_config=balance_config,
-    ).blocks
-
-
-def _chunk_source_neighbors(neighbors: tuple[str, ...], task_size: int) -> tuple[tuple[str, ...], ...]:
-    if task_size <= 0:
-        raise ValueError("source neighbor task size must be positive")
-    if not neighbors:
-        return (tuple(),)
-    return tuple(tuple(neighbors[index:index + task_size]) for index in range(0, len(neighbors), task_size))
-
 
 def _source_neighbor_prefix_tasks(
     graph: TransformedGraph,
@@ -2311,7 +1659,6 @@ def _source_neighbor_prefix_tasks(
     source = instance.depot_source
     sink = instance.depot_sink
     zero_duals = PricingDuals(mu={customer: 0.0 for customer in instance.customers}, kappa=0.0, nu={})
-    arc_customer_sets = {arc: graph.arc_customer_set(arc) for arc in graph.arcs}
     source_label = _Label(
         path=(source,),
         represented=frozenset(),
@@ -2355,133 +1702,167 @@ def _source_neighbor_prefix_tasks(
                 tuple(),
                 False,
                 restrictions,
-                arc_customer_sets,
             )
             if next_node == sink:
-                if new_label.represented and _complete_allowed(new_label, graph, restrictions, arc_customer_sets):
+                if new_label.represented and _complete_allowed(new_label, graph, restrictions):
                     prefixes.append(new_label.path[1:])
                 continue
             stack.append(new_label)
     return tuple(sorted(set(prefixes)))
 
-
-def _chunk_prefix_tasks(prefixes: tuple[tuple[str, ...], ...], task_size: int) -> tuple[tuple[tuple[str, ...], ...], ...]:
-    if task_size <= 0:
-        raise ValueError("source neighbor task size must be positive")
-    if not prefixes:
-        return (tuple(),)
-    return tuple(tuple(prefixes[index:index + task_size]) for index in range(0, len(prefixes), task_size))
-
-
-def _build_balanced_dynamic_task_plan(
+def _build_deterministic_task_plan(
     graph: TransformedGraph,
     objective: ObjectiveData,
     residual_customers: frozenset[str],
     restrictions: BranchRestrictions,
-    source_neighbors: tuple[str, ...],
-    workers: int,
     *,
     prefix_task_depth: int,
-    balance_config: _KCoreBalanceConfig,
-    refinement_config: _DynamicRefinementConfig,
-    pricing_tolerance: float,
 ) -> _PricingTaskPlan:
-    planning_start = time.time()
-    partition = _balanced_source_neighbor_partition(
-        source_neighbors,
-        workers,
-        graph=graph,
-        objective=objective,
-        residual_customers=residual_customers,
-        balance_config=balance_config,
+    prefixes = _source_neighbor_prefix_tasks(
+        graph,
+        objective,
+        residual_customers,
+        restrictions,
+        prefix_task_depth,
     )
-    effective_depth = max(prefix_task_depth, refinement_config.refinement_depth if refinement_config.enabled else prefix_task_depth)
-    if effective_depth <= 1:
-        return _PricingTaskPlan(
-            source_neighbor_blocks=partition.blocks,
-            source_prefix_blocks=tuple(tuple() for _ in partition.blocks),
-            task_size_units=tuple(len(block) for block in partition.blocks),
-            initial_block_sizes=tuple(len(block) for block in partition.blocks),
-            initial_block_loads=partition.loads,
-            initial_load_imbalance=partition.imbalance_max_mean,
-            initial_empty_blocks=sum(1 for block in partition.blocks if not block),
-            split_overhead_time=time.time() - planning_start,
-        )
-    prefixes = _source_neighbor_prefix_tasks(graph, objective, residual_customers, restrictions, effective_depth)
-    first_neighbor_to_core: dict[str, int] = {}
-    for core_id, block in enumerate(partition.blocks):
-        for first_neighbor in block:
-            first_neighbor_to_core[first_neighbor] = core_id
-    grouped_prefixes: list[list[tuple[str, ...]]] = [[] for _ in partition.blocks]
-    for prefix in prefixes:
-        if not prefix:
-            raise RuntimeError("empty source prefix task")
-        grouped_prefixes[first_neighbor_to_core[prefix[0]]].append(prefix)
-
-    source_blocks: list[tuple[str, ...]] = []
-    prefix_blocks: list[tuple[tuple[str, ...], ...]] = []
-    task_units: list[int] = []
-    split_candidates = 0
-    splits_performed = 0
-    rejected_close = 0
-    rejected_small = 0
-    rejected_short = 0
-    rejected_low_work = 0
-    child_tasks = 0
-    labels_transferred = 0
-    split_gap_threshold = pricing_tolerance * refinement_config.split_gap_multiplier
-    for core_id, block in enumerate(partition.blocks):
-        core_prefixes = tuple(sorted(grouped_prefixes[core_id]))
-        workload = partition.loads[core_id] if core_id < len(partition.loads) else 0.0
-        estimated_open_labels = max(len(core_prefixes), int(workload * max(len(core_prefixes), 1)))
-        split_candidate = refinement_config.enabled and len(core_prefixes) > 1
-        if split_candidate:
-            split_candidates += 1
-        split_allowed = split_candidate
-        if split_allowed and estimated_open_labels < refinement_config.split_label_threshold:
-            split_allowed = False
-            rejected_small += 1
-        if split_allowed and split_gap_threshold <= 0.0:
-            split_allowed = False
-            rejected_close += 1
-        if split_allowed and estimated_open_labels < refinement_config.split_work_threshold:
-            split_allowed = False
-            rejected_low_work += 1
-        if split_allowed:
-            splits_performed += 1
-            for prefix in core_prefixes:
-                source_blocks.append((prefix[0],))
-                prefix_blocks.append((prefix,))
-                task_units.append(1)
-            child_tasks += len(core_prefixes)
-            labels_transferred += len(core_prefixes)
-        elif core_prefixes:
-            source_blocks.append(block)
-            prefix_blocks.append(core_prefixes)
-            task_units.append(len(core_prefixes))
-        else:
-            source_blocks.append(block)
-            prefix_blocks.append(tuple())
-            task_units.append(len(block))
+    if not prefixes:
+        return _PricingTaskPlan(prefixes=(tuple(),), source_neighbors=tuple())
     return _PricingTaskPlan(
-        source_neighbor_blocks=tuple(source_blocks),
-        source_prefix_blocks=tuple(prefix_blocks),
-        task_size_units=tuple(task_units),
-        initial_block_sizes=tuple(len(block) for block in partition.blocks),
-        initial_block_loads=partition.loads,
-        initial_load_imbalance=partition.imbalance_max_mean,
-        initial_empty_blocks=sum(1 for block in partition.blocks if not block),
-        dynamic_split_candidates=split_candidates,
-        dynamic_splits_performed=splits_performed,
-        dynamic_split_rejected_close_to_closure=rejected_close,
-        dynamic_split_rejected_small_queue=rejected_small,
-        dynamic_split_rejected_short_elapsed=rejected_short,
-        dynamic_split_rejected_low_workload=rejected_low_work,
-        dynamic_child_tasks_created=child_tasks,
-        labels_transferred_to_idle_workers=labels_transferred,
-        split_overhead_time=time.time() - planning_start,
+        prefixes=prefixes,
+        source_neighbors=tuple(sorted({prefix[0] for prefix in prefixes})),
     )
 
+def _pricing_source_label(
+    graph: TransformedGraph,
+    objective: ObjectiveData,
+    duals: PricingDuals,
+    farkas: bool,
+) -> _Label:
+    instance = graph.instance
+    active_sr = tuple(sorted(duals.nu))
+    source_cost = -duals.kappa if farkas else objective.coeffs.cost * instance.truck_cost - duals.kappa
+    return _Label(
+        path=(instance.depot_source,),
+        represented=frozenset(),
+        truck_visited=frozenset({instance.depot_source}),
+        truck_load=0.0,
+        active_pad=None,
+        active_pad_arrival=0.0,
+        active_wait=0.0,
+        block_count=0,
+        physical_time=0.0,
+        service_times=tuple(),
+        sr_counts=tuple((triplet, 0) for triplet in active_sr),
+        reduced_cost=source_cost,
+        used_arcs=frozenset(),
+        represented_mask=0,
+        truck_node_mask=_truck_node_mask(frozenset({instance.depot_source}), graph),
+    )
+
+def _balanced_source_neighbor_plan(
+    graph: TransformedGraph,
+    objective: ObjectiveData,
+    residual_customers: frozenset[str],
+    restrictions: BranchRestrictions,
+    duals: PricingDuals,
+    worker_count: int,
+    scheduler: PricingSchedulerConfig,
+) -> _BalancedTaskPlan:
+    if worker_count <= 0:
+        raise ValueError("worker_count must be positive")
+    shortest = _shortest_truck_times(graph)
+    source_label = _pricing_source_label(graph, objective, duals, False)
+    scored: list[tuple[str, float]] = []
+    for neighbor in _admissible_source_neighbors(graph):
+        if not _extension_allowed(source_label, neighbor, graph, residual_customers, restrictions):
+            continue
+        if _extension_rejected_by_service_deadline(source_label, neighbor, graph, objective):
+            continue
+        first_label = _extend(
+            source_label,
+            neighbor,
+            graph,
+            objective,
+            duals,
+            tuple(sorted(duals.nu)),
+            False,
+            restrictions,
+        )
+        location = _physical_location(first_label)
+        reachable = tuple(
+            customer
+            for customer in residual_customers - first_label.represented
+            if _customer_reachable_from_location(customer, location, graph, shortest)
+        )
+        deadline_compatible = tuple(
+            customer
+            for customer in reachable
+            if _customer_deadline_reachable_from_label(first_label, customer, graph, objective, shortest)
+        )
+        drone_pads = {
+            hub
+            for hub in graph.instance.hubs
+            if isfinite(shortest[(location, hub)])
+            and isfinite(shortest[(hub, graph.instance.depot_sink)])
+            and any(
+                (hub, customer) in graph.instance.drone_arcs
+                for customer in residual_customers - first_label.represented
+            )
+        }
+        score = (
+            1.0
+            + scheduler.customer_weight * len(reachable)
+            + scheduler.out_degree_weight * len(graph.out_arcs[neighbor])
+            + scheduler.drone_pad_weight * len(drone_pads)
+            + scheduler.deadline_weight * len(deadline_compatible)
+        )
+        scored.append((neighbor, score))
+    scored.sort(key=lambda item: (-item[1], item[0]))
+    blocks: list[list[str]] = [[] for _ in range(worker_count)]
+    loads = [0.0 for _ in range(worker_count)]
+    for neighbor, score in scored:
+        worker = min(range(worker_count), key=lambda index: (loads[index], index))
+        blocks[worker].append(neighbor)
+        loads[worker] += score
+    return _BalancedTaskPlan(
+        source_neighbors=tuple(sorted(neighbor for neighbor, _ in scored)),
+        blocks=tuple(tuple(block) for block in blocks),
+        block_scores=tuple(loads),
+        successor_scores=tuple(sorted(scored)),
+    )
+
+def _split_open_label_frontier(
+    labels: tuple[_Label, ...],
+    *,
+    task_root_prefix: tuple[str, ...],
+    refinement_depth: int,
+    child_limit: int,
+) -> tuple[tuple[_Label, ...], tuple[tuple[tuple[str, ...], tuple[_Label, ...]], ...]]:
+    if refinement_depth <= 0 or child_limit <= 0:
+        raise ValueError("refinement depth and child limit must be positive")
+    groups: dict[tuple[str, ...], list[_Label]] = {}
+    retained: list[_Label] = []
+    root_length = len(task_root_prefix)
+    for label in labels:
+        encoded_prefix = label.path[1:]
+        if task_root_prefix and encoded_prefix[:root_length] != task_root_prefix:
+            raise RuntimeError("open label does not belong to its task root prefix")
+        split_start = root_length
+        if len(encoded_prefix) < split_start + refinement_depth:
+            retained.append(label)
+            continue
+        signature = encoded_prefix[: split_start + refinement_depth]
+        groups.setdefault(signature, []).append(label)
+    ranked = sorted(groups.items(), key=lambda item: (-len(item[1]), item[0]))
+    if len(ranked) < 2:
+        return labels, tuple()
+    transferred = ranked[: min(child_limit, len(ranked) - 1)]
+    transferred_keys = {key for key, _ in transferred}
+    for key, group in ranked:
+        if key not in transferred_keys:
+            retained.extend(group)
+    children = tuple((key, tuple(group)) for key, group in transferred)
+    return tuple(retained), children
 
 def _with_runtime_diagnostics(
     result: PricingResult,
@@ -2494,7 +1875,6 @@ def _with_runtime_diagnostics(
     parallel_workers: int,
     source_neighbor_task_count: int = 0,
     source_neighbor_task_sizes: tuple[int, ...] = tuple(),
-    local_worker_candidate_quota: int = 0,
 ) -> PricingResult:
     elapsed = result.diagnostics.elapsed_seconds
     core_equivalent = process_cpu_time_seconds / elapsed if elapsed > 0.0 else 0.0
@@ -2514,7 +1894,6 @@ def _with_runtime_diagnostics(
         parallel_workers=parallel_workers,
         source_neighbor_task_count=source_neighbor_task_count,
         source_neighbor_task_sizes=source_neighbor_task_sizes,
-        local_worker_candidate_quota=local_worker_candidate_quota,
     )
     return PricingResult(
         result.routes,
@@ -2522,462 +1901,67 @@ def _with_runtime_diagnostics(
         result.best_route,
         result.best_reduced_cost,
         diagnostics,
-        result.side_pool_routes,
-        result.side_pool_reduced_costs,
     )
 
-
-def _merge_parallel_forward_results(
-    results: list[PricingResult],
+def _execute_forward_pricing_task(
+    task: _WorkerPricingTask,
     graph: TransformedGraph,
     objective: ObjectiveData,
-    residual_customers: frozenset[str],
-    restrictions: BranchRestrictions,
-    duals: PricingDuals,
-    next_route_id: int,
-    farkas: bool,
-    pricing_tolerance: float,
-    existing_routes: dict[tuple[str, ...], Route] | None,
-    existing_column_paths: set[tuple[str, ...]] | None,
-    pricing_mode: str,
-    pricing_yield_ratio: float,
-    pricing_worker_backend: str,
-    source_neighbor_count: int,
-    source_neighbor_block_sizes: tuple[int, ...],
-    parallel_workers: int,
-    *,
-    selected: PricingResult | None,
-    force_time_limit: bool = False,
-    process_cpu_time_seconds: float | None = None,
-    adaptive_slice_seconds: float = 0.0,
-    productive_yield_window_rate: float = 0.0,
-    prefix_task_depth: int = 1,
-) -> PricingResult:
-    diagnostics = [result.diagnostics for result in results]
-    candidate_sources = [selected] if selected is not None else sorted(
-        results,
-        key=lambda item: -1 if item.diagnostics.worker_id is None else item.diagnostics.worker_id,
+) -> _WorkerPricingResult:
+    cpu_start = time.process_time()
+    result = _price_route_forward_only(
+        graph=graph,
+        objective=objective,
+        residual_customers=task.residual_customers,
+        restrictions=task.restrictions,
+        duals=task.duals,
+        next_route_id=task.next_route_id,
+        farkas=task.farkas,
+        pricing_tolerance=task.pricing_tolerance,
+        use_standard_acceleration=task.use_standard_acceleration,
+        stop_at_first_negative=task.stop_at_first_negative,
+        batch_size=task.batch_size,
+        deadline=task.deadline,
+        existing_routes=None,
+        existing_column_paths=None,
+        pricing_mode=task.pricing_mode,
+        source_neighbor_block=tuple(sorted({prefix[0] for prefix in task.source_prefixes if prefix})),
+        worker_id=task.worker_id,
+        known_signature_costs_snapshot=task.known_signature_costs,
+        source_prefixes=task.source_prefixes,
+        initial_open_labels=task.initial_open_labels,
     )
-    raw_candidates: list[tuple[float, tuple[str, ...], int]] = []
-    for result in candidate_sources:
-        if result is None:
-            continue
-        worker_id = -1 if result.diagnostics.worker_id is None else result.diagnostics.worker_id
-        for route, cost in zip(result.routes, result.reduced_costs):
-            raw_candidates.append((cost, route.path, worker_id))
-    unique_candidates: list[tuple[float, tuple[str, ...], int]] = []
-    seen_paths: set[tuple[str, ...]] = set()
-    for cost, path, worker_id in sorted(raw_candidates, key=lambda item: (item[0], item[1], item[2])):
-        if path in seen_paths:
-            continue
-        seen_paths.add(path)
-        unique_candidates.append((cost, path, worker_id))
-    known_signature_costs = _known_signature_costs(
-        existing_routes,
-        existing_column_paths,
-        graph,
-        residual_customers,
-        RouteSignatureCache(),
+    if isinstance(result, _ForwardSearchCheckpoint):
+        raise RuntimeError("non-resumable pricing task returned a checkpoint")
+    result = _with_runtime_diagnostics(
+        result,
+        pricing_worker_backend="worker",
+        process_cpu_time_seconds=time.process_time() - cpu_start,
+        worker_id=task.worker_id,
+        source_neighbor_count=len({prefix[0] for prefix in task.source_prefixes if prefix}),
+        source_neighbor_block_sizes=(len(task.source_prefixes),),
+        parallel_workers=1,
+        source_neighbor_task_count=1,
+        source_neighbor_task_sizes=(len(task.source_prefixes),),
     )
-    signature_cache = RouteSignatureCache()
-    arc_customer_sets = {arc: graph.arc_customer_set(arc) for arc in graph.arcs}
-    verified_candidates: list[tuple[Route, float, int]] = []
-    for _, path, worker_id in unique_candidates:
-        route = route_from_path(next_route_id + len(verified_candidates), path, graph, objective)
-        if not restrictions.route_allowed(route, arc_customer_sets):
-            raise RuntimeError("parallel pricing candidate failed route-level branch validation")
-        direct_cost = route_farkas_reduced_cost(route, duals) if farkas else route_reduced_cost(route, duals)
-        if direct_cost >= -pricing_tolerance:
-            continue
-        duplicate, signature = _duplicate_dominated_by_existing(
-            route,
-            known_signature_costs,
-            graph,
-            residual_customers,
-            signature_cache,
-        )
-        if duplicate:
-            continue
-        verified_candidates.append((route, direct_cost, worker_id))
-        coeff_signature = route_coefficient_signature(signature)
-        known_signature_costs[coeff_signature] = min(
-            known_signature_costs.get(coeff_signature, float("inf")),
-            route.cost,
-        )
-    selected_candidates, diversity_quota = _select_diverse_pricing_candidates(
-        verified_candidates,
-        residual_customers,
-        max(1, max((item.diagnostics.returned_routes for item in results), default=1)),
-        0.0,
-    )
-    returned_routes = [route for route, _, _ in selected_candidates]
-    returned_costs = [cost for _, cost, _ in selected_candidates]
-    best_result = min(
-        (result for result in results if result.best_reduced_cost is not None),
-        key=lambda item: (item.best_reduced_cost, item.best_route.path if item.best_route else tuple()),
-        default=None,
-    )
-    best_cost = None if best_result is None else best_result.best_reduced_cost
-    best_route = None
-    if best_result is not None and best_result.best_route is not None:
-        best_route = route_from_path(next_route_id + len(returned_routes), best_result.best_route.path, graph, objective)
-    has_negative = bool(returned_routes)
-    exact_completion = bool(diagnostics) and all(item.exact_completion for item in diagnostics) and not has_negative and not force_time_limit
-    if force_time_limit:
-        termination_reason = "time_limit_unresolved"
-        certification_mode = "not_certified_time_limit"
-    elif has_negative:
-        termination_reason = "closure_negative_batch_found" if pricing_mode == "closure" else "productive_batch_found"
-        certification_mode = "not_certified_closure_returned_columns" if pricing_mode == "closure" else "not_certified_productive"
-    else:
-        termination_reason = "exact_pricing_complete"
-        certification_mode = "source_neighbor_partitions_closed"
-    elapsed = max((item.elapsed_seconds for item in diagnostics), default=0.0)
-    worker_cpu_sum = sum(item.process_cpu_time_seconds for item in diagnostics)
-    cpu_time = process_cpu_time_seconds if pricing_worker_backend == "thread" and process_cpu_time_seconds is not None else worker_cpu_sum
-    per_worker_elapsed = tuple(sorted((item.worker_id, item.elapsed_seconds) for item in diagnostics if item.worker_id is not None))
-    per_worker_cpu = tuple(sorted((item.worker_id, item.process_cpu_time_seconds) for item in diagnostics if item.worker_id is not None))
-    per_worker_generated = tuple(sorted((item.worker_id, item.labels_generated) for item in diagnostics if item.worker_id is not None))
-    per_worker_dominated = tuple(sorted((item.worker_id, item.labels_dominated) for item in diagnostics if item.worker_id is not None))
-    per_worker_pruned = tuple(sorted((item.worker_id, item.labels_pruned) for item in diagnostics if item.worker_id is not None))
-    per_worker_complete = tuple(sorted((item.worker_id, item.complete_routes_generated) for item in diagnostics if item.worker_id is not None))
-    per_worker_negative = tuple(sorted((item.worker_id, item.returned_routes) for item in diagnostics if item.worker_id is not None))
-    core_best_reduced_costs = tuple(
-        sorted(
-            (item.worker_id, item.best_reduced_cost)
-            for item in diagnostics
-            if item.worker_id is not None and item.best_reduced_cost is not None
-        )
-    )
-    min_core_reduced_cost = min((value for _, value in core_best_reduced_costs), default=None)
-    interrupted_cores = sum(1 for item in diagnostics if item.termination_reason == "interrupted_after_first_hit")
-    certification_timeouts = 1 if force_time_limit and pricing_mode == "closure" else 0
-    scheduler_summary = _scheduler_diagnostics_summary(diagnostics, parallel_workers=parallel_workers, elapsed=elapsed)
-    return _pricing_result(
-        returned_routes,
-        returned_costs,
-        best_route,
-        best_cost,
-        labels_generated=sum(item.labels_generated for item in diagnostics),
-        labels_dominated=sum(item.labels_dominated for item in diagnostics),
-        labels_pruned=sum(item.labels_pruned for item in diagnostics),
-        labels_purged=sum(item.labels_purged for item in diagnostics),
-        stale_labels_skipped=sum(item.stale_labels_skipped for item in diagnostics),
-        standard_bound_pruned=sum(item.standard_bound_pruned for item in diagnostics),
-        farkas_bound_pruned=sum(item.farkas_bound_pruned for item in diagnostics),
-        max_queue_size=max((item.max_queue_size for item in diagnostics), default=0),
-        complete_routes_generated=sum(item.complete_routes_generated for item in diagnostics),
-        exact_completion=exact_completion,
-        termination_reason=termination_reason,
-        certification_mode=certification_mode,
-        elapsed_seconds=elapsed,
-        pricing_engine="source_neighbor_parallel_forward",
-        forward_labels_generated=sum(item.forward_labels_generated for item in diagnostics),
-        forward_labeling_time_seconds=sum(item.forward_labeling_time_seconds for item in diagnostics),
-        parallel_labeling_used=True,
-        parallel_workers=parallel_workers,
-        parallel_calls=1,
-        pricing_mode=pricing_mode,
-        pricing_yield_ratio=pricing_yield_ratio,
-        pricing_worker_backend=pricing_worker_backend,
-        process_cpu_time_seconds=cpu_time,
-        cpu_core_equivalent=cpu_time / elapsed if elapsed > 0.0 else 0.0,
-        source_neighbor_count=source_neighbor_count,
-        source_neighbor_block_sizes=source_neighbor_block_sizes,
-        first_hit_worker_id=None if selected is None else selected.diagnostics.worker_id,
-        first_hit_exits=1 if selected is not None else 0,
-        interrupted_worker_calls=interrupted_cores,
-        certification_worker_calls=sum(1 for item in diagnostics if item.exact_completion and not item.returned_routes),
-        productive_worker_calls=sum(1 for item in diagnostics if item.returned_routes),
-        per_worker_elapsed_seconds=per_worker_elapsed,
-        per_worker_cpu_time_seconds=per_worker_cpu,
-        per_worker_labels_generated=per_worker_generated,
-        per_worker_labels_dominated=per_worker_dominated,
-        per_worker_labels_pruned=per_worker_pruned,
-        per_worker_completed_labels=per_worker_complete,
-        per_worker_verified_negative_routes=per_worker_negative,
-        core_subspace_count=len(source_neighbor_block_sizes),
-        core_empty_blocks=sum(1 for size in source_neighbor_block_sizes if size == 0),
-        core_best_reduced_costs=core_best_reduced_costs,
-        min_core_reduced_cost=min_core_reduced_cost,
-        productive_first_hit_core_id=None if selected is None else selected.diagnostics.worker_id,
-        productive_interrupted_cores=interrupted_cores,
-        certification_core_closed_count=sum(1 for item in diagnostics if item.exact_completion and not item.returned_routes),
-        certification_core_unresolved_count=sum(
-            1 for item in diagnostics if item.pricing_status == PRICING_STATUS_TIME_LIMIT_NO_COLUMNS
-        ),
-        root_closed_by_all_cores=exact_completion,
-        stale_worker_results_discarded=0,
-        number_of_productive_restarts=1 if pricing_mode == "productive" and has_negative else 0,
-        number_of_certification_calls=1 if pricing_mode == "closure" else 0,
-        number_of_certification_failures_due_to_negative_column=1 if pricing_mode == "closure" and has_negative else 0,
-        number_of_certification_timeouts_unresolved=certification_timeouts,
-        negative_routes_verified=len(returned_routes),
-        negative_routes_inserted=len(returned_routes),
-        adaptive_slice_seconds=adaptive_slice_seconds,
-        productive_yield_window_rate=productive_yield_window_rate,
-        prefix_task_depth=prefix_task_depth,
-        extensions_attempted=sum(item.extensions_attempted for item in diagnostics),
-        extensions_rejected_by_deadline=sum(item.extensions_rejected_by_deadline for item in diagnostics),
-        deadline_reachability_removed=sum(item.deadline_reachability_removed for item in diagnostics),
-        reward_set_size_before_deadline=sum(item.reward_set_size_before_deadline for item in diagnostics),
-        reward_set_size_after_deadline=sum(item.reward_set_size_after_deadline for item in diagnostics),
-        deadline_reward_bound_calls=sum(item.deadline_reward_bound_calls for item in diagnostics),
-        deadline_dominance_prefilter_skips=sum(item.deadline_dominance_prefilter_skips for item in diagnostics),
-        routes_rejected_by_deadline_in_master=sum(item.routes_rejected_by_deadline_in_master for item in diagnostics),
-        forward_dominance_tests=sum(item.forward_dominance_tests for item in diagnostics),
-        forward_same_node_dominance_tests=sum(item.forward_same_node_dominance_tests for item in diagnostics),
-        forward_physical_location_dominance_tests=sum(item.forward_physical_location_dominance_tests for item in diagnostics),
-        forward_physical_location_dominance_rejections=sum(
-            item.forward_physical_location_dominance_rejections for item in diagnostics
-        ),
-        forward_return_time_credit_checks=sum(item.forward_return_time_credit_checks for item in diagnostics),
-        forward_return_time_credit_checks_skipped=sum(
-            item.forward_return_time_credit_checks_skipped for item in diagnostics
-        ),
-        forward_branch_language_failures=sum(item.forward_branch_language_failures for item in diagnostics),
-        forward_mask_scalar_prefilter_failures=sum(item.forward_mask_scalar_prefilter_failures for item in diagnostics),
-        dom_gate_pairs_seen=sum(item.dom_gate_pairs_seen for item in diagnostics),
-        dom_gate_mask_failures=sum(item.dom_gate_mask_failures for item in diagnostics),
-        dom_gate_scalar_failures=sum(item.dom_gate_scalar_failures for item in diagnostics),
-        dom_gate_branch_failures=sum(item.dom_gate_branch_failures for item in diagnostics),
-        dom_gate_deadline_failures=sum(item.dom_gate_deadline_failures for item in diagnostics),
-        dom_frontier_queries=sum(item.dom_frontier_queries for item in diagnostics),
-        dom_frontier_keys_scanned=sum(item.dom_frontier_keys_scanned for item in diagnostics),
-        dom_frontier_keys_skipped_by_mask=sum(item.dom_frontier_keys_skipped_by_mask for item in diagnostics),
-        dom_frontier_keys_skipped_by_branch=sum(item.dom_frontier_keys_skipped_by_branch for item in diagnostics),
-        dom_frontier_keys_skipped_by_deadline=sum(item.dom_frontier_keys_skipped_by_deadline for item in diagnostics),
-        dom_frontier_keys_skipped_by_return_credit=sum(
-            item.dom_frontier_keys_skipped_by_return_credit for item in diagnostics
-        ),
-        frontier_cells_created=max((item.frontier_cells_created for item in diagnostics), default=0),
-        frontier_cells_split=max((item.frontier_cells_split for item in diagnostics), default=0),
-        frontier_cell_lb_min_at_stop=min(
-            (
-                item.frontier_cell_lb_min_at_stop
-                for item in diagnostics
-                if item.frontier_cell_lb_min_at_stop is not None
-            ),
-            default=None,
-        ),
-        frontier_cell_lb_closed=sum(item.frontier_cell_lb_closed for item in diagnostics),
-        frontier_cell_lb_invalidations=sum(item.frontier_cell_lb_invalidations for item in diagnostics),
-        mask_trie_subset_queries=sum(item.mask_trie_subset_queries for item in diagnostics),
-        mask_trie_superset_queries=sum(item.mask_trie_superset_queries for item in diagnostics),
-        mask_trie_returned_items=sum(item.mask_trie_returned_items for item in diagnostics),
-        mask_subset_queries=sum(item.mask_subset_queries for item in diagnostics),
-        mask_superset_queries=sum(item.mask_superset_queries for item in diagnostics),
-        mask_query_cache_hits=sum(item.mask_query_cache_hits for item in diagnostics),
-        mask_query_cache_misses=sum(item.mask_query_cache_misses for item in diagnostics),
-        cell_splits=sum(item.cell_splits for item in diagnostics),
-        cell_pair_products_before_split=sum(item.cell_pair_products_before_split for item in diagnostics),
-        cell_pairs_considered=sum(item.cell_pairs_considered for item in diagnostics),
-        cell_pairs_rejected_by_mask=sum(item.cell_pairs_rejected_by_mask for item in diagnostics),
-        cell_pairs_rejected_by_envelope=sum(item.cell_pairs_rejected_by_envelope for item in diagnostics),
-        cell_pairs_rejected_by_lb=sum(item.cell_pairs_rejected_by_lb for item in diagnostics),
-        cell_pairs_rejected_by_closure_lb=sum(item.cell_pairs_rejected_by_closure_lb for item in diagnostics),
-        label_pairs_materialized=sum(item.label_pairs_materialized for item in diagnostics),
-        labels_certified_by_cell_lb=sum(item.labels_certified_by_cell_lb for item in diagnostics),
-        full_same_node_tests=sum(item.full_same_node_tests for item in diagnostics),
-        full_physical_location_tests=sum(item.full_physical_location_tests for item in diagnostics),
-        labels_deleted_same_node=sum(item.labels_deleted_same_node for item in diagnostics),
-        labels_deleted_physical_location=sum(item.labels_deleted_physical_location for item in diagnostics),
-        closure_queue_pushes=sum(item.closure_queue_pushes for item in diagnostics),
-        closure_queue_pops=sum(item.closure_queue_pops for item in diagnostics),
-        closure_queue_min_key_at_stop=min(
-            (
-                item.closure_queue_min_key_at_stop
-                for item in diagnostics
-                if item.closure_queue_min_key_at_stop is not None
-            ),
-            default=None,
-        ),
-        certification_tasks_exhausted_by_cell_lb=sum(
-            item.certification_tasks_exhausted_by_cell_lb for item in diagnostics
-        ),
-        certification_tasks_closed_by_cell_lb=sum(
-            item.certification_tasks_closed_by_cell_lb for item in diagnostics
-        ),
-        certification_tasks_exhausted_by_label_search=sum(
-            item.certification_tasks_exhausted_by_label_search for item in diagnostics
-        ),
-        resource_reward_bound_calls=sum(item.resource_reward_bound_calls for item in diagnostics),
-        resource_reward_bound_time=sum(item.resource_reward_bound_time for item in diagnostics),
-        resource_reward_bound_fallbacks=sum(item.resource_reward_bound_fallbacks for item in diagnostics),
-        physdom_cell_pairs_considered=sum(item.physdom_cell_pairs_considered for item in diagnostics),
-        physdom_cell_pairs_rejected_by_mask=sum(item.physdom_cell_pairs_rejected_by_mask for item in diagnostics),
-        physdom_cell_pairs_rejected_by_envelope=sum(
-            item.physdom_cell_pairs_rejected_by_envelope for item in diagnostics
-        ),
-        physdom_label_pairs_materialized=sum(item.physdom_label_pairs_materialized for item in diagnostics),
-        physdom_full_tests=sum(item.physdom_full_tests for item in diagnostics),
-        physdom_deletions=sum(item.physdom_deletions for item in diagnostics),
-        physdom_time=sum(item.physdom_time for item in diagnostics),
-        return_credit_incompatible_pairs=sum(item.return_credit_incompatible_pairs for item in diagnostics),
-        dom_pairs_avoided_before_materialization=sum(
-            item.dom_pairs_avoided_before_materialization for item in diagnostics
-        ),
-        dom_candidate_pairs_materialized=sum(item.dom_candidate_pairs_materialized for item in diagnostics),
-        dom_full_tests_same_node=sum(item.dom_full_tests_same_node for item in diagnostics),
-        dom_full_tests_physical_location=sum(item.dom_full_tests_physical_location for item in diagnostics),
-        dom_labels_deleted_same_node=sum(item.dom_labels_deleted_same_node for item in diagnostics),
-        dom_labels_deleted_physical_location=sum(item.dom_labels_deleted_physical_location for item in diagnostics),
-        labels_dominated_same_node=sum(item.labels_dominated_same_node for item in diagnostics),
-        labels_dominated_physical=sum(item.labels_dominated_physical for item in diagnostics),
-        dom_prefilter_pairs=sum(item.dom_prefilter_pairs for item in diagnostics),
-        dom_prefilter_mask_fail=sum(item.dom_prefilter_mask_fail for item in diagnostics),
-        dom_prefilter_branch_fail=sum(item.dom_prefilter_branch_fail for item in diagnostics),
-        dom_prefilter_payload_fail=sum(item.dom_prefilter_payload_fail for item in diagnostics),
-        dom_prefilter_block_fail=sum(item.dom_prefilter_block_fail for item in diagnostics),
-        dom_prefilter_return_credit_fail=sum(item.dom_prefilter_return_credit_fail for item in diagnostics),
-        dom_full_tests=sum(item.dom_full_tests for item in diagnostics),
-        dom_full_rejections=sum(item.dom_full_rejections for item in diagnostics),
-        physical_location_full_tests=sum(item.physical_location_full_tests for item in diagnostics),
-        physical_location_rejections=sum(item.physical_location_rejections for item in diagnostics),
-        **scheduler_summary,
+    return _WorkerPricingResult(
+        call_id=task.call_id,
+        dual_id=task.dual_id,
+        epoch=task.epoch,
+        worker_id=task.worker_id,
+        task_id=task.task_id,
+        generation=task.generation,
+        route_paths=tuple(route.path for route in result.routes),
+        reduced_costs=result.reduced_costs,
+        best_path=None if result.best_route is None else result.best_route.path,
+        best_reduced_cost=result.best_reduced_cost,
+        diagnostics=result.diagnostics,
     )
 
+def _sum_worker_diagnostic(results: list[_WorkerPricingResult], name: str) -> int | float:
+    return sum(getattr(result.diagnostics, name) for result in results)
 
-def _candidate_source_neighbor(route: Route) -> str:
-    if len(route.path) < 2:
-        raise RuntimeError("pricing candidate path has no source-neighbor arc")
-    return route.path[1]
-
-
-def _candidate_counts_by_source(candidates: list[tuple[Route, float, int]]) -> tuple[tuple[str, int], ...]:
-    counts: dict[str, int] = {}
-    for route, _, _ in candidates:
-        source_neighbor = _candidate_source_neighbor(route)
-        counts[source_neighbor] = counts.get(source_neighbor, 0) + 1
-    return tuple(sorted(counts.items()))
-
-
-def _scheduler_diagnostics_summary(
-    diagnostics: list[PricingDiagnostics],
-    *,
-    parallel_workers: int,
-    elapsed: float,
-) -> dict[str, object]:
-    if not diagnostics:
-        return {}
-    busy_by_id: dict[int, float] = {}
-    task_count_by_id: dict[int, int] = {}
-    for item in diagnostics:
-        if item.worker_id is None:
-            continue
-        busy_by_id[item.worker_id] = busy_by_id.get(item.worker_id, 0.0) + item.elapsed_seconds
-        task_count_by_id[item.worker_id] = task_count_by_id.get(item.worker_id, 0) + 1
-    idle_total = max(0.0, parallel_workers * elapsed - sum(item.elapsed_seconds for item in diagnostics))
-    idle_by_id = {
-        worker_id: max(0.0, elapsed - busy)
-        for worker_id, busy in busy_by_id.items()
-    }
-    return {
-        "pricing_initial_source_neighbors": max((item.pricing_initial_source_neighbors for item in diagnostics), default=0),
-        "pricing_initial_task_count": max((item.pricing_initial_task_count for item in diagnostics), default=len(diagnostics)),
-        "pricing_initial_block_loads": max(
-            (item.pricing_initial_block_loads for item in diagnostics if item.pricing_initial_block_loads),
-            default=tuple(),
-            key=len,
-        ),
-        "pricing_initial_load_imbalance_max_mean": max(
-            (item.pricing_initial_load_imbalance_max_mean for item in diagnostics),
-            default=0.0,
-        ),
-        "pricing_empty_initial_blocks": max((item.pricing_empty_initial_blocks for item in diagnostics), default=0),
-        "pricing_idle_worker_seconds": idle_total,
-        "pricing_dynamic_split_candidates": max((item.pricing_dynamic_split_candidates for item in diagnostics), default=0),
-        "pricing_dynamic_splits_performed": max((item.pricing_dynamic_splits_performed for item in diagnostics), default=0),
-        "pricing_dynamic_split_rejected_close_to_closure": max(
-            (item.pricing_dynamic_split_rejected_close_to_closure for item in diagnostics),
-            default=0,
-        ),
-        "pricing_dynamic_split_rejected_small_queue": max(
-            (item.pricing_dynamic_split_rejected_small_queue for item in diagnostics),
-            default=0,
-        ),
-        "pricing_dynamic_split_rejected_short_elapsed": max(
-            (item.pricing_dynamic_split_rejected_short_elapsed for item in diagnostics),
-            default=0,
-        ),
-        "pricing_dynamic_split_rejected_low_workload": max(
-            (item.pricing_dynamic_split_rejected_low_workload for item in diagnostics),
-            default=0,
-        ),
-        "pricing_dynamic_child_tasks_created": max((item.pricing_dynamic_child_tasks_created for item in diagnostics), default=0),
-        "pricing_labels_transferred_to_idle_workers": max(
-            (item.pricing_labels_transferred_to_idle_workers for item in diagnostics),
-            default=0,
-        ),
-        "pricing_split_overhead_time": max((item.pricing_split_overhead_time for item in diagnostics), default=0.0),
-        "pricing_leaf_tasks_closed": sum(item.pricing_leaf_tasks_closed for item in diagnostics),
-        "pricing_leaf_tasks_stale_discarded": sum(item.pricing_leaf_tasks_stale_discarded for item in diagnostics),
-        "pricing_best_active_task_gap": max((item.pricing_best_active_task_gap for item in diagnostics), default=0.0),
-        "pricing_open_labels_by_task_max": max((item.pricing_open_labels_by_task_max for item in diagnostics), default=0),
-        "worker_busy_time_by_id": tuple(sorted(busy_by_id.items())),
-        "worker_idle_time_by_id": tuple(sorted(idle_by_id.items())),
-        "worker_task_count_by_id": tuple(sorted(task_count_by_id.items())),
-        "stale_task_reuse_attempts": sum(item.stale_task_reuse_attempts for item in diagnostics),
-        "stale_task_reuse_blocked": sum(item.stale_task_reuse_blocked for item in diagnostics),
-        "cross_task_dominance_attempts": sum(item.cross_task_dominance_attempts for item in diagnostics),
-        "cross_task_dominance_blocked": sum(item.cross_task_dominance_blocked for item in diagnostics),
-    }
-
-
-def _select_diverse_pricing_candidates(
-    candidates: list[tuple[Route, float, int]],
-    residual_customers: frozenset[str],
-    batch_target: int,
-    diversity_fraction: float,
-) -> tuple[list[tuple[Route, float, int]], int]:
-    if batch_target <= 0:
-        raise ValueError("batch target must be positive")
-    if not 0.0 <= diversity_fraction <= 1.0:
-        raise ValueError("pricing diversity batch fraction must be in [0, 1]")
-    if not candidates:
-        return [], 0
-    diversity_quota = min(batch_target, ceil(batch_target * diversity_fraction))
-    selected_indices: set[int] = set()
-    selected: list[tuple[Route, float, int]] = []
-    if diversity_quota > 0:
-        groups: dict[str, list[int]] = {}
-        for index, (route, _, _) in enumerate(candidates):
-            groups.setdefault(_candidate_source_neighbor(route), []).append(index)
-        covered: set[str] = set()
-        while len(selected) < diversity_quota:
-            progressed = False
-            for source_neighbor in sorted(groups):
-                available = [index for index in groups[source_neighbor] if index not in selected_indices]
-                if not available:
-                    continue
-                best_index = min(
-                    available,
-                    key=lambda index: (
-                        -len(candidates[index][0].served.intersection(residual_customers - covered)),
-                        candidates[index][1],
-                        candidates[index][0].path,
-                    ),
-                )
-                selected_indices.add(best_index)
-                route, cost, worker_id = candidates[best_index]
-                selected.append((route, cost, worker_id))
-                covered.update(route.served.intersection(residual_customers))
-                progressed = True
-                if len(selected) >= diversity_quota:
-                    break
-            if not progressed:
-                break
-    for index, candidate in enumerate(candidates):
-        if len(selected) >= batch_target:
-            break
-        if index in selected_indices:
-            continue
-        selected_indices.add(index)
-        selected.append(candidate)
-    return selected, diversity_quota
-
-
-def _merge_compact_worker_results(
+def _merge_worker_results(
     results: list[_WorkerPricingResult],
     graph: TransformedGraph,
     objective: ObjectiveData,
@@ -2990,13 +1974,11 @@ def _merge_compact_worker_results(
     existing_routes: dict[tuple[str, ...], Route] | None,
     existing_column_paths: set[tuple[str, ...]] | None,
     pricing_mode: str,
-    pricing_yield_ratio: float,
     pricing_worker_backend: str,
     source_neighbor_count: int,
     source_neighbor_block_sizes: tuple[int, ...],
     parallel_workers: int,
     *,
-    selected: _WorkerPricingResult | None,
     force_time_limit: bool,
     call_id: int,
     dual_id: int,
@@ -3005,47 +1987,330 @@ def _merge_compact_worker_results(
     pool_startup_time_seconds: float,
     pool_startup_count: int,
     pool_reused_calls: int,
-    first_hit_enabled: bool,
     batch_target: int,
-    productive_slice_seconds: float = 0.0,
-    productive_slice_deadline_used: bool = False,
-    adaptive_slice_seconds: float = 0.0,
-    productive_yield_window_rate: float = 0.0,
-    stabilized_dual_enabled: bool = False,
-    prefix_task_depth: int = 1,
-    pricing_diversity_batch_fraction: float = 0.5,
-    worker_reduced_costs_are_true: bool = True,
-    call_start_time: float | None = None,
+    prefix_task_depth: int,
+    all_leaf_tasks_closed: bool | None = None,
+    leaf_task_count: int | None = None,
+    wall_elapsed_seconds: float | None = None,
+    dynamic_diagnostics: dict[str, object] | None = None,
 ) -> PricingResult:
-    stale_rejections = 0
     for result in results:
         if result.call_id != call_id or result.dual_id != dual_id or result.epoch != expected_epoch:
-            stale_rejections += 1
-    if stale_rejections:
-        raise RuntimeError("persistent pricing worker returned a stale pricing epoch")
-    diagnostics = [result.diagnostics for result in results]
-    merge_start = time.time()
-    merge_cpu_start = time.process_time()
-    route_decode_time = 0.0
-    verification_time = 0.0
-    duplicate_lookup_time = 0.0
-    decoded_routes = 0
-    verified_routes = 0
-    candidate_sources = [selected] if selected is not None else sorted(results, key=lambda item: item.worker_id)
-    raw_candidates: list[tuple[float, tuple[str, ...], int]] = []
-    for result in candidate_sources:
-        if result is None:
-            continue
-        for path, cost in zip(result.route_paths, result.reduced_costs):
-            raw_candidates.append((cost, path, result.worker_id))
-    raw_candidate_count = len(raw_candidates)
-    unique_candidates: list[tuple[float, tuple[str, ...], int]] = []
+            raise RuntimeError("pricing worker returned a stale result from a different epoch")
+
+    active_sr = tuple(sorted(duals.nu))
+    active_sr_version = len(active_sr)
+    known_signature_costs = _known_signature_costs(
+        existing_routes,
+        existing_column_paths,
+        graph,
+        residual_customers,
+        RouteSignatureCache(),
+        active_sr,
+        active_sr_version,
+    )
+    signature_cache = RouteSignatureCache()
+    candidates: list[tuple[float, tuple[str, ...]]] = []
     seen_paths: set[tuple[str, ...]] = set()
-    for cost, path, worker_id in sorted(raw_candidates, key=lambda item: (item[0], item[1], item[2])):
-        if path in seen_paths:
+    for result in results:
+        for path in result.route_paths:
+            if path in seen_paths:
+                continue
+            seen_paths.add(path)
+            route = route_from_path(next_route_id, path, graph, objective)
+            if not restrictions.route_allowed(route):
+                raise RuntimeError("pricing worker candidate failed branch validation")
+            reduced_cost = route_farkas_reduced_cost(route, duals) if farkas else route_reduced_cost(route, duals)
+            if reduced_cost >= -pricing_tolerance:
+                continue
+            duplicate, signature = _duplicate_dominated_by_existing(
+                route,
+                known_signature_costs,
+                graph,
+                residual_customers,
+                signature_cache,
+                active_sr,
+                active_sr_version,
+            )
+            if duplicate:
+                continue
+            candidates.append((reduced_cost, path))
+            coefficient_signature = route_coefficient_signature(signature)
+            known_signature_costs[coefficient_signature] = min(
+                known_signature_costs.get(coefficient_signature, float("inf")),
+                route.cost,
+            )
+
+    candidates.sort(key=lambda item: (item[0], item[1]))
+    selected = candidates[:batch_target]
+    routes = tuple(route_from_path(next_route_id + index, path, graph, objective) for index, (_, path) in enumerate(selected))
+    reduced_costs = tuple(cost for cost, _ in selected)
+
+    best_path: tuple[str, ...] | None = None
+    best_cost: float | None = None
+    for result in results:
+        if result.best_path is None:
             continue
-        seen_paths.add(path)
-        unique_candidates.append((cost, path, worker_id))
+        route = route_from_path(next_route_id, result.best_path, graph, objective)
+        direct_cost = route_farkas_reduced_cost(route, duals) if farkas else route_reduced_cost(route, duals)
+        if best_cost is None or (direct_cost, result.best_path) < (best_cost, best_path or tuple()):
+            best_cost = direct_cost
+            best_path = result.best_path
+    best_route = None if best_path is None else route_from_path(next_route_id, best_path, graph, objective)
+
+    all_tasks_exhausted = (
+        all_leaf_tasks_closed
+        if all_leaf_tasks_closed is not None
+        else bool(results) and all(result.diagnostics.exact_completion for result in results)
+    )
+    exact_completion = pricing_mode == "closure" and not routes and all_tasks_exhausted and not force_time_limit
+    if routes:
+        termination_reason = "closure_negative_batch_found" if pricing_mode == "closure" else "productive_batch_found"
+        certification_mode = "not_certified_closure_returned_columns" if pricing_mode == "closure" else "not_certified_productive"
+    elif force_time_limit:
+        termination_reason = "time_limit_no_columns"
+        certification_mode = "not_certified_time_limit"
+    elif exact_completion:
+        termination_reason = "exhausted_no_negative"
+        certification_mode = "certified_exhaustive_forward_tasks"
+    else:
+        termination_reason = "productive_no_columns"
+        certification_mode = "not_certified_productive"
+
+    elapsed = (
+        wall_elapsed_seconds
+        if wall_elapsed_seconds is not None
+        else max((result.diagnostics.elapsed_seconds for result in results), default=0.0)
+    )
+    worker_ids = sorted({result.worker_id for result in results})
+    per_worker_elapsed = tuple(
+        (worker_id, sum(result.diagnostics.elapsed_seconds for result in results if result.worker_id == worker_id))
+        for worker_id in worker_ids
+    )
+    per_worker_cpu = tuple(
+        (worker_id, sum(result.diagnostics.process_cpu_time_seconds for result in results if result.worker_id == worker_id))
+        for worker_id in worker_ids
+    )
+    process_cpu = sum(value for _, value in per_worker_cpu)
+    diagnostics = PricingDiagnostics(
+        labels_generated=int(_sum_worker_diagnostic(results, "labels_generated")),
+        labels_dominated=int(_sum_worker_diagnostic(results, "labels_dominated")),
+        labels_pruned=int(_sum_worker_diagnostic(results, "labels_pruned")),
+        max_queue_size=max((result.diagnostics.max_queue_size for result in results), default=0),
+        complete_routes_generated=int(_sum_worker_diagnostic(results, "complete_routes_generated")),
+        returned_routes=len(routes),
+        best_reduced_cost=best_cost,
+        exact_completion=exact_completion,
+        termination_reason=termination_reason,
+        certification_mode=certification_mode,
+        elapsed_seconds=elapsed,
+        pricing_engine="source_neighbor_parallel_forward",
+        forward_labels_generated=int(_sum_worker_diagnostic(results, "forward_labels_generated")),
+        parallel_labeling_used=parallel_workers > 1,
+        parallel_workers=parallel_workers,
+        pricing_mode=pricing_mode,
+        pricing_status=_pricing_status_from_reason(termination_reason, bool(routes)),
+        productive_calls=1 if pricing_mode == "productive" else 0,
+        certification_calls=1 if pricing_mode == "closure" else 0,
+        negative_routes_verified=len(candidates),
+        negative_routes_inserted=len(routes),
+        pricing_worker_backend=pricing_worker_backend,
+        process_cpu_time_seconds=process_cpu,
+        cpu_core_equivalent=process_cpu / elapsed if elapsed > 0.0 else 0.0,
+        source_neighbor_count=source_neighbor_count,
+        source_neighbor_block_sizes=source_neighbor_block_sizes,
+        source_neighbor_task_count=leaf_task_count if leaf_task_count is not None else len(results),
+        source_neighbor_task_sizes=tuple(1 for _ in range(leaf_task_count if leaf_task_count is not None else len(results))),
+        certification_worker_calls=(leaf_task_count if leaf_task_count is not None else len(results)) if pricing_mode == "closure" else 0,
+        productive_worker_calls=(leaf_task_count if leaf_task_count is not None else len(results)) if pricing_mode == "productive" else 0,
+        pricing_pool_startup_time_seconds=pool_startup_time_seconds,
+        pricing_pool_startup_count=pool_startup_count,
+        pricing_pool_reused_calls=pool_reused_calls,
+        pricing_task_submission_time_seconds=submission_time_seconds,
+        pricing_worker_payload_count=len(results),
+        pricing_worker_response_count=len(results),
+        pricing_candidate_paths_before_merge=sum(len(result.route_paths) for result in results),
+        pricing_candidate_paths_after_merge=len(candidates),
+        pricing_decoded_routes_in_main=len(seen_paths),
+        pricing_verified_routes_in_main=len(candidates),
+        pricing_batch_target=batch_target,
+        pricing_returned_batch_size=len(routes),
+        prefix_task_depth=prefix_task_depth,
+        certification_core_closed_count=sum(1 for result in results if result.diagnostics.exact_completion),
+        certification_core_unresolved_count=sum(1 for result in results if not result.diagnostics.exact_completion),
+        root_closed_by_all_cores=exact_completion,
+        per_worker_elapsed_seconds=per_worker_elapsed,
+        per_worker_cpu_time_seconds=per_worker_cpu,
+        per_worker_labels_generated=tuple(
+            (worker_id, sum(result.diagnostics.labels_generated for result in results if result.worker_id == worker_id))
+            for worker_id in worker_ids
+        ),
+        per_worker_labels_dominated=tuple(
+            (worker_id, sum(result.diagnostics.labels_dominated for result in results if result.worker_id == worker_id))
+            for worker_id in worker_ids
+        ),
+        per_worker_labels_pruned=tuple(
+            (worker_id, sum(result.diagnostics.labels_pruned for result in results if result.worker_id == worker_id))
+            for worker_id in worker_ids
+        ),
+        per_worker_completed_labels=tuple(
+            (worker_id, sum(result.diagnostics.complete_routes_generated for result in results if result.worker_id == worker_id))
+            for worker_id in worker_ids
+        ),
+        per_worker_verified_negative_routes=tuple(
+            (worker_id, sum(len(result.route_paths) for result in results if result.worker_id == worker_id))
+            for worker_id in worker_ids
+        ),
+        extensions_attempted=int(_sum_worker_diagnostic(results, "extensions_attempted")),
+        extensions_rejected_by_deadline=int(_sum_worker_diagnostic(results, "extensions_rejected_by_deadline")),
+        deadline_reachability_removed=int(_sum_worker_diagnostic(results, "deadline_reachability_removed")),
+        forward_dominance_tests=int(_sum_worker_diagnostic(results, "forward_dominance_tests")),
+        forward_same_node_dominance_tests=int(_sum_worker_diagnostic(results, "forward_same_node_dominance_tests")),
+        forward_physical_location_dominance_tests=int(_sum_worker_diagnostic(results, "forward_physical_location_dominance_tests")),
+        forward_return_time_credit_checks=int(_sum_worker_diagnostic(results, "forward_return_time_credit_checks")),
+        forward_return_time_credit_checks_skipped=int(_sum_worker_diagnostic(results, "forward_return_time_credit_checks_skipped")),
+        forward_branch_language_failures=int(_sum_worker_diagnostic(results, "forward_branch_language_failures")),
+        forward_branch_interface_failures=int(_sum_worker_diagnostic(results, "forward_branch_interface_failures")),
+        labels_dominated_same_node=int(_sum_worker_diagnostic(results, "labels_dominated_same_node")),
+        labels_dominated_physical=int(_sum_worker_diagnostic(results, "labels_dominated_physical")),
+        **(dynamic_diagnostics or {}),
+    )
+    additive_fields = (
+        "labels_purged",
+        "stale_labels_skipped",
+        "standard_bound_pruned",
+        "farkas_bound_pruned",
+        "together_branch_reachability_pruned",
+        "forward_labeling_time_seconds",
+        "reward_set_size_before_deadline",
+        "reward_set_size_after_deadline",
+        "deadline_reward_bound_calls",
+        "deadline_dominance_prefilter_skips",
+        "routes_rejected_by_deadline_in_master",
+        "forward_physical_location_dominance_rejections",
+        "forward_mask_scalar_prefilter_failures",
+        "dom_gate_pairs_seen",
+        "dom_gate_mask_failures",
+        "dom_gate_scalar_failures",
+        "dom_gate_branch_failures",
+        "dom_gate_deadline_failures",
+        "dominance_bucket_pairs_considered",
+        "dominance_bucket_pairs_rejected",
+        "dominance_bucket_candidate_pairs",
+        "dominance_bucket_scans_avoided",
+        "dominance_bucket_queries",
+        "dominance_bucket_skipped_by_mask",
+        "dominance_bucket_skipped_by_scalar",
+        "dominance_bucket_skipped_by_branch",
+        "dominance_bucket_skipped_by_deadline",
+        "dominance_bucket_skipped_by_return_credit",
+        "dom_frontier_queries",
+        "dom_frontier_keys_scanned",
+        "dom_frontier_keys_skipped_by_mask",
+        "dom_frontier_keys_skipped_by_branch",
+        "dom_frontier_keys_skipped_by_deadline",
+        "dom_frontier_keys_skipped_by_return_credit",
+        "frontier_cells_created",
+        "frontier_cells_split",
+        "mask_trie_subset_queries",
+        "mask_trie_superset_queries",
+        "mask_trie_returned_items",
+        "mask_subset_queries",
+        "mask_superset_queries",
+        "mask_query_cache_hits",
+        "mask_query_cache_misses",
+        "cell_splits",
+        "cell_pair_products_before_split",
+        "cell_pairs_considered",
+        "cell_pairs_rejected_by_mask",
+        "cell_pairs_rejected_by_envelope",
+        "label_pairs_materialized",
+        "full_same_node_tests",
+        "full_physical_location_tests",
+        "labels_deleted_same_node",
+        "labels_deleted_physical_location",
+        "certification_tasks_exhausted_by_label_search",
+        "physdom_cell_pairs_considered",
+        "physdom_cell_pairs_rejected_by_mask",
+        "physdom_cell_pairs_rejected_by_envelope",
+        "physdom_label_pairs_materialized",
+        "physdom_full_tests",
+        "physdom_deletions",
+        "physdom_time",
+        "return_credit_incompatible_pairs",
+        "dom_pairs_avoided_before_materialization",
+        "dom_candidate_pairs_materialized",
+        "dom_full_tests_same_node",
+        "dom_full_tests_physical_location",
+        "dom_labels_deleted_same_node",
+        "dom_labels_deleted_physical_location",
+        "dom_prefilter_pairs",
+        "dom_prefilter_mask_fail",
+        "dom_prefilter_branch_fail",
+        "dom_prefilter_payload_fail",
+        "dom_prefilter_block_fail",
+        "dom_prefilter_return_credit_fail",
+        "dom_full_tests",
+        "dom_full_rejections",
+        "physical_location_full_tests",
+        "physical_location_rejections",
+    )
+    aggregate_values = {
+        name: _sum_worker_diagnostic(results, name)
+        for name in additive_fields
+    }
+    physdom_deletions = int(aggregate_values["physdom_deletions"])
+    aggregate_values["physdom_time_per_deletion"] = (
+        float(aggregate_values["physdom_time"]) / physdom_deletions
+        if physdom_deletions
+        else 0.0
+    )
+    diagnostics = replace(diagnostics, **aggregate_values)
+    return PricingResult(routes, reduced_costs, best_route, best_cost, diagnostics)
+
+def _price_route_source_neighbor_parallel(
+    graph: TransformedGraph,
+    objective: ObjectiveData,
+    residual_customers: frozenset[str],
+    restrictions: BranchRestrictions,
+    duals: PricingDuals,
+    next_route_id: int,
+    farkas: bool,
+    pricing_tolerance: float,
+    use_standard_acceleration: bool,
+    stop_at_first_negative: bool,
+    batch_size: int,
+    deadline: float | None,
+    existing_routes: dict[tuple[str, ...], Route] | None,
+    existing_column_paths: set[tuple[str, ...]] | None,
+    pricing_mode: str,
+    parallel_workers: int,
+    pricing_worker_backend: str,
+    prefix_task_depth: int = 1,
+    epoch_context: PricingEpochContext | None = None,
+) -> PricingResult:
+    if pricing_worker_backend not in {"thread", "process"}:
+        raise ValueError("pricing_worker_backend must be 'thread' or 'process'")
+    if pricing_worker_backend == "process":
+        raise RuntimeError("process pricing must use SourceNeighborPricingPool")
+
+    task_plan = _build_deterministic_task_plan(
+        graph,
+        objective,
+        residual_customers,
+        restrictions,
+        prefix_task_depth=prefix_task_depth,
+    )
+    call_id = 1
+    epoch = _pricing_epoch(
+        objective,
+        residual_customers,
+        restrictions,
+        duals,
+        existing_routes,
+        existing_column_paths,
+        epoch_context,
+    )
     known_signature_costs = _known_signature_costs(
         existing_routes,
         existing_column_paths,
@@ -3053,383 +2318,69 @@ def _merge_compact_worker_results(
         residual_customers,
         RouteSignatureCache(),
     )
-    signature_cache = RouteSignatureCache()
-    arc_customer_sets = {arc: graph.arc_customer_set(arc) for arc in graph.arcs}
-    verified_candidates: list[tuple[Route, float, int]] = []
-    returned_routes: list[Route] = []
-    returned_costs: list[float] = []
-    true_dual_rejected_candidates = 0
-    worker_true_diffs: list[float] = []
-    routes_rejected_by_deadline = 0
-    for worker_cost, path, _ in unique_candidates:
-        decode_start = time.time()
-        try:
-            route = route_from_path(next_route_id + len(verified_candidates), path, graph, objective)
-        except ServiceEnvelopeViolation:
-            route_decode_time += time.time() - decode_start
-            routes_rejected_by_deadline += 1
-            continue
-        route_decode_time += time.time() - decode_start
-        decoded_routes += 1
-        if not restrictions.route_allowed(route, arc_customer_sets):
-            raise RuntimeError("compact worker pricing candidate failed route-level branch validation")
-        verify_start = time.time()
-        direct_cost = route_farkas_reduced_cost(route, duals) if farkas else route_reduced_cost(route, duals)
-        verification_time += time.time() - verify_start
-        verified_routes += 1
-        diff = worker_cost - direct_cost
-        worker_true_diffs.append(diff)
-        if worker_reduced_costs_are_true and abs(diff) > max(1e-8, pricing_tolerance * 10.0):
-            raise RuntimeError("worker reduced-cost report disagrees with direct main-process verification")
-        if direct_cost >= -pricing_tolerance:
-            if stabilized_dual_enabled:
-                true_dual_rejected_candidates += 1
-            continue
-        duplicate_start = time.time()
-        duplicate, signature = _duplicate_dominated_by_existing(
-            route,
-            known_signature_costs,
-            graph,
-            residual_customers,
-            signature_cache,
+    tasks = [
+        _WorkerPricingTask(
+            call_id=call_id,
+            dual_id=call_id,
+            epoch=epoch,
+            worker_id=index,
+            task_id=index,
+            generation=0,
+            source_prefixes=(prefix,),
+            task_root_prefix=prefix,
+            initial_open_labels=None,
+            residual_customers=residual_customers,
+            restrictions=restrictions,
+            duals=duals,
+            next_route_id=next_route_id,
+            farkas=farkas,
+            pricing_tolerance=pricing_tolerance,
+            use_standard_acceleration=use_standard_acceleration,
+            stop_at_first_negative=stop_at_first_negative,
+            batch_size=1 if stop_at_first_negative else batch_size,
+            deadline=deadline,
+            known_signature_costs=known_signature_costs,
+            pricing_mode=pricing_mode,
         )
-        duplicate_lookup_time += time.time() - duplicate_start
-        if duplicate:
-            continue
-        verified_candidates.append((route, direct_cost, worker_id))
-        coeff_signature = route_coefficient_signature(signature)
-        known_signature_costs[coeff_signature] = min(
-            known_signature_costs.get(coeff_signature, float("inf")),
-            route.cost,
-        )
-    selected_candidates, diversity_quota = _select_diverse_pricing_candidates(
-        verified_candidates,
+        for index, prefix in enumerate(task_plan.prefixes)
+    ]
+    submit_start = time.time()
+    with ThreadPoolExecutor(max_workers=parallel_workers) as executor:
+        futures = [executor.submit(_execute_forward_pricing_task, task, graph, objective) for task in tasks]
+        submission_time = time.time() - submit_start
+        results = [future.result() for future in futures]
+    has_time_limit = any(result.diagnostics.pricing_status == PRICING_STATUS_TIME_LIMIT_NO_COLUMNS for result in results)
+    merged = _merge_worker_results(
+        results,
+        graph,
+        objective,
         residual_customers,
-        batch_target,
-        pricing_diversity_batch_fraction,
-    )
-    returned_routes = [route for route, _, _ in selected_candidates]
-    returned_costs = [cost for _, cost, _ in selected_candidates]
-    best_result = min(
-        (result for result in results if result.best_reduced_cost is not None),
-        key=lambda item: (item.best_reduced_cost, item.best_path or tuple()),
-        default=None,
-    )
-    best_cost = None if best_result is None else best_result.best_reduced_cost
-    best_route = None
-    if best_result is not None and best_result.best_path is not None:
-        try:
-            best_route = route_from_path(next_route_id + len(returned_routes), best_result.best_path, graph, objective)
-        except ServiceEnvelopeViolation:
-            routes_rejected_by_deadline += 1
-    has_negative = bool(returned_routes)
-    any_time_limit = force_time_limit or any(
-        item.pricing_status == PRICING_STATUS_TIME_LIMIT_NO_COLUMNS for item in diagnostics
-    )
-    exact_completion = bool(diagnostics) and all(item.exact_completion for item in diagnostics) and not has_negative and not any_time_limit
-    if any_time_limit and has_negative:
-        termination_reason = "time_limit_with_columns"
-        certification_mode = "not_certified_time_limit"
-    elif any_time_limit:
-        termination_reason = "time_limit_unresolved"
-        certification_mode = "not_certified_time_limit"
-    elif has_negative:
-        termination_reason = "closure_negative_batch_found" if pricing_mode == "closure" else "productive_batch_found"
-        certification_mode = "not_certified_closure_returned_columns" if pricing_mode == "closure" else "not_certified_productive"
-    else:
-        termination_reason = "exact_pricing_complete"
-        certification_mode = "source_neighbor_partitions_closed"
-    merge_time = time.time() - merge_start
-    main_cpu_time = time.process_time() - merge_cpu_start
-    if call_start_time is None:
-        worker_elapsed = max((item.elapsed_seconds for item in diagnostics), default=0.0)
-        elapsed = worker_elapsed + submission_time_seconds + merge_time
-    else:
-        elapsed = time.time() - call_start_time
-    worker_cpu_sum = sum(item.process_cpu_time_seconds for item in diagnostics)
-    total_cpu = worker_cpu_sum + main_cpu_time
-    per_worker_elapsed = tuple(sorted((item.worker_id, item.elapsed_seconds) for item in diagnostics if item.worker_id is not None))
-    per_worker_cpu = tuple(sorted((item.worker_id, item.process_cpu_time_seconds) for item in diagnostics if item.worker_id is not None))
-    per_worker_generated = tuple(sorted((item.worker_id, item.labels_generated) for item in diagnostics if item.worker_id is not None))
-    per_worker_dominated = tuple(sorted((item.worker_id, item.labels_dominated) for item in diagnostics if item.worker_id is not None))
-    per_worker_pruned = tuple(sorted((item.worker_id, item.labels_pruned) for item in diagnostics if item.worker_id is not None))
-    per_worker_complete = tuple(sorted((item.worker_id, item.complete_routes_generated) for item in diagnostics if item.worker_id is not None))
-    per_worker_negative = tuple(sorted((item.worker_id, item.returned_routes) for item in diagnostics if item.worker_id is not None))
-    core_best_reduced_costs = tuple(
-        sorted(
-            (item.worker_id, item.best_reduced_cost)
-            for item in diagnostics
-            if item.worker_id is not None and item.best_reduced_cost is not None
-        )
-    )
-    min_core_reduced_cost = min((value for _, value in core_best_reduced_costs), default=None)
-    interrupted_cores = sum(1 for item in diagnostics if item.termination_reason == "interrupted_after_first_hit")
-    verified_by_source = _candidate_counts_by_source([(route, cost, worker_id) for route, cost, worker_id in verified_candidates])
-    selected_by_source = _candidate_counts_by_source(selected_candidates)
-    selected_customers = frozenset().union(*(route.served for route in returned_routes)) if returned_routes else frozenset()
-    mean_worker_diff = sum(worker_true_diffs) / len(worker_true_diffs) if worker_true_diffs else 0.0
-    max_abs_worker_diff = max((abs(value) for value in worker_true_diffs), default=0.0)
-    scheduler_summary = _scheduler_diagnostics_summary(diagnostics, parallel_workers=parallel_workers, elapsed=elapsed)
-    return _pricing_result(
-        returned_routes,
-        returned_costs,
-        best_route,
-        best_cost,
-        labels_generated=sum(item.labels_generated for item in diagnostics),
-        labels_dominated=sum(item.labels_dominated for item in diagnostics),
-        labels_pruned=sum(item.labels_pruned for item in diagnostics),
-        labels_purged=sum(item.labels_purged for item in diagnostics),
-        stale_labels_skipped=sum(item.stale_labels_skipped for item in diagnostics),
-        standard_bound_pruned=sum(item.standard_bound_pruned for item in diagnostics),
-        farkas_bound_pruned=sum(item.farkas_bound_pruned for item in diagnostics),
-        max_queue_size=max((item.max_queue_size for item in diagnostics), default=0),
-        complete_routes_generated=sum(item.complete_routes_generated for item in diagnostics),
-        exact_completion=exact_completion,
-        termination_reason=termination_reason,
-        certification_mode=certification_mode,
-        elapsed_seconds=elapsed,
-        pricing_engine="source_neighbor_parallel_forward",
-        forward_labels_generated=sum(item.forward_labels_generated for item in diagnostics),
-        forward_labeling_time_seconds=sum(item.forward_labeling_time_seconds for item in diagnostics),
-        parallel_labeling_used=True,
-        parallel_workers=parallel_workers,
-        parallel_calls=1,
-        signature_cache_hits=signature_cache.stats.signature_cache_hits,
-        signature_cache_misses=signature_cache.stats.signature_cache_misses,
-        core_signature_cache_hits=signature_cache.stats.core_signature_cache_hits,
-        core_signature_cache_misses=signature_cache.stats.core_signature_cache_misses,
-        active_signature_cache_hits=signature_cache.stats.active_signature_cache_hits,
-        active_signature_cache_misses=signature_cache.stats.active_signature_cache_misses,
-        sr_coeff_cache_hits=signature_cache.stats.sr_coeff_cache_hits,
-        sr_coeff_cache_misses=signature_cache.stats.sr_coeff_cache_misses,
-        active_sr_key_cache_hits=signature_cache.stats.active_sr_key_cache_hits,
-        active_sr_key_cache_misses=signature_cache.stats.active_sr_key_cache_misses,
-        active_sr_coeffs_computed=signature_cache.stats.active_sr_coeffs_computed,
-        triplet_masks_built=signature_cache.stats.triplet_masks_built,
-        dominance_bucket_pairs_considered=sum(item.dominance_bucket_pairs_considered for item in diagnostics),
-        dominance_bucket_pairs_rejected=sum(item.dominance_bucket_pairs_rejected for item in diagnostics),
-        dominance_bucket_candidate_pairs=sum(item.dominance_bucket_candidate_pairs for item in diagnostics),
-        dominance_bucket_queries=sum(item.dominance_bucket_queries for item in diagnostics),
-        dominance_bucket_skipped_by_mask=sum(item.dominance_bucket_skipped_by_mask for item in diagnostics),
-        dominance_bucket_skipped_by_scalar=sum(item.dominance_bucket_skipped_by_scalar for item in diagnostics),
-        dominance_bucket_skipped_by_branch=sum(item.dominance_bucket_skipped_by_branch for item in diagnostics),
-        dominance_bucket_skipped_by_deadline=sum(item.dominance_bucket_skipped_by_deadline for item in diagnostics),
-        dominance_bucket_skipped_by_return_credit=sum(
-            item.dominance_bucket_skipped_by_return_credit for item in diagnostics
-        ),
-        dom_frontier_queries=sum(item.dom_frontier_queries for item in diagnostics),
-        dom_frontier_keys_scanned=sum(item.dom_frontier_keys_scanned for item in diagnostics),
-        dom_frontier_keys_skipped_by_mask=sum(item.dom_frontier_keys_skipped_by_mask for item in diagnostics),
-        dom_frontier_keys_skipped_by_branch=sum(item.dom_frontier_keys_skipped_by_branch for item in diagnostics),
-        dom_frontier_keys_skipped_by_deadline=sum(item.dom_frontier_keys_skipped_by_deadline for item in diagnostics),
-        dom_frontier_keys_skipped_by_return_credit=sum(
-            item.dom_frontier_keys_skipped_by_return_credit for item in diagnostics
-        ),
-        frontier_cells_created=max((item.frontier_cells_created for item in diagnostics), default=0),
-        frontier_cells_split=max((item.frontier_cells_split for item in diagnostics), default=0),
-        frontier_cell_lb_min_at_stop=min(
-            (
-                item.frontier_cell_lb_min_at_stop
-                for item in diagnostics
-                if item.frontier_cell_lb_min_at_stop is not None
-            ),
-            default=None,
-        ),
-        frontier_cell_lb_closed=sum(item.frontier_cell_lb_closed for item in diagnostics),
-        frontier_cell_lb_invalidations=sum(item.frontier_cell_lb_invalidations for item in diagnostics),
-        mask_trie_subset_queries=sum(item.mask_trie_subset_queries for item in diagnostics),
-        mask_trie_superset_queries=sum(item.mask_trie_superset_queries for item in diagnostics),
-        mask_trie_returned_items=sum(item.mask_trie_returned_items for item in diagnostics),
-        mask_subset_queries=sum(item.mask_subset_queries for item in diagnostics),
-        mask_superset_queries=sum(item.mask_superset_queries for item in diagnostics),
-        mask_query_cache_hits=sum(item.mask_query_cache_hits for item in diagnostics),
-        mask_query_cache_misses=sum(item.mask_query_cache_misses for item in diagnostics),
-        cell_splits=sum(item.cell_splits for item in diagnostics),
-        cell_pair_products_before_split=sum(item.cell_pair_products_before_split for item in diagnostics),
-        cell_pairs_considered=sum(item.cell_pairs_considered for item in diagnostics),
-        cell_pairs_rejected_by_mask=sum(item.cell_pairs_rejected_by_mask for item in diagnostics),
-        cell_pairs_rejected_by_envelope=sum(item.cell_pairs_rejected_by_envelope for item in diagnostics),
-        cell_pairs_rejected_by_lb=sum(item.cell_pairs_rejected_by_lb for item in diagnostics),
-        cell_pairs_rejected_by_closure_lb=sum(item.cell_pairs_rejected_by_closure_lb for item in diagnostics),
-        label_pairs_materialized=sum(item.label_pairs_materialized for item in diagnostics),
-        labels_certified_by_cell_lb=sum(item.labels_certified_by_cell_lb for item in diagnostics),
-        full_same_node_tests=sum(item.full_same_node_tests for item in diagnostics),
-        full_physical_location_tests=sum(item.full_physical_location_tests for item in diagnostics),
-        labels_deleted_same_node=sum(item.labels_deleted_same_node for item in diagnostics),
-        labels_deleted_physical_location=sum(item.labels_deleted_physical_location for item in diagnostics),
-        closure_queue_pushes=sum(item.closure_queue_pushes for item in diagnostics),
-        closure_queue_pops=sum(item.closure_queue_pops for item in diagnostics),
-        closure_queue_min_key_at_stop=min(
-            (
-                item.closure_queue_min_key_at_stop
-                for item in diagnostics
-                if item.closure_queue_min_key_at_stop is not None
-            ),
-            default=None,
-        ),
-        certification_tasks_exhausted_by_cell_lb=sum(
-            item.certification_tasks_exhausted_by_cell_lb for item in diagnostics
-        ),
-        certification_tasks_closed_by_cell_lb=sum(
-            item.certification_tasks_closed_by_cell_lb for item in diagnostics
-        ),
-        certification_tasks_exhausted_by_label_search=sum(
-            item.certification_tasks_exhausted_by_label_search for item in diagnostics
-        ),
-        resource_reward_bound_calls=sum(item.resource_reward_bound_calls for item in diagnostics),
-        resource_reward_bound_time=sum(item.resource_reward_bound_time for item in diagnostics),
-        resource_reward_bound_fallbacks=sum(item.resource_reward_bound_fallbacks for item in diagnostics),
-        pricing_mode_productive_or_certification=pricing_mode,
-        physdom_cell_pairs_considered=sum(item.physdom_cell_pairs_considered for item in diagnostics),
-        physdom_cell_pairs_rejected_by_mask=sum(item.physdom_cell_pairs_rejected_by_mask for item in diagnostics),
-        physdom_cell_pairs_rejected_by_envelope=sum(
-            item.physdom_cell_pairs_rejected_by_envelope for item in diagnostics
-        ),
-        physdom_label_pairs_materialized=sum(item.physdom_label_pairs_materialized for item in diagnostics),
-        physdom_full_tests=sum(item.physdom_full_tests for item in diagnostics),
-        physdom_deletions=sum(item.physdom_deletions for item in diagnostics),
-        physdom_time=sum(item.physdom_time for item in diagnostics),
-        physdom_time_per_deletion=(
-            sum(item.physdom_time for item in diagnostics)
-            / sum(item.physdom_deletions for item in diagnostics)
-            if sum(item.physdom_deletions for item in diagnostics)
-            else 0.0
-        ),
-        return_credit_incompatible_pairs=sum(item.return_credit_incompatible_pairs for item in diagnostics),
-        dom_pairs_avoided_before_materialization=sum(
-            item.dom_pairs_avoided_before_materialization for item in diagnostics
-        ),
-        dom_candidate_pairs_materialized=sum(item.dom_candidate_pairs_materialized for item in diagnostics),
-        dom_full_tests_same_node=sum(item.dom_full_tests_same_node for item in diagnostics),
-        dom_full_tests_physical_location=sum(item.dom_full_tests_physical_location for item in diagnostics),
-        dom_labels_deleted_same_node=sum(item.dom_labels_deleted_same_node for item in diagnostics),
-        dom_labels_deleted_physical_location=sum(
-            item.dom_labels_deleted_physical_location for item in diagnostics
-        ),
-        dominance_bucket_scans_avoided=sum(item.dominance_bucket_scans_avoided for item in diagnostics),
-        duplicate_equivalent_rejected=signature_cache.stats.duplicate_equivalent_rejected,
-        cost_dominated_rejected=signature_cache.stats.cost_dominated_rejected,
-        signature_build_time_seconds=signature_cache.stats.signature_build_time,
-        sr_coeff_build_time_seconds=signature_cache.stats.sr_coeff_build_time,
-        duplicate_lookup_time_seconds=duplicate_lookup_time,
-        route_decode_time_seconds=route_decode_time,
-        reduced_cost_verification_time_seconds=verification_time,
-        pricing_mode=pricing_mode,
-        pricing_yield_ratio=pricing_yield_ratio,
-        pricing_status=_pricing_status_from_reason(termination_reason, has_negative),
-        pricing_worker_backend=pricing_worker_backend,
-        process_cpu_time_seconds=total_cpu,
-        cpu_core_equivalent=total_cpu / elapsed if elapsed > 0.0 else 0.0,
-        source_neighbor_count=source_neighbor_count,
-        source_neighbor_block_sizes=source_neighbor_block_sizes,
-        first_hit_worker_id=None if selected is None else selected.worker_id,
-        first_hit_exits=1 if selected is not None else 0,
-        interrupted_worker_calls=interrupted_cores,
-        certification_worker_calls=sum(1 for item in diagnostics if item.exact_completion and not item.returned_routes),
-        productive_worker_calls=sum(1 for item in diagnostics if item.returned_routes),
-        per_worker_elapsed_seconds=per_worker_elapsed,
-        per_worker_cpu_time_seconds=per_worker_cpu,
-        per_worker_labels_generated=per_worker_generated,
-        per_worker_labels_dominated=per_worker_dominated,
-        per_worker_labels_pruned=per_worker_pruned,
-        per_worker_completed_labels=per_worker_complete,
-        per_worker_verified_negative_routes=per_worker_negative,
-        negative_routes_verified=verified_routes,
-        negative_routes_inserted=len(returned_routes),
-        pricing_pool_startup_time_seconds=pool_startup_time_seconds,
-        pricing_pool_startup_count=pool_startup_count,
-        pricing_pool_reused_calls=pool_reused_calls,
-        pricing_task_submission_time_seconds=submission_time_seconds,
-        pricing_worker_payload_count=len(results),
-        pricing_worker_response_count=len(results),
-        pricing_candidate_paths_before_merge=raw_candidate_count,
-        pricing_candidate_paths_after_merge=len(unique_candidates),
-        pricing_decoded_routes_in_main=decoded_routes,
-        pricing_verified_routes_in_main=verified_routes,
-        pricing_batch_target=batch_target,
-        pricing_returned_batch_size=len(returned_routes),
-        pricing_first_hit_enabled=first_hit_enabled,
-        pricing_stale_response_rejections=stale_rejections,
-        pricing_worker_cpu_time_seconds=worker_cpu_sum,
-        pricing_main_process_cpu_time_seconds=main_cpu_time,
-        pricing_main_merge_time_seconds=merge_time,
-        core_subspace_count=len(source_neighbor_block_sizes),
-        core_empty_blocks=sum(1 for size in source_neighbor_block_sizes if size == 0),
-        core_best_reduced_costs=core_best_reduced_costs,
-        min_core_reduced_cost=min_core_reduced_cost,
-        productive_first_hit_core_id=None if selected is None else selected.worker_id,
-        productive_interrupted_cores=interrupted_cores,
-        certification_core_closed_count=sum(1 for item in diagnostics if item.exact_completion and not item.returned_routes),
-        certification_core_unresolved_count=sum(
-            1 for item in diagnostics if item.pricing_status == PRICING_STATUS_TIME_LIMIT_NO_COLUMNS
-        ),
-        root_closed_by_all_cores=exact_completion,
-        stale_worker_results_discarded=stale_rejections,
-        number_of_productive_restarts=1 if pricing_mode == "productive" and has_negative else 0,
-        number_of_certification_calls=1 if pricing_mode == "closure" else 0,
-        number_of_certification_failures_due_to_negative_column=1 if pricing_mode == "closure" and has_negative else 0,
-        number_of_certification_timeouts_unresolved=1 if any_time_limit and pricing_mode == "closure" else 0,
-        productive_slice_seconds=productive_slice_seconds,
-        productive_slice_deadline_used=productive_slice_deadline_used,
-        adaptive_slice_seconds=adaptive_slice_seconds,
-        productive_yield_window_rate=productive_yield_window_rate,
-        stabilized_dual_enabled=stabilized_dual_enabled,
-        stabilized_candidates_returned=raw_candidate_count if stabilized_dual_enabled else 0,
-        true_dual_rejected_candidates=true_dual_rejected_candidates,
-        mean_worker_rc_minus_true_rc=mean_worker_diff,
-        max_abs_worker_true_rc_discrepancy=max_abs_worker_diff,
+        restrictions,
+        duals,
+        next_route_id,
+        farkas,
+        pricing_tolerance,
+        existing_routes,
+        existing_column_paths,
+        pricing_mode,
+        "thread",
+        len(task_plan.source_neighbors),
+        tuple(1 for _ in task_plan.prefixes),
+        parallel_workers,
+        force_time_limit=has_time_limit,
+        call_id=call_id,
+        dual_id=call_id,
+        expected_epoch=epoch,
+        submission_time_seconds=submission_time,
+        pool_startup_time_seconds=0.0,
+        pool_startup_count=0,
+        pool_reused_calls=0,
+        batch_target=batch_size,
         prefix_task_depth=prefix_task_depth,
-        productive_time_limit_with_columns=1 if termination_reason == "time_limit_with_columns" and has_negative else 0,
-        productive_time_limit_no_columns=1 if termination_reason == "time_limit_unresolved" and pricing_mode == "productive" else 0,
-        source_neighbor_task_count=len(diagnostics),
-        source_neighbor_task_sizes=source_neighbor_block_sizes,
-        local_worker_candidate_quota=max((item.local_worker_candidate_quota for item in diagnostics), default=0),
-        diversity_quota=diversity_quota,
-        diversity_selected_routes=len(returned_routes),
-        diversity_selected_customers=len(selected_customers.intersection(residual_customers)),
-        verified_candidates_by_source_neighbor=verified_by_source,
-        selected_candidates_by_source_neighbor=selected_by_source,
-        routes_rejected_by_deadline_in_master=routes_rejected_by_deadline
-        + sum(item.routes_rejected_by_deadline_in_master for item in diagnostics),
-        extensions_attempted=sum(item.extensions_attempted for item in diagnostics),
-        extensions_rejected_by_deadline=sum(item.extensions_rejected_by_deadline for item in diagnostics),
-        deadline_reachability_removed=sum(item.deadline_reachability_removed for item in diagnostics),
-        reward_set_size_before_deadline=sum(item.reward_set_size_before_deadline for item in diagnostics),
-        reward_set_size_after_deadline=sum(item.reward_set_size_after_deadline for item in diagnostics),
-        deadline_reward_bound_calls=sum(item.deadline_reward_bound_calls for item in diagnostics),
-        deadline_dominance_prefilter_skips=sum(item.deadline_dominance_prefilter_skips for item in diagnostics),
-        forward_dominance_tests=sum(item.forward_dominance_tests for item in diagnostics),
-        forward_same_node_dominance_tests=sum(item.forward_same_node_dominance_tests for item in diagnostics),
-        forward_physical_location_dominance_tests=sum(item.forward_physical_location_dominance_tests for item in diagnostics),
-        forward_physical_location_dominance_rejections=sum(
-            item.forward_physical_location_dominance_rejections for item in diagnostics
-        ),
-        forward_return_time_credit_checks=sum(item.forward_return_time_credit_checks for item in diagnostics),
-        forward_return_time_credit_checks_skipped=sum(
-            item.forward_return_time_credit_checks_skipped for item in diagnostics
-        ),
-        forward_branch_language_failures=sum(item.forward_branch_language_failures for item in diagnostics),
-        forward_mask_scalar_prefilter_failures=sum(item.forward_mask_scalar_prefilter_failures for item in diagnostics),
-        dom_gate_pairs_seen=sum(item.dom_gate_pairs_seen for item in diagnostics),
-        dom_gate_mask_failures=sum(item.dom_gate_mask_failures for item in diagnostics),
-        dom_gate_scalar_failures=sum(item.dom_gate_scalar_failures for item in diagnostics),
-        dom_gate_branch_failures=sum(item.dom_gate_branch_failures for item in diagnostics),
-        dom_gate_deadline_failures=sum(item.dom_gate_deadline_failures for item in diagnostics),
-        labels_dominated_same_node=sum(item.labels_dominated_same_node for item in diagnostics),
-        labels_dominated_physical=sum(item.labels_dominated_physical for item in diagnostics),
-        dom_prefilter_pairs=sum(item.dom_prefilter_pairs for item in diagnostics),
-        dom_prefilter_mask_fail=sum(item.dom_prefilter_mask_fail for item in diagnostics),
-        dom_prefilter_branch_fail=sum(item.dom_prefilter_branch_fail for item in diagnostics),
-        dom_prefilter_payload_fail=sum(item.dom_prefilter_payload_fail for item in diagnostics),
-        dom_prefilter_block_fail=sum(item.dom_prefilter_block_fail for item in diagnostics),
-        dom_prefilter_return_credit_fail=sum(item.dom_prefilter_return_credit_fail for item in diagnostics),
-        dom_full_tests=sum(item.dom_full_tests for item in diagnostics),
-        dom_full_rejections=sum(item.dom_full_rejections for item in diagnostics),
-        physical_location_full_tests=sum(item.physical_location_full_tests for item in diagnostics),
-        physical_location_rejections=sum(item.physical_location_rejections for item in diagnostics),
-        **scheduler_summary,
     )
-
+    if has_time_limit and not merged.routes:
+        raise PricingTimeLimitReached(merged.diagnostics)
+    return merged
 
 def _price_route_forward_only(
     graph: TransformedGraph,
@@ -3447,17 +2398,18 @@ def _price_route_forward_only(
     existing_routes: dict[tuple[str, ...], Route] | None = None,
     existing_column_paths: set[tuple[str, ...]] | None = None,
     pricing_mode: str = "productive",
-    pricing_yield_ratio: float = 0.0,
     source_neighbor_block: tuple[str, ...] | None = None,
     worker_id: int | None = None,
-    stop_event: object | None = None,
     known_signature_costs_snapshot: dict[RouteCoefficientSignature, float] | None = None,
     source_prefixes: tuple[tuple[str, ...], ...] = tuple(),
     max_frontier_cell_size: int = 512,
     max_frontier_pair_product: int = 2000,
     max_frontier_split_depth: int = 6,
-    enable_resource_restricted_closure_bound: bool = True,
-) -> PricingResult:
+    initial_open_labels: tuple[_Label, ...] | None = None,
+    extension_budget: int | None = None,
+    prior_best_path: tuple[str, ...] | None = None,
+    prior_best_reduced_cost: float = float("inf"),
+) -> PricingResult | _ForwardSearchCheckpoint | _ForwardCandidateCheckpoint:
     if batch_size <= 0:
         raise ValueError("pricing batch size must be positive")
     _validate_inequality_dual_signs(duals, pricing_tolerance)
@@ -3467,7 +2419,6 @@ def _price_route_forward_only(
     sink = instance.depot_sink
     active_sr = tuple(sorted(duals.nu))
     active_sr_version = len(active_sr)
-    arc_customer_sets = {arc: graph.arc_customer_set(arc) for arc in graph.arcs}
     shortest = _shortest_truck_times(graph)
     bounds = _build_pricing_bounds(graph, duals, residual_customers, shortest)
     deadline_counters = _DeadlinePricingCounters(
@@ -3475,7 +2426,6 @@ def _price_route_forward_only(
         max_frontier_cell_size=max_frontier_cell_size,
         max_frontier_pair_product=max_frontier_pair_product,
         max_frontier_split_depth=max_frontier_split_depth,
-        enable_resource_restricted_closure_bound=enable_resource_restricted_closure_bound,
     )
     signature_cache = RouteSignatureCache()
     known_signature_costs = (
@@ -3512,12 +2462,12 @@ def _price_route_forward_only(
     )
     queue: list[tuple[float, int, _Label]] = []
     best_route: Route | None = None
-    best_path: tuple[str, ...] | None = None
-    best_cost = float("inf")
+    best_path = prior_best_path
+    best_cost = prior_best_reduced_cost
     returned_routes: list[Route] = []
     returned_costs: list[float] = []
     returned_paths: set[tuple[str, ...]] = set()
-    labels_generated = 1
+    labels_generated = 0 if initial_open_labels is not None else 1
     labels_dominated = 0
     labels_pruned = 0
     labels_purged = 0
@@ -3528,6 +2478,11 @@ def _price_route_forward_only(
     max_queue_size = 0
     kept_standard_labels: dict[str, list[_Label]] = {}
     kept_farkas_labels: dict[str, list[_Label]] = {}
+    dominance_extension_context = _DominanceExtensionContext(
+        objective=objective,
+        residual_customers=residual_customers,
+        restrictions=restrictions,
+    )
     effective_batch_size = 1 if stop_at_first_negative else batch_size
     source_neighbor_set = None if source_neighbor_block is None else frozenset(source_neighbor_block)
 
@@ -3535,6 +2490,7 @@ def _price_route_forward_only(
         return {
             "extensions_attempted": deadline_counters.extensions_attempted,
             "extensions_rejected_by_deadline": deadline_counters.extensions_rejected_by_deadline,
+            "together_branch_reachability_pruned": deadline_counters.together_branch_reachability_pruned,
             "deadline_reachability_removed": deadline_counters.deadline_reachability_removed,
             "reward_set_size_before_deadline": deadline_counters.reward_set_size_before_deadline,
             "reward_set_size_after_deadline": deadline_counters.reward_set_size_after_deadline,
@@ -3548,6 +2504,7 @@ def _price_route_forward_only(
             "forward_return_time_credit_checks": deadline_counters.forward_return_time_credit_checks,
             "forward_return_time_credit_checks_skipped": deadline_counters.forward_return_time_credit_checks_skipped,
             "forward_branch_language_failures": deadline_counters.forward_branch_language_failures,
+            "forward_branch_interface_failures": deadline_counters.forward_branch_interface_failures,
             "forward_mask_scalar_prefilter_failures": deadline_counters.forward_mask_scalar_prefilter_failures,
             "dom_gate_pairs_seen": deadline_counters.dom_gate_pairs_seen,
             "dom_gate_mask_failures": deadline_counters.dom_gate_mask_failures,
@@ -3572,9 +2529,6 @@ def _price_route_forward_only(
             "dom_frontier_keys_skipped_by_return_credit": deadline_counters.dom_frontier_keys_skipped_by_return_credit,
             "frontier_cells_created": deadline_counters.frontier_cells_created,
             "frontier_cells_split": deadline_counters.frontier_cells_split,
-            "frontier_cell_lb_min_at_stop": deadline_counters.frontier_cell_lb_min_at_stop,
-            "frontier_cell_lb_closed": deadline_counters.frontier_cell_lb_closed,
-            "frontier_cell_lb_invalidations": deadline_counters.frontier_cell_lb_invalidations,
             "mask_trie_subset_queries": deadline_counters.mask_trie_subset_queries,
             "mask_trie_superset_queries": deadline_counters.mask_trie_superset_queries,
             "mask_trie_returned_items": deadline_counters.mask_trie_returned_items,
@@ -3587,24 +2541,12 @@ def _price_route_forward_only(
             "cell_pairs_considered": deadline_counters.cell_pairs_considered,
             "cell_pairs_rejected_by_mask": deadline_counters.cell_pairs_rejected_by_mask,
             "cell_pairs_rejected_by_envelope": deadline_counters.cell_pairs_rejected_by_envelope,
-            "cell_pairs_rejected_by_lb": deadline_counters.cell_pairs_rejected_by_lb,
-            "cell_pairs_rejected_by_closure_lb": deadline_counters.cell_pairs_rejected_by_closure_lb,
             "label_pairs_materialized": deadline_counters.label_pairs_materialized,
-            "labels_certified_by_cell_lb": deadline_counters.labels_certified_by_cell_lb,
             "full_same_node_tests": deadline_counters.full_same_node_tests,
             "full_physical_location_tests": deadline_counters.full_physical_location_tests,
             "labels_deleted_same_node": deadline_counters.labels_deleted_same_node,
             "labels_deleted_physical_location": deadline_counters.labels_deleted_physical_location,
-            "closure_queue_pushes": deadline_counters.closure_queue_pushes,
-            "closure_queue_pops": deadline_counters.closure_queue_pops,
-            "closure_queue_min_key_at_stop": deadline_counters.closure_queue_min_key_at_stop,
-            "certification_tasks_exhausted_by_cell_lb": deadline_counters.certification_tasks_exhausted_by_cell_lb,
-            "certification_tasks_closed_by_cell_lb": deadline_counters.certification_tasks_closed_by_cell_lb,
             "certification_tasks_exhausted_by_label_search": deadline_counters.certification_tasks_exhausted_by_label_search,
-            "resource_reward_bound_calls": deadline_counters.resource_reward_bound_calls,
-            "resource_reward_bound_time": deadline_counters.resource_reward_bound_time,
-            "resource_reward_bound_fallbacks": deadline_counters.resource_reward_bound_fallbacks,
-            "pricing_mode_productive_or_certification": pricing_mode,
             "physdom_cell_pairs_considered": deadline_counters.physdom_cell_pairs_considered,
             "physdom_cell_pairs_rejected_by_mask": deadline_counters.physdom_cell_pairs_rejected_by_mask,
             "physdom_cell_pairs_rejected_by_envelope": deadline_counters.physdom_cell_pairs_rejected_by_envelope,
@@ -3638,16 +2580,16 @@ def _price_route_forward_only(
             "physical_location_rejections": deadline_counters.physical_location_rejections,
         }
 
-    def accept_complete_label(new_label: _Label) -> PricingResult | None:
+    def accept_complete_label(new_label: _Label) -> None:
         nonlocal best_route, best_path, best_cost, complete_routes_generated
-        if not new_label.represented or not _complete_allowed(new_label, graph, restrictions, arc_customer_sets):
+        if not new_label.represented or not _complete_allowed(new_label, graph, restrictions):
             return None
         try:
             route = route_from_path(next_route_id, new_label.path, graph, objective)
         except ServiceEnvelopeViolation:
             deadline_counters.routes_rejected_by_deadline_in_master += 1
             return None
-        if not restrictions.route_allowed(route, arc_customer_sets):
+        if not restrictions.route_allowed(route):
             raise RuntimeError("complete pricing label failed route-level branch validation")
         duplicate, signature = _duplicate_dominated_by_existing(
             route,
@@ -3682,41 +2624,27 @@ def _price_route_forward_only(
             )
             if route.path == best_path:
                 best_route = route
-            if len(returned_routes) >= effective_batch_size:
-                best_route = _materialize_best_route(best_route, best_path, next_route_id, graph, objective)
-                negative_batch_reason = (
-                    "closure_negative_batch_found"
-                    if pricing_mode == "closure"
-                    else "productive_batch_found"
-                )
-                negative_batch_certification = (
-                    "not_certified_closure_returned_columns"
-                    if pricing_mode == "closure"
-                    else "not_certified_productive"
-                )
-                return _pricing_result(
-                    returned_routes,
-                    returned_costs,
-                    best_route,
-                    best_cost,
-                    labels_generated,
-                    labels_dominated,
-                    labels_pruned,
-                    labels_purged,
-                    stale_labels_skipped,
-                    standard_bound_pruned,
-                    farkas_bound_pruned,
-                    max_queue_size,
-                    complete_routes_generated,
-                    exact_completion=False,
-                    termination_reason=negative_batch_reason,
-                    certification_mode=negative_batch_certification,
-                    elapsed_seconds=time.time() - pricing_start,
-                    pricing_mode=pricing_mode,
-                    pricing_yield_ratio=pricing_yield_ratio,
-                    **deadline_diag_kwargs(),
-                )
-        return None
+
+    def live_open_state() -> tuple[tuple[_Label, ...], float] | None:
+        kept_labels = kept_farkas_labels if farkas else kept_standard_labels
+        live_by_location = {
+            location: frozenset(labels)
+            for location, labels in kept_labels.items()
+        }
+        live_open_labels: list[_Label] = []
+        live_keys: list[float] = []
+        seen: set[_Label] = set()
+        for open_key, _, open_label in queue:
+            if open_label in seen:
+                continue
+            if open_label not in live_by_location.get(_physical_location(open_label), frozenset()):
+                continue
+            seen.add(open_label)
+            live_open_labels.append(open_label)
+            live_keys.append(open_key)
+        if not live_open_labels:
+            return None
+        return tuple(live_open_labels), min(live_keys)
 
     def insert_open_label(new_label: _Label) -> bool:
         nonlocal labels_dominated, labels_purged
@@ -3725,18 +2653,15 @@ def _price_route_forward_only(
                 kept_farkas_labels,
                 new_label,
                 graph,
-                restrictions,
-                arc_customer_sets,
+                dominance_extension_context,
             )
         else:
             accepted, rejected_count, purged_count = _insert_nondominated_standard_label(
                 kept_standard_labels,
                 new_label,
                 graph,
-                objective,
                 duals,
-                restrictions,
-                arc_customer_sets,
+                dominance_extension_context,
                 deadline_counters,
                 shortest if pricing_mode == "closure" else None,
                 bounds if pricing_mode == "closure" else None,
@@ -3745,12 +2670,55 @@ def _price_route_forward_only(
         labels_purged += purged_count
         return accepted
 
+    def prune_unreachable_together_partner(label: _Label) -> bool:
+        nonlocal labels_pruned
+        if not _together_branch_partner_unreachable(
+            label,
+            graph,
+            objective,
+            shortest,
+            residual_customers,
+            restrictions,
+        ):
+            return False
+        labels_pruned += 1
+        deadline_counters.together_branch_reachability_pruned += 1
+        return True
+
     source_prefix_tuple = tuple(source_prefixes or tuple())
-    if source_prefix_tuple:
+    if initial_open_labels is not None:
+        for initial_label in initial_open_labels:
+            if initial_label.path[-1] == sink:
+                raise RuntimeError("checkpoint cannot contain a completed sink label")
+            if prune_unreachable_together_partner(initial_label):
+                continue
+            if not insert_open_label(initial_label):
+                continue
+            initial_key = _queue_key(
+                initial_label,
+                graph,
+                objective,
+                shortest,
+                bounds,
+                farkas,
+                use_standard_acceleration,
+                deadline_counters,
+            )
+            if (farkas or use_standard_acceleration) and initial_key >= -pricing_tolerance:
+                labels_pruned += 1
+                if farkas:
+                    farkas_bound_pruned += 1
+                else:
+                    standard_bound_pruned += 1
+                continue
+            heappush(queue, (initial_key, next(counter), initial_label))
+        max_queue_size = len(queue)
+    elif source_prefix_tuple:
         for prefix in source_prefix_tuple:
             if not prefix:
                 raise RuntimeError("empty source prefix task")
             prefix_label = source_label
+            prefix_pruned = False
             for next_node in prefix:
                 if prefix_label.path[-1] == source and next_node == sink:
                     raise RuntimeError("prefix task cannot be the empty source-sink route")
@@ -3769,58 +2737,34 @@ def _price_route_forward_only(
                     active_sr,
                     farkas,
                     restrictions,
-                    arc_customer_sets,
                 )
                 labels_generated += 1
+                if next_node != sink and prune_unreachable_together_partner(prefix_label):
+                    prefix_pruned = True
+                    break
+            if prefix_pruned:
+                continue
             if prefix_label.path[-1] == sink:
-                result = accept_complete_label(prefix_label)
-                if result is not None:
-                    return result
+                accept_complete_label(prefix_label)
                 continue
             if not insert_open_label(prefix_label):
                 continue
             prefix_key = _queue_key(prefix_label, graph, objective, shortest, bounds, farkas, use_standard_acceleration, deadline_counters)
-            if not farkas and use_standard_acceleration and prefix_key >= -pricing_tolerance:
+            if (farkas or use_standard_acceleration) and prefix_key >= -pricing_tolerance:
                 labels_pruned += 1
-                standard_bound_pruned += 1
+                if farkas:
+                    farkas_bound_pruned += 1
+                else:
+                    standard_bound_pruned += 1
                 continue
             heappush(queue, (prefix_key, next(counter), prefix_label))
-            if pricing_mode == "closure":
-                deadline_counters.closure_queue_pushes += 1
         max_queue_size = max(max_queue_size, len(queue))
     else:
         source_key = _queue_key(source_label, graph, objective, shortest, bounds, farkas, use_standard_acceleration, deadline_counters)
         heappush(queue, (source_key, next(counter), source_label))
-        if pricing_mode == "closure":
-            deadline_counters.closure_queue_pushes += 1
         max_queue_size = 1
 
     while queue:
-        if stop_event is not None and stop_event.is_set():
-            best_route = _materialize_best_route(best_route, best_path, next_route_id, graph, objective)
-            return _pricing_result(
-                returned_routes,
-                returned_costs,
-                best_route,
-                None if best_cost == float("inf") else best_cost,
-                labels_generated,
-                labels_dominated,
-                labels_pruned,
-                labels_purged,
-                stale_labels_skipped,
-                standard_bound_pruned,
-                farkas_bound_pruned,
-                max_queue_size,
-                complete_routes_generated,
-                exact_completion=False,
-                termination_reason="interrupted_after_first_hit",
-                certification_mode="not_certified_interrupted",
-                elapsed_seconds=time.time() - pricing_start,
-                pricing_engine="source_neighbor_forward_labeling",
-                pricing_mode=pricing_mode,
-                pricing_yield_ratio=pricing_yield_ratio,
-                **deadline_diag_kwargs(),
-            )
         if deadline is not None and time.time() >= deadline:
             if returned_routes:
                 best_route = _materialize_best_route(best_route, best_path, next_route_id, graph, objective)
@@ -3843,7 +2787,6 @@ def _price_route_forward_only(
                     certification_mode="not_certified_time_limit",
                     elapsed_seconds=time.time() - pricing_start,
                     pricing_mode=pricing_mode,
-                    pricing_yield_ratio=pricing_yield_ratio,
                     **deadline_diag_kwargs(),
                 )
             raise PricingTimeLimitReached(
@@ -3866,19 +2809,20 @@ def _price_route_forward_only(
                     forward_labels_generated=labels_generated,
                     forward_labeling_time_seconds=time.time() - pricing_start,
                     pricing_mode=pricing_mode,
-                    pricing_yield_ratio=pricing_yield_ratio,
                     pricing_status=PRICING_STATUS_TIME_LIMIT_NO_COLUMNS,
                     **deadline_diag_kwargs(),
                 )
             )
         key, _, label = heappop(queue)
-        if pricing_mode == "closure":
-            deadline_counters.closure_queue_pops += 1
-        if not farkas and use_standard_acceleration:
-            if key >= -pricing_tolerance:
-                if pricing_mode == "closure":
-                    deadline_counters.certification_tasks_exhausted_by_cell_lb += 1
-                break
+        if (farkas or use_standard_acceleration) and key >= -pricing_tolerance:
+            pruned_open_count = 1 + len(queue)
+            labels_pruned += pruned_open_count
+            if farkas:
+                farkas_bound_pruned += pruned_open_count
+            else:
+                standard_bound_pruned += pruned_open_count
+            queue.clear()
+            break
         node = label.path[-1]
         if node != source:
             kept_labels = kept_farkas_labels if farkas else kept_standard_labels
@@ -3899,20 +2843,19 @@ def _price_route_forward_only(
             if _extension_rejected_by_service_deadline(label, next_node, graph, objective):
                 deadline_counters.extensions_rejected_by_deadline += 1
                 continue
-            new_label = _extend(label, next_node, graph, objective, duals, active_sr, farkas, restrictions, arc_customer_sets)
+            new_label = _extend(label, next_node, graph, objective, duals, active_sr, farkas, restrictions)
             labels_generated += 1
             if next_node == sink:
-                result = accept_complete_label(new_label)
-                if result is not None:
-                    return result
+                accept_complete_label(new_label)
+                continue
+            if prune_unreachable_together_partner(new_label):
                 continue
             if farkas:
                 accepted, rejected_count, purged_count = _insert_nondominated_farkas_label(
                     kept_farkas_labels,
                     new_label,
                     graph,
-                    restrictions,
-                    arc_customer_sets,
+                    dominance_extension_context,
                 )
                 labels_dominated += rejected_count + purged_count
                 labels_purged += purged_count
@@ -3923,10 +2866,8 @@ def _price_route_forward_only(
                     kept_standard_labels,
                     new_label,
                     graph,
-                    objective,
                     duals,
-                    restrictions,
-                    arc_customer_sets,
+                    dominance_extension_context,
                     deadline_counters,
                     shortest if pricing_mode == "closure" else None,
                     bounds if pricing_mode == "closure" else None,
@@ -3936,15 +2877,113 @@ def _price_route_forward_only(
                 if not accepted:
                     continue
             new_key = _queue_key(new_label, graph, objective, shortest, bounds, farkas, use_standard_acceleration, deadline_counters)
-            if not farkas and use_standard_acceleration:
-                if new_key >= -pricing_tolerance:
-                    labels_pruned += 1
+            if (farkas or use_standard_acceleration) and new_key >= -pricing_tolerance:
+                labels_pruned += 1
+                if farkas:
+                    farkas_bound_pruned += 1
+                else:
                     standard_bound_pruned += 1
-                    continue
+                continue
             heappush(queue, (new_key, next(counter), new_label))
-            if pricing_mode == "closure":
-                deadline_counters.closure_queue_pushes += 1
             max_queue_size = max(max_queue_size, len(queue))
+
+        if len(returned_routes) >= effective_batch_size and queue and extension_budget is None:
+            return _pricing_result(
+                returned_routes,
+                returned_costs,
+                _materialize_best_route(best_route, best_path, next_route_id, graph, objective),
+                best_cost,
+                labels_generated,
+                labels_dominated,
+                labels_pruned,
+                labels_purged,
+                stale_labels_skipped,
+                standard_bound_pruned,
+                farkas_bound_pruned,
+                max_queue_size,
+                complete_routes_generated,
+                exact_completion=False,
+                termination_reason=(
+                    "closure_negative_batch_found"
+                    if pricing_mode == "closure"
+                    else "productive_batch_found"
+                ),
+                certification_mode=(
+                    "not_certified_closure_returned_columns"
+                    if pricing_mode == "closure"
+                    else "not_certified_productive"
+                ),
+                elapsed_seconds=time.time() - pricing_start,
+                pricing_mode=pricing_mode,
+                **deadline_diag_kwargs(),
+            )
+
+        if len(returned_routes) >= effective_batch_size and queue:
+            live_state = live_open_state()
+            if live_state is not None:
+                live_open_labels, completion_lower_bound = live_state
+                checkpoint_result = _pricing_result(
+                    returned_routes,
+                    returned_costs,
+                    _materialize_best_route(best_route, best_path, next_route_id, graph, objective),
+                    best_cost,
+                    labels_generated,
+                    labels_dominated,
+                    labels_pruned,
+                    labels_purged,
+                    stale_labels_skipped,
+                    standard_bound_pruned,
+                    farkas_bound_pruned,
+                    max_queue_size,
+                    complete_routes_generated,
+                    exact_completion=False,
+                    termination_reason="candidate_checkpoint",
+                    certification_mode="not_certified_candidate_checkpoint",
+                    elapsed_seconds=time.time() - pricing_start,
+                    pricing_mode=pricing_mode,
+                    **deadline_diag_kwargs(),
+                )
+                return _ForwardCandidateCheckpoint(
+                    open_labels=live_open_labels,
+                    completion_lower_bound=completion_lower_bound,
+                    best_path=best_path,
+                    best_reduced_cost=best_cost,
+                    result=checkpoint_result,
+                )
+
+        if extension_budget is not None and deadline_counters.extensions_attempted >= extension_budget and queue:
+            live_state = live_open_state()
+            if live_state is None:
+                continue
+            live_open_labels, completion_lower_bound = live_state
+            checkpoint_result = _pricing_result(
+                [],
+                [],
+                None,
+                None if best_cost == float("inf") else best_cost,
+                labels_generated,
+                labels_dominated,
+                labels_pruned,
+                labels_purged,
+                stale_labels_skipped,
+                standard_bound_pruned,
+                farkas_bound_pruned,
+                max_queue_size,
+                complete_routes_generated,
+                exact_completion=False,
+                termination_reason="checkpoint",
+                certification_mode="not_certified_checkpoint",
+                elapsed_seconds=time.time() - pricing_start,
+                pricing_mode=pricing_mode,
+                **deadline_diag_kwargs(),
+            )
+            return _ForwardSearchCheckpoint(
+                open_labels=tuple(live_open_labels),
+                completion_lower_bound=completion_lower_bound,
+                best_path=best_path,
+                best_reduced_cost=best_cost,
+                result=checkpoint_result,
+            )
 
     if pricing_mode == "closure" and not queue:
         deadline_counters.certification_tasks_exhausted_by_label_search += 1
@@ -3968,7 +3007,6 @@ def _price_route_forward_only(
             exact_completion=True,
             elapsed_seconds=time.time() - pricing_start,
                 pricing_mode=pricing_mode,
-                pricing_yield_ratio=pricing_yield_ratio,
                 **deadline_diag_kwargs(),
             )
     if farkas:
@@ -3991,7 +3029,6 @@ def _price_route_forward_only(
             exact_completion=True,
             elapsed_seconds=time.time() - pricing_start,
             pricing_mode=pricing_mode,
-            pricing_yield_ratio=pricing_yield_ratio,
             **deadline_diag_kwargs(),
         )
     if best_route is None:
@@ -4014,7 +3051,6 @@ def _price_route_forward_only(
             exact_completion=True,
             elapsed_seconds=time.time() - pricing_start,
             pricing_mode=pricing_mode,
-            pricing_yield_ratio=pricing_yield_ratio,
             **deadline_diag_kwargs(),
         )
     best_route = _materialize_best_route(best_route, best_path, next_route_id, graph, objective)
@@ -4035,1981 +3071,8 @@ def _price_route_forward_only(
         exact_completion=True,
         elapsed_seconds=time.time() - pricing_start,
         pricing_mode=pricing_mode,
-        pricing_yield_ratio=pricing_yield_ratio,
         **deadline_diag_kwargs(),
     )
-
-
-def _price_route_bidirectional(
-    graph: TransformedGraph,
-    objective: ObjectiveData,
-    residual_customers: frozenset[str],
-    restrictions: BranchRestrictions,
-    duals: PricingDuals,
-    next_route_id: int,
-    farkas: bool = False,
-    pricing_tolerance: float = 0.0,
-    use_standard_acceleration: bool = True,
-    stop_at_first_negative: bool = False,
-    batch_size: int = 1,
-    deadline: float | None = None,
-    parallel_workers: int = 2,
-    existing_routes: dict[tuple[str, ...], Route] | None = None,
-    existing_column_paths: set[tuple[str, ...]] | None = None,
-    small_join_pair_threshold: int = 5_000,
-    small_join_cumulative_threshold: int = 250_000,
-    max_join_bypass_calls: int = 1_000,
-    small_dom_bucket_threshold: int = 100,
-    small_dom_cumulative_threshold: int = 500_000,
-    max_dom_bypass_calls: int = 2_000,
-    join_payload_bin_width: float = 1.0,
-    side_pool_batch_size: int = 0,
-    pricing_mode: str = "productive",
-    pricing_yield_ratio: float = 0.0,
-    join_eval_budget: int = 0,
-    pricing_certification_slice_seconds: float = 0.0,
-    enable_join_lower_envelope: bool = True,
-    join_generator_split_threshold: int = 50_000,
-    join_generator_pair_batch_size: int = 10_000,
-    enable_bucket_join_envelope: bool = True,
-    enable_join_profile_cache: bool = True,
-) -> PricingResult:
-    if batch_size <= 0:
-        raise ValueError("pricing batch size must be positive")
-    if min(
-        small_join_pair_threshold,
-        small_join_cumulative_threshold,
-        max_join_bypass_calls,
-        small_dom_bucket_threshold,
-        small_dom_cumulative_threshold,
-        max_dom_bypass_calls,
-        join_generator_split_threshold,
-        join_generator_pair_batch_size,
-    ) <= 0:
-        raise ValueError("candidate-management thresholds must be positive")
-    if join_payload_bin_width <= 0:
-        raise ValueError("join payload bin width must be positive")
-    if side_pool_batch_size < 0:
-        raise ValueError("side-pool batch size must be nonnegative")
-    if join_eval_budget < 0 or pricing_certification_slice_seconds < 0:
-        raise ValueError("join evaluation budget and certification slice must be nonnegative")
-    _validate_inequality_dual_signs(duals, pricing_tolerance)
-    pricing_start = time.time()
-    effective_deadline = deadline
-    if pricing_mode == "closure" and pricing_certification_slice_seconds > 0.0:
-        slice_deadline = pricing_start + pricing_certification_slice_seconds
-        effective_deadline = slice_deadline if deadline is None else min(deadline, slice_deadline)
-    instance = graph.instance
-    source = instance.depot_source
-    sink = instance.depot_sink
-    active_sr = tuple(sorted(duals.nu))
-    active_sr_version = len(active_sr)
-    dual_solution_key = _dual_solution_key(duals)
-    arc_customer_sets = {arc: graph.arc_customer_set(arc) for arc in graph.arcs}
-    shortest = _shortest_truck_times(graph)
-    bounds = _build_pricing_bounds(graph, duals, residual_customers, shortest)
-    signature_cache = RouteSignatureCache()
-    known_signature_costs = _known_signature_costs(
-        existing_routes,
-        existing_column_paths,
-        graph,
-        residual_customers,
-        signature_cache,
-        active_sr,
-        active_sr_version,
-    )
-    source_cost = -duals.kappa if farkas else objective.coeffs.cost * instance.truck_cost - duals.kappa
-    source_label = _Label(
-        path=(source,),
-        represented=frozenset(),
-        truck_visited=frozenset({source}),
-        truck_load=0.0,
-        active_pad=None,
-        active_pad_arrival=0.0,
-        active_wait=0.0,
-        block_count=0,
-        physical_time=0.0,
-        service_times=tuple(),
-        sr_counts=tuple((triplet, 0) for triplet in active_sr),
-        reduced_cost=source_cost,
-        used_arcs=frozenset(),
-        represented_mask=0,
-        truck_node_mask=_truck_node_mask(frozenset({source}), graph),
-    )
-    sink_label = _build_backward_label(
-        (sink,),
-        graph,
-        residual_customers,
-        active_sr,
-        restrictions,
-        arc_customer_sets,
-    )
-
-    forward_counter = count()
-    backward_counter = count()
-    forward_queue: list[tuple[float, int, _Label]] = []
-    backward_queue: list[tuple[int, int, _BackwardLabel]] = []
-    source_key = _queue_key(source_label, graph, objective, shortest, bounds, farkas, use_standard_acceleration)
-    heappush(forward_queue, (source_key, next(forward_counter), source_label))
-    heappush(backward_queue, (0, next(backward_counter), sink_label))
-    kept_standard: dict[str, list[_Label]] = {}
-    kept_farkas: dict[str, list[_Label]] = {}
-    loc = _physical_location(source_label)
-    kept_standard[loc] = [source_label]
-    kept_farkas[loc] = [source_label]
-    forward_by_node: dict[str, list[_Label]] = {source: [source_label]}
-    backward_by_node: dict[str, list[_BackwardLabel]] = {sink: [sink_label]}
-    backward_dominance_index: dict[_DominanceBucketKey, list[_BackwardLabel]] = {
-        _dominance_bucket_key(sink_label): [sink_label],
-    }
-    backward_paths = {sink_label.path}
-
-    returned_routes: list[Route] = []
-    returned_costs: list[float] = []
-    returned_paths: set[tuple[str, ...]] = set()
-    side_pool_routes: list[Route] = []
-    side_pool_costs: list[float] = []
-    side_pool_paths: set[tuple[str, ...]] = set()
-    best_route: Route | None = None
-    best_path: tuple[str, ...] | None = None
-    best_cost = float("inf")
-    forward_labels_generated = 1
-    backward_labels_generated = 1
-    backward_dominance_tests = 0
-    backward_labels_dominated = 0
-    backward_cost_function_build_time = 0.0
-    backward_cost_function_eval_time = 0.0
-    join_sr_correction_time = 0.0
-    join_active_block_time = 0.0
-    joined_reduced_cost_evaluations = 0
-    backward_exclusive_resource_violations = 0
-    labels_dominated = 0
-    labels_pruned = 0
-    labels_purged = 0
-    stale_labels_skipped = 0
-    standard_bound_pruned = 0
-    farkas_bound_pruned = 0
-    max_queue_size = 2
-    complete_routes_generated = 0
-    join_pairs_tested = 0
-    joined_routes_accepted = 0
-    forward_labeling_time = 0.0
-    backward_labeling_time = 0.0
-    join_time = 0.0
-    parallel_calls = 0
-    parallel_labeling_used = False
-    dominance_counter = _DominanceCounter()
-    join_prefilter_pairs = 0
-    join_prefilter_rejected = 0
-    join_bucket_pairs_considered = 0
-    join_bucket_pairs_rejected = 0
-    join_bucket_candidate_pairs = 0
-    join_compatible_keys_generated = 0
-    join_compatible_key_lookups = 0
-    join_bucket_scans_avoided = 0
-    join_key_generation_time = 0.0
-    join_key_cache_hits = 0
-    join_key_cache_misses = 0
-    join_graph_build_time = 0.0
-    join_subbucket_pairs_considered = 0
-    join_subbucket_pairs_rejected = 0
-    join_small_bypass_calls = 0
-    join_local_bypass_calls = 0
-    join_cumulative_bypass_calls = 0
-    join_indexed_activation_count = 0
-    join_work_estimate = 0
-    join_candidate_pairs_accepted = 0
-    join_label_pairs_materialized = 0
-    join_full_decodes = 0
-    lazy_rejected_before_decode = 0
-    fully_decoded_routes = 0
-    duplicate_equivalent_rejected = 0
-    cost_dominated_rejected = 0
-    duplicate_lookup_time = 0.0
-    route_decode_time = 0.0
-    reduced_cost_verification_time = 0.0
-    side_pool_candidates_seen = 0
-    side_pool_routes_retained = 0
-    side_pool_routes_rejected_by_budget = 0
-    join_key_cache: dict[_JoinLookupKey, tuple[_JoinLookupKey, ...]] = {}
-    dominance_key_cache: dict[tuple[_DominanceBucketKey, bool], tuple[_DominanceBucketKey, ...]] = {}
-    join_stage_counter = _JoinStageCounter()
-    sticky_indexed_join = False
-    join_eval_cache = _JoinEvalCache()
-    join_pairs_key_compatible = 0
-    join_pairs_after_bitset_filters = 0
-    join_lower_envelope_rejects = 0
-    join_bucket_lower_envelope_rejects = 0
-    join_subbucket_lower_envelope_rejects = 0
-    join_pair_lower_envelope_rejects = 0
-    join_queue_pushes = 0
-    join_queue_pops = 0
-    join_generator_splits = 0
-    join_materialized_pairs = 0
-    join_exact_rc_evals = 0
-    join_exact_rc_time = 0.0
-    negative_routes_verified = 0
-    join_eval_budget_exhausted = False
-
-    def finish(
-        exact_completion: bool,
-        termination_reason: str | None = None,
-        certification_mode: str | None = None,
-    ) -> PricingResult:
-        nonlocal best_route
-        best_route = _materialize_best_route(best_route, best_path, next_route_id, graph, objective)
-        best_cost_value = None if best_cost == float("inf") else best_cost
-        return _pricing_result(
-            returned_routes,
-            returned_costs,
-            best_route,
-            best_cost_value,
-            forward_labels_generated + backward_labels_generated,
-            labels_dominated,
-            labels_pruned,
-            labels_purged,
-            stale_labels_skipped,
-            standard_bound_pruned,
-            farkas_bound_pruned,
-            max_queue_size,
-            complete_routes_generated,
-            exact_completion=exact_completion,
-            termination_reason=termination_reason,
-            certification_mode=certification_mode,
-            elapsed_seconds=time.time() - pricing_start,
-            pricing_engine="bidirectional_forward_backward",
-            forward_labels_generated=forward_labels_generated,
-            backward_labels_generated=backward_labels_generated,
-            backward_dominance_tests=backward_dominance_tests,
-            backward_labels_dominated=backward_labels_dominated,
-            backward_cost_function_build_time_seconds=backward_cost_function_build_time,
-            backward_cost_function_eval_time_seconds=backward_cost_function_eval_time,
-            join_sr_correction_time_seconds=join_sr_correction_time,
-            join_active_block_time_seconds=join_active_block_time,
-            joined_reduced_cost_evaluations=joined_reduced_cost_evaluations,
-            backward_dominance_cost_tests=dominance_counter.cost_function_tests,
-            backward_dominance_cost_rejected=dominance_counter.cost_function_rejected,
-            backward_exclusive_resource_violations=backward_exclusive_resource_violations,
-            join_pairs_tested=join_pairs_tested,
-            joined_routes_accepted=joined_routes_accepted,
-            forward_labeling_time_seconds=forward_labeling_time,
-            backward_labeling_time_seconds=backward_labeling_time,
-            join_time_seconds=join_time,
-            parallel_labeling_used=parallel_labeling_used,
-            parallel_workers=parallel_workers,
-            parallel_calls=parallel_calls,
-            signature_cache_hits=signature_cache.stats.signature_cache_hits,
-            signature_cache_misses=signature_cache.stats.signature_cache_misses,
-            core_signature_cache_hits=signature_cache.stats.core_signature_cache_hits,
-            core_signature_cache_misses=signature_cache.stats.core_signature_cache_misses,
-            active_signature_cache_hits=signature_cache.stats.active_signature_cache_hits,
-            active_signature_cache_misses=signature_cache.stats.active_signature_cache_misses,
-            sr_coeff_cache_hits=signature_cache.stats.sr_coeff_cache_hits,
-            sr_coeff_cache_misses=signature_cache.stats.sr_coeff_cache_misses,
-            active_sr_key_cache_hits=signature_cache.stats.active_sr_key_cache_hits,
-            active_sr_key_cache_misses=signature_cache.stats.active_sr_key_cache_misses,
-            active_sr_coeffs_computed=signature_cache.stats.active_sr_coeffs_computed,
-            triplet_masks_built=signature_cache.stats.triplet_masks_built,
-            dominance_prefilter_pairs=dominance_counter.prefilter_pairs,
-            dominance_prefilter_rejected=dominance_counter.prefilter_rejected,
-            dominance_bucket_pairs_considered=dominance_counter.bucket_pairs_considered,
-            dominance_bucket_pairs_rejected=dominance_counter.bucket_pairs_rejected,
-            dominance_bucket_candidate_pairs=dominance_counter.bucket_candidate_pairs,
-            dominance_compatible_keys_generated=dominance_counter.compatible_keys_generated,
-            dominance_compatible_key_lookups=dominance_counter.compatible_key_lookups,
-            dominance_bucket_scans_avoided=dominance_counter.bucket_scans_avoided,
-            dominance_key_generation_time_seconds=dominance_counter.key_generation_time_seconds,
-            backward_full_dominance_tests=dominance_counter.full_tests,
-            join_prefilter_pairs=join_prefilter_pairs,
-            join_prefilter_rejected=join_prefilter_rejected,
-            join_bucket_pairs_considered=join_bucket_pairs_considered,
-            join_bucket_pairs_rejected=join_bucket_pairs_rejected,
-            join_bucket_candidate_pairs=join_bucket_candidate_pairs,
-            join_compatible_keys_generated=join_compatible_keys_generated,
-            join_compatible_key_lookups=join_compatible_key_lookups,
-            join_bucket_scans_avoided=join_bucket_scans_avoided,
-            join_key_generation_time_seconds=join_key_generation_time,
-            join_key_cache_hits=join_key_cache_hits,
-            join_key_cache_misses=join_key_cache_misses,
-            join_graph_build_time_seconds=join_graph_build_time,
-            join_subbucket_pairs_considered=join_subbucket_pairs_considered,
-            join_subbucket_pairs_rejected=join_subbucket_pairs_rejected,
-            join_small_bypass_calls=join_small_bypass_calls,
-            join_local_bypass_calls=join_local_bypass_calls,
-            join_cumulative_bypass_calls=join_cumulative_bypass_calls,
-            join_indexed_activation_count=join_indexed_activation_count,
-            join_work_estimate=join_work_estimate,
-            join_candidate_pairs_accepted=join_candidate_pairs_accepted,
-            join_activation_mode=_activation_mode(join_small_bypass_calls, join_indexed_activation_count),
-            join_label_pairs_materialized=join_label_pairs_materialized,
-            join_full_decodes=join_full_decodes,
-            lazy_rejected_before_decode=lazy_rejected_before_decode,
-            fully_decoded_routes=fully_decoded_routes,
-            duplicate_equivalent_rejected=duplicate_equivalent_rejected + signature_cache.stats.duplicate_equivalent_rejected,
-            cost_dominated_rejected=cost_dominated_rejected + signature_cache.stats.cost_dominated_rejected,
-            signature_build_time_seconds=signature_cache.stats.signature_build_time,
-            sr_coeff_build_time_seconds=signature_cache.stats.sr_coeff_build_time,
-            duplicate_lookup_time_seconds=duplicate_lookup_time,
-            route_decode_time_seconds=route_decode_time,
-            reduced_cost_verification_time_seconds=reduced_cost_verification_time,
-            dominance_key_cache_hits=dominance_counter.key_cache_hits,
-            dominance_key_cache_misses=dominance_counter.key_cache_misses,
-            dominance_small_bypass_calls=dominance_counter.small_bypass_calls,
-            dominance_bypass_calls=dominance_counter.small_bypass_calls,
-            dominance_indexed_activation_count=dominance_counter.indexed_activation_count,
-            dominance_work_estimate=dominance_counter.work_estimate,
-            dominance_activation_mode=_activation_mode(dominance_counter.small_bypass_calls, dominance_counter.indexed_activation_count),
-            sticky_indexed_join_activations=join_stage_counter.sticky_indexed_activations,
-            sticky_indexed_dominance_activations=dominance_counter.sticky_indexed_activations,
-            join_stage_reject_key=join_stage_counter.reject_key,
-            join_stage_reject_branch=join_stage_counter.reject_branch,
-            join_stage_reject_customer=join_stage_counter.reject_customer,
-            join_stage_reject_truck_node=join_stage_counter.reject_truck_node,
-            join_stage_reject_payload=join_stage_counter.reject_payload,
-            join_stage_reject_block=join_stage_counter.reject_block,
-            join_stage_reject_reduced_cost=join_stage_counter.reject_reduced_cost,
-            dominance_stage_reject_key=dominance_counter.stage_reject_key,
-            dominance_stage_reject_branch=dominance_counter.stage_reject_branch,
-            dominance_stage_reject_customer=dominance_counter.stage_reject_customer,
-            dominance_stage_reject_truck_node=dominance_counter.stage_reject_truck_node,
-            dominance_stage_reject_payload=dominance_counter.stage_reject_payload,
-            dominance_stage_reject_block=dominance_counter.stage_reject_block,
-            dominance_stage_reject_time=dominance_counter.stage_reject_time,
-            dominance_stage_reject_cost=dominance_counter.stage_reject_cost,
-            pricing_mode=pricing_mode,
-            pricing_yield_ratio=pricing_yield_ratio,
-            side_pool_routes=side_pool_routes,
-            side_pool_reduced_costs=side_pool_costs,
-            side_pool_candidates_seen=side_pool_candidates_seen,
-            side_pool_routes_retained=side_pool_routes_retained,
-            side_pool_routes_rejected_by_budget=side_pool_routes_rejected_by_budget,
-            join_pairs_key_compatible=join_pairs_key_compatible,
-            join_pairs_after_bitset_filters=join_pairs_after_bitset_filters,
-            join_lower_envelope_rejects=join_lower_envelope_rejects,
-            join_bucket_lower_envelope_rejects=join_bucket_lower_envelope_rejects,
-            join_subbucket_lower_envelope_rejects=join_subbucket_lower_envelope_rejects,
-            join_pair_lower_envelope_rejects=join_pair_lower_envelope_rejects,
-            join_queue_pushes=join_queue_pushes,
-            join_queue_pops=join_queue_pops,
-            join_generator_queue_pushes=join_queue_pushes,
-            join_generator_queue_pops=join_queue_pops,
-            join_generator_splits=join_generator_splits,
-            join_materialized_pairs=join_materialized_pairs,
-            join_exact_rc_evals=join_exact_rc_evals,
-            join_exact_rc_time_seconds=join_exact_rc_time,
-            interface_cache_hits=join_eval_cache.hits,
-            interface_cache_misses=join_eval_cache.misses,
-            suffix_profile_cache_hits=join_eval_cache.suffix_profile_hits,
-            suffix_profile_cache_misses=join_eval_cache.suffix_profile_misses,
-            interface_profile_cache_hits=join_eval_cache.interface_profile_hits,
-            interface_profile_cache_misses=join_eval_cache.interface_profile_misses,
-            productive_calls=1 if pricing_mode == "productive" else 0,
-            certification_calls=1 if pricing_mode == "closure" else 0,
-            negative_routes_verified=negative_routes_verified,
-            negative_routes_inserted=len(returned_routes),
-        )
-
-    def accept_candidates(candidates: list[_RouteCandidate]) -> bool:
-        nonlocal best_route, best_path, best_cost, complete_routes_generated, joined_routes_accepted
-        nonlocal lazy_rejected_before_decode, fully_decoded_routes, duplicate_equivalent_rejected, cost_dominated_rejected
-        nonlocal duplicate_lookup_time, route_decode_time, reduced_cost_verification_time, join_full_decodes
-        nonlocal side_pool_candidates_seen, side_pool_routes_retained, side_pool_routes_rejected_by_budget
-        nonlocal negative_routes_verified
-        batch_ready = False
-        for candidate in sorted(candidates, key=lambda item: (item.reduced_cost, item.path)):
-            if candidate.reduced_cost < best_cost:
-                best_cost = candidate.reduced_cost
-                best_path = candidate.path
-                best_route = None
-            complete_routes_generated += 1
-            if candidate.reduced_cost >= -pricing_tolerance or candidate.path in returned_paths:
-                lazy_rejected_before_decode += 1
-                continue
-            lookup_start = time.time()
-            estimated_cost = _candidate_route_cost_from_reduced_cost(candidate, duals, farkas)
-            signature = route_signature_from_resources(
-                candidate.served,
-                candidate.truck_served,
-                candidate.pad_served,
-                candidate.used_arcs,
-                graph,
-                residual_customers,
-                signature_cache,
-                active_sr=active_sr,
-                active_sr_version=active_sr_version,
-                route_cost=estimated_cost,
-            )
-            coeff_signature = route_coefficient_signature(signature)
-            incumbent_cost = known_signature_costs.get(coeff_signature)
-            duplicate_lookup_time += time.time() - lookup_start
-            if estimated_cost is not None and incumbent_cost is not None and incumbent_cost <= estimated_cost + PAPER_DOMINANCE_TOLERANCE:
-                if abs(incumbent_cost - estimated_cost) <= COST_SIGNATURE_TOLERANCE:
-                    duplicate_equivalent_rejected += 1
-                else:
-                    cost_dominated_rejected += 1
-                lazy_rejected_before_decode += 1
-                continue
-            decode_start = time.time()
-            route = route_from_path(next_route_id + len(returned_routes), candidate.path, graph, objective)
-            route_decode_time += time.time() - decode_start
-            fully_decoded_routes += 1
-            if candidate.joined:
-                join_full_decodes += 1
-            verify_start = time.time()
-            if not route.served or not route.served.issubset(residual_customers):
-                raise RuntimeError("decoded pricing route violates residual-customer scope")
-            if not restrictions.route_allowed(route, arc_customer_sets):
-                raise RuntimeError("decoded pricing route violates branch restrictions")
-            direct_reduced_cost = route_farkas_reduced_cost(route, duals) if farkas else route_reduced_cost(route, duals)
-            if abs(direct_reduced_cost - candidate.reduced_cost) > max(1e-7, 10.0 * pricing_tolerance):
-                raise RuntimeError("label-computed reduced cost disagrees with direct decoded route cost")
-            if direct_reduced_cost < -pricing_tolerance:
-                negative_routes_verified += 1
-            duplicate, signature = _duplicate_dominated_by_existing(
-                route,
-                known_signature_costs,
-                graph,
-                residual_customers,
-                signature_cache,
-                active_sr,
-                active_sr_version,
-            )
-            reduced_cost_verification_time += time.time() - verify_start
-            if duplicate:
-                lazy_rejected_before_decode += 1
-                continue
-            coeff_signature = route_coefficient_signature(signature)
-            if candidate.path not in returned_paths and len(returned_routes) < batch_size:
-                returned_routes.append(route)
-                returned_costs.append(direct_reduced_cost)
-                returned_paths.add(candidate.path)
-                known_signature_costs[coeff_signature] = min(
-                    known_signature_costs.get(coeff_signature, float("inf")),
-                    route.cost,
-                )
-                if candidate.joined:
-                    joined_routes_accepted += 1
-                if stop_at_first_negative or len(returned_routes) >= batch_size:
-                    batch_ready = True
-                    if stop_at_first_negative and side_pool_batch_size == 0:
-                        return True
-                continue
-            if (
-                side_pool_batch_size > 0
-                and candidate.path not in returned_paths
-                and candidate.path not in side_pool_paths
-            ):
-                side_pool_candidates_seen += 1
-                if len(side_pool_routes) < side_pool_batch_size:
-                    side_pool_routes.append(route)
-                    side_pool_costs.append(direct_reduced_cost)
-                    side_pool_paths.add(candidate.path)
-                    side_pool_routes_retained += 1
-                else:
-                    side_pool_routes_rejected_by_budget += 1
-        return batch_ready
-
-    def join_candidates(
-        forward_labels: list[_Label],
-        backward_labels: list[_BackwardLabel],
-    ) -> list[_RouteCandidate]:
-        nonlocal join_pairs_tested, join_time, parallel_calls, parallel_labeling_used
-        nonlocal join_prefilter_pairs, join_prefilter_rejected
-        nonlocal join_bucket_pairs_considered, join_bucket_pairs_rejected, join_bucket_candidate_pairs, join_label_pairs_materialized
-        nonlocal join_compatible_keys_generated, join_compatible_key_lookups, join_bucket_scans_avoided, join_key_generation_time
-        nonlocal join_key_cache_hits, join_key_cache_misses, join_graph_build_time
-        nonlocal join_subbucket_pairs_considered, join_subbucket_pairs_rejected, join_small_bypass_calls
-        nonlocal join_local_bypass_calls, join_cumulative_bypass_calls, join_indexed_activation_count
-        nonlocal join_work_estimate, join_candidate_pairs_accepted
-        nonlocal sticky_indexed_join
-        nonlocal backward_cost_function_eval_time, joined_reduced_cost_evaluations, join_sr_correction_time, join_active_block_time
-        nonlocal join_pairs_key_compatible, join_pairs_after_bitset_filters, join_lower_envelope_rejects
-        nonlocal join_bucket_lower_envelope_rejects, join_subbucket_lower_envelope_rejects, join_pair_lower_envelope_rejects
-        nonlocal join_queue_pushes, join_queue_pops, join_generator_splits, join_materialized_pairs
-        nonlocal join_exact_rc_evals, join_exact_rc_time
-        nonlocal join_eval_budget_exhausted
-        if not forward_labels or not backward_labels:
-            return []
-        join_start = time.time()
-        current_join_work = _estimate_join_work(forward_by_node, backward_by_node)
-        join_work_estimate = max(join_work_estimate, current_join_work)
-        local_pair_count = len(forward_labels) * len(backward_labels)
-        if (
-            not sticky_indexed_join
-            and (
-                local_pair_count > small_join_pair_threshold
-                or current_join_work > small_join_cumulative_threshold
-                or join_small_bypass_calls >= max_join_bypass_calls
-            )
-        ):
-            sticky_indexed_join = True
-            join_stage_counter.sticky_indexed_activations += 1
-        bucketed = _bucketed_join_generators(
-            forward_labels,
-            backward_labels,
-            graph,
-            duals,
-            farkas,
-            compatible_key_cache=join_key_cache,
-            small_join_pair_threshold=small_join_pair_threshold,
-            small_join_cumulative_threshold=small_join_cumulative_threshold,
-            max_join_bypass_calls=max_join_bypass_calls,
-            previous_join_bypass_calls=join_small_bypass_calls,
-            cumulative_pair_count=current_join_work,
-            payload_bin_width=join_payload_bin_width,
-            force_indexed=sticky_indexed_join,
-            stage_counter=join_stage_counter,
-            pricing_tolerance=pricing_tolerance,
-            enable_join_lower_envelope=enable_join_lower_envelope,
-            enable_bucket_join_envelope=enable_bucket_join_envelope,
-        )
-        join_bucket_pairs_considered += bucketed["bucket_pairs_considered"]
-        join_bucket_pairs_rejected += bucketed["bucket_pairs_rejected"]
-        join_bucket_candidate_pairs += bucketed["bucket_candidate_pairs"]
-        join_bucket_lower_envelope_rejects += bucketed["bucket_lower_envelope_rejects"]
-        join_lower_envelope_rejects += bucketed["bucket_lower_envelope_rejects"]
-        join_compatible_keys_generated += bucketed["compatible_keys_generated"]
-        join_compatible_key_lookups += bucketed["compatible_key_lookups"]
-        join_bucket_scans_avoided += bucketed["bucket_scans_avoided"]
-        join_key_generation_time += bucketed["key_generation_time_seconds"]
-        join_key_cache_hits += bucketed["key_cache_hits"]
-        join_key_cache_misses += bucketed["key_cache_misses"]
-        join_graph_build_time += bucketed["join_graph_build_time_seconds"]
-        join_subbucket_pairs_considered += bucketed["subbucket_pairs_considered"]
-        join_subbucket_pairs_rejected += bucketed["subbucket_pairs_rejected"]
-        join_small_bypass_calls += bucketed["small_bypass_calls"]
-        join_local_bypass_calls += bucketed["local_bypass_calls"]
-        join_cumulative_bypass_calls += bucketed["cumulative_bypass_calls"]
-        join_indexed_activation_count += bucketed["indexed_activation_count"]
-        join_work_estimate = max(join_work_estimate, int(bucketed["join_work_estimate"]))
-        join_candidate_pairs_accepted += bucketed["candidate_pairs_accepted"]
-        join_prefilter_rejected += bucketed["label_pairs_rejected"]
-        generators = bucketed["generators"]
-        if not generators:
-            join_time += time.time() - join_start
-            return []
-        join_pairs_key_compatible += int(bucketed["bucket_candidate_pairs"])
-        queue: list[tuple[float, int, _JoinGenerator]] = []
-        queue_counter = count()
-        for generator in generators:
-            heappush(queue, (generator.lower_bound, next(queue_counter), generator))
-            join_queue_pushes += 1
-
-        candidates: list[_RouteCandidate] = []
-        negative_candidates = 0
-        while queue:
-            if effective_deadline is not None and time.time() >= effective_deadline:
-                break
-            if join_eval_budget > 0 and join_exact_rc_evals >= join_eval_budget and pricing_mode != "closure":
-                join_eval_budget_exhausted = True
-                break
-            _, _, generator = heappop(queue)
-            join_queue_pops += 1
-            split_threshold = min(join_generator_split_threshold, join_generator_pair_batch_size)
-            if generator.level == "bucket" and generator.estimated_pair_count > split_threshold:
-                subgenerators = _split_join_generator(
-                    generator,
-                    graph,
-                    duals,
-                    farkas,
-                    join_payload_bin_width,
-                    pricing_tolerance,
-                    enable_join_lower_envelope,
-                    enable_bucket_join_envelope,
-                )
-                if (
-                    int(subgenerators["subbucket_pairs_considered"]) > 1
-                    or int(subgenerators["subbucket_lower_envelope_rejects"]) > 0
-                    or int(subgenerators["subbucket_pairs_rejected"]) > 0
-                ):
-                    join_generator_splits += 1
-                    join_subbucket_pairs_considered += subgenerators["subbucket_pairs_considered"]
-                    join_subbucket_pairs_rejected += subgenerators["subbucket_pairs_rejected"]
-                    join_subbucket_lower_envelope_rejects += subgenerators["subbucket_lower_envelope_rejects"]
-                    join_lower_envelope_rejects += subgenerators["subbucket_lower_envelope_rejects"]
-                    _increment_join_stage(join_stage_counter, "reduced_cost", int(subgenerators["subbucket_lower_envelope_rejects"]))
-                    for subgenerator in subgenerators["generators"]:
-                        heappush(queue, (subgenerator.lower_bound, next(queue_counter), subgenerator))
-                        join_queue_pushes += 1
-                    continue
-            for forward_label, backward_label in _iter_join_generator_pairs(generator, graph):
-                if effective_deadline is not None and time.time() >= effective_deadline:
-                    break
-                if join_eval_budget > 0 and join_exact_rc_evals >= join_eval_budget and pricing_mode != "closure":
-                    join_eval_budget_exhausted = True
-                    break
-                join_materialized_pairs += 1
-                join_label_pairs_materialized += 1
-                join_pairs_tested += 1
-                join_prefilter_pairs += 1
-                rejection_stage = _join_rejection_stage(forward_label, backward_label, graph)
-                if rejection_stage is not None:
-                    join_prefilter_rejected += 1
-                    _increment_join_stage(join_stage_counter, rejection_stage)
-                    continue
-                join_pairs_after_bitset_filters += 1
-                join_lb = _join_lower_bound(
-                    forward_label,
-                    backward_label,
-                    graph,
-                    duals,
-                    farkas,
-                    enable_join_lower_envelope=enable_join_lower_envelope,
-                )
-                if not farkas and enable_join_lower_envelope and join_lb >= -pricing_tolerance:
-                    join_lower_envelope_rejects += 1
-                    join_pair_lower_envelope_rejects += 1
-                    _increment_join_stage(join_stage_counter, "reduced_cost")
-                    continue
-                eval_start = time.time()
-                reduced_cost = _joined_reduced_cost_cached(
-                    forward_label,
-                    backward_label,
-                    graph,
-                    objective,
-                    duals,
-                    farkas,
-                    join_eval_cache,
-                    active_sr_version,
-                    dual_solution_key,
-                    enable_cache=enable_join_profile_cache,
-                )
-                eval_elapsed = time.time() - eval_start
-                join_exact_rc_time += eval_elapsed
-                backward_cost_function_eval_time += eval_elapsed
-                join_sr_correction_time += eval_elapsed
-                join_active_block_time += eval_elapsed
-                join_exact_rc_evals += 1
-                joined_reduced_cost_evaluations += 1
-                candidate = _join_forward_backward(
-                    forward_label,
-                    backward_label,
-                    graph,
-                    objective,
-                    residual_customers,
-                    restrictions,
-                    arc_customer_sets,
-                    duals,
-                    farkas,
-                    reduced_cost=reduced_cost,
-                )
-                if candidate is None:
-                    continue
-                candidates.append(candidate)
-                if reduced_cost < -pricing_tolerance:
-                    negative_candidates += 1
-                    if negative_candidates >= batch_size:
-                        break
-            if negative_candidates >= batch_size or join_eval_budget_exhausted:
-                break
-        join_time += time.time() - join_start
-        return candidates
-
-    def _evaluate_join_pair(pair: tuple[_Label, _BackwardLabel]) -> _RouteCandidate | None:
-        forward_label, backward_label = pair
-        candidate = _join_forward_backward(
-            forward_label,
-            backward_label,
-            graph,
-            objective,
-            residual_customers,
-            restrictions,
-            arc_customer_sets,
-            duals,
-            farkas,
-        )
-        if candidate is None:
-            return None
-        return candidate
-
-    with ThreadPoolExecutor(max_workers=parallel_workers) as executor:
-        while forward_queue or backward_queue:
-            if effective_deadline is not None and time.time() >= effective_deadline:
-                if returned_routes:
-                    return finish(
-                        exact_completion=False,
-                        termination_reason="time_limit_with_columns",
-                        certification_mode="not_certified_time_limit",
-                    )
-                raise PricingTimeLimitReached(
-                    finish(
-                        exact_completion=False,
-                        termination_reason="time_limit_unresolved",
-                        certification_mode="not_certified_time_limit",
-                    ).diagnostics
-                )
-
-            forward_label: _Label | None = None
-            while forward_queue and forward_label is None:
-                _, _, candidate = heappop(forward_queue)
-                key = _physical_location(candidate)
-                kept = kept_farkas if farkas else kept_standard
-                if candidate not in kept.get(key, []):
-                    stale_labels_skipped += 1
-                    continue
-                forward_label = candidate
-            backward_label: _BackwardLabel | None = None
-            while backward_queue and backward_label is None:
-                _, _, candidate = heappop(backward_queue)
-                if candidate not in backward_by_node.get(candidate.path[0], []):
-                    stale_labels_skipped += 1
-                    continue
-                backward_label = candidate
-
-            if forward_label is None and backward_label is None:
-                continue
-            futures = []
-            if forward_label is not None and backward_label is not None and parallel_workers > 1:
-                parallel_calls += 1
-                parallel_labeling_used = True
-                futures.append(("forward", executor.submit(
-                    _expand_forward_label,
-                    forward_label,
-                    graph,
-                    objective,
-                    residual_customers,
-                    restrictions,
-                    arc_customer_sets,
-                    duals,
-                    active_sr,
-                    farkas,
-                )))
-                futures.append(("backward", executor.submit(
-                    _expand_backward_label,
-                    backward_label,
-                    graph,
-                    residual_customers,
-                    active_sr,
-                    restrictions,
-                    arc_customer_sets,
-                )))
-                forward_expansion: _ForwardExpansion | None = None
-                backward_expansion: _BackwardExpansion | None = None
-                for kind, future in futures:
-                    if kind == "forward":
-                        forward_expansion = future.result()
-                    else:
-                        backward_expansion = future.result()
-            else:
-                forward_expansion = (
-                    _expand_forward_label(
-                        forward_label,
-                        graph,
-                        objective,
-                        residual_customers,
-                        restrictions,
-                        arc_customer_sets,
-                        duals,
-                        active_sr,
-                        farkas,
-                    )
-                    if forward_label is not None
-                    else None
-                )
-                backward_expansion = (
-                    _expand_backward_label(
-                        backward_label,
-                        graph,
-                        residual_customers,
-                        active_sr,
-                        restrictions,
-                        arc_customer_sets,
-                    )
-                    if backward_label is not None
-                    else None
-                )
-
-            candidate_routes: list[_RouteCandidate] = []
-            if forward_expansion is not None:
-                forward_labels_generated += forward_expansion.generated
-                forward_labeling_time += forward_expansion.elapsed_seconds
-                for complete_label in forward_expansion.complete_labels:
-                    candidate_routes.append(_candidate_from_forward_label(complete_label, graph, objective, duals, farkas))
-                for new_label in sorted(forward_expansion.labels, key=lambda item: (item.path, item.reduced_cost)):
-                    insert_ok = True
-                    if farkas:
-                        inserted, rejected_count, purged = _insert_nondominated_farkas_label(
-                            kept_farkas,
-                            new_label,
-                            graph,
-                            restrictions,
-                            arc_customer_sets,
-                        )
-                    else:
-                        inserted, rejected_count, purged = _insert_nondominated_standard_label(
-                            kept_standard,
-                            new_label,
-                            graph,
-                            objective,
-                            duals,
-                            restrictions,
-                            arc_customer_sets,
-                        )
-                    if not inserted:
-                        labels_dominated += rejected_count + purged
-                        insert_ok = False
-                    else:
-                        labels_dominated += purged
-                    labels_purged += purged
-                    if insert_ok:
-                        key = _queue_key(new_label, graph, objective, shortest, bounds, farkas, use_standard_acceleration)
-                        if not farkas and use_standard_acceleration and key >= -pricing_tolerance:
-                            standard_bound_pruned += 1
-                            labels_pruned += 1
-                            insert_ok = False
-                    if not insert_ok:
-                        continue
-                    heappush(forward_queue, (key, next(forward_counter), new_label))
-                    forward_by_node.setdefault(new_label.path[-1], []).append(new_label)
-                    candidate_routes.extend(join_candidates([new_label], list(backward_by_node.get(new_label.path[-1], ()))))
-
-            if backward_expansion is not None:
-                backward_labels_generated += backward_expansion.generated
-                backward_labeling_time += backward_expansion.elapsed_seconds
-                backward_cost_function_build_time += backward_expansion.cost_function_build_time_seconds
-                backward_exclusive_resource_violations += backward_expansion.exclusive_resource_violations
-                for suffix in sorted(backward_expansion.labels, key=lambda item: item.path):
-                    inserted, rejected_count, purged_count, dominance_tests = _insert_nondominated_backward_label(
-                        backward_by_node,
-                        backward_paths,
-                        suffix,
-                        graph,
-                        objective,
-                        restrictions,
-                        arc_customer_sets,
-                        duals,
-                        farkas,
-                        dominance_counter,
-                        dominance_index=backward_dominance_index,
-                        dominance_key_cache=dominance_key_cache,
-                        small_dom_bucket_threshold=small_dom_bucket_threshold,
-                        small_dom_cumulative_threshold=small_dom_cumulative_threshold,
-                        max_dom_bypass_calls=max_dom_bypass_calls,
-                    )
-                    backward_dominance_tests += dominance_tests
-                    backward_labels_dominated += rejected_count + purged_count
-                    if not inserted:
-                        continue
-                    heappush(backward_queue, (len(suffix.path), next(backward_counter), suffix))
-                    candidate_routes.extend(join_candidates(list(forward_by_node.get(suffix.path[0], ())), [suffix]))
-
-            if accept_candidates(candidate_routes):
-                negative_batch_reason = (
-                    "closure_negative_batch_found"
-                    if pricing_mode == "closure"
-                    else "productive_batch_found"
-                )
-                negative_batch_certification = (
-                    "not_certified_closure_returned_columns"
-                    if pricing_mode == "closure"
-                    else "not_certified_productive"
-                )
-                return finish(
-                    exact_completion=False,
-                    termination_reason=negative_batch_reason,
-                    certification_mode=negative_batch_certification,
-                )
-            max_queue_size = max(max_queue_size, len(forward_queue) + len(backward_queue))
-
-    if join_eval_budget_exhausted:
-        raise PricingTimeLimitReached(
-            finish(
-                exact_completion=False,
-                termination_reason="time_limit_unresolved",
-                certification_mode="not_certified_join_eval_budget",
-            ).diagnostics
-        )
-    return finish(
-        exact_completion=True,
-        termination_reason="complete_label_and_join_exhaustion",
-        certification_mode="bidirectional_complete_meet_node",
-    )
-
-
-def _expand_forward_label(
-    label: _Label,
-    graph: TransformedGraph,
-    objective: ObjectiveData,
-    residual_customers: frozenset[str],
-    restrictions: BranchRestrictions,
-    arc_customer_sets: dict[tuple[str, str], frozenset[str]],
-    duals: PricingDuals,
-    active_sr: tuple[tuple[str, str, str], ...],
-    farkas: bool,
-) -> _ForwardExpansion:
-    start = time.time()
-    instance = graph.instance
-    sink = instance.depot_sink
-    labels: list[_Label] = []
-    complete_labels: list[_Label] = []
-    generated = 0
-    for next_node in graph.out_arcs[label.path[-1]]:
-        if not _extension_allowed(label, next_node, graph, residual_customers, restrictions):
-            continue
-        new_label = _extend(label, next_node, graph, objective, duals, active_sr, farkas, restrictions, arc_customer_sets)
-        generated += 1
-        if next_node == sink:
-            if new_label.represented and _complete_allowed(new_label, graph, restrictions, arc_customer_sets):
-                complete_labels.append(new_label)
-        else:
-            labels.append(new_label)
-    return _ForwardExpansion(tuple(labels), tuple(complete_labels), generated, time.time() - start)
-
-
-def _expand_backward_label(
-    label: _BackwardLabel,
-    graph: TransformedGraph,
-    residual_customers: frozenset[str],
-    active_sr: tuple[tuple[str, str, str], ...],
-    restrictions: BranchRestrictions,
-    arc_customer_sets: dict[tuple[str, str], frozenset[str]],
-) -> _BackwardExpansion:
-    start = time.time()
-    source = graph.instance.depot_source
-    if label.path[0] == source:
-        return _BackwardExpansion(tuple(), 0, time.time() - start)
-    labels: list[_BackwardLabel] = []
-    cost_function_build_time = 0.0
-    exclusive_resource_violations = 0
-    for prev_node in graph.in_arcs[label.path[0]]:
-        extension_start = time.time()
-        suffix = _extend_backward_label(prev_node, label, graph, residual_customers, active_sr, restrictions, arc_customer_sets)
-        extension_elapsed = time.time() - extension_start
-        if suffix is not None:
-            labels.append(suffix)
-            cost_function_build_time += extension_elapsed
-        else:
-            exclusive_resource_violations += 1
-    return _BackwardExpansion(
-        tuple(labels),
-        len(labels),
-        time.time() - start,
-        cost_function_build_time_seconds=cost_function_build_time,
-        exclusive_resource_violations=exclusive_resource_violations,
-    )
-
-
-def _extend_backward_label(
-    predecessor: str,
-    label: _BackwardLabel,
-    graph: TransformedGraph,
-    residual_customers: frozenset[str],
-    active_sr: tuple[tuple[str, str, str], ...],
-    restrictions: BranchRestrictions,
-    arc_customer_sets: dict[tuple[str, str], frozenset[str]],
-) -> _BackwardLabel | None:
-    instance = graph.instance
-    if not label.path:
-        return None
-    suffix_start = label.path[0]
-    arc = (predecessor, suffix_start)
-    if arc not in graph.arcs:
-        return None
-    if predecessor == instance.depot_sink or instance.depot_source in label.path[1:]:
-        return None
-
-    represented = set(label.represented)
-    truck_visited = set(label.truck_visited)
-    truck_load = label.truck_load
-
-    if suffix_start in instance.customers + instance.hubs:
-        if suffix_start in truck_visited:
-            return None
-        truck_visited.add(suffix_start)
-    if predecessor in instance.customers + instance.hubs and predecessor in truck_visited:
-        return None
-
-    truck_served = set(label.truck_served)
-    pad_served = set(label.pad_served)
-    if is_customer_representation(suffix_start, instance):
-        customer = served_customer(suffix_start)
-        if customer not in residual_customers or customer in represented:
-            return None
-        if customer in restrictions.truck_service and is_duplicate(suffix_start):
-            return None
-        if customer in restrictions.drone_service and suffix_start == customer:
-            return None
-        required_pads = [hub for hub, c in restrictions.pad_required if c == customer]
-        if required_pads and (not is_duplicate(suffix_start) or duplicate_hub(suffix_start) not in required_pads):
-            return None
-        if is_duplicate(suffix_start) and (duplicate_hub(suffix_start), customer) in restrictions.pad_forbidden:
-            return None
-        for p, q in restrictions.separate_pairs:
-            if customer == p and q in represented:
-                return None
-            if customer == q and p in represented:
-                return None
-        if is_duplicate(suffix_start):
-            hub = duplicate_hub(suffix_start)
-            if (hub, customer) not in instance.drone_arcs:
-                return None
-            pad_served.add((hub, customer))
-            if label.leading_block_hub is not None and label.leading_block_hub != hub:
-                return None
-            leading_block_hub = hub
-            leading_block_count = label.leading_block_count + 1
-            leading_block_wait = max(label.leading_block_wait, instance.drone_trip_time[(hub, customer)])
-        else:
-            truck_served.add(customer)
-            leading_block_hub = None
-            leading_block_count = 0
-            leading_block_wait = 0.0
-        represented.add(customer)
-        truck_load += instance.demand[customer]
-        if truck_load > instance.truck_payload + PAYLOAD_TOLERANCE:
-            return None
-    else:
-        leading_block_hub = None
-        leading_block_count = 0
-        leading_block_wait = 0.0
-
-    if leading_block_count > instance.drones_per_truck:
-        return None
-
-    path = (predecessor,) + label.path
-    profile, profile_truck_served, profile_pad_served = _backward_profile(path, graph)
-    truck_served = set(profile_truck_served)
-    pad_served = set(profile_pad_served)
-    represented_frozen = frozenset(represented)
-    truck_visited_frozen = frozenset(truck_visited)
-    sr_counts = tuple(
-        (triplet, len(represented_frozen.intersection(triplet)))
-        for triplet in active_sr
-    )
-    used_arcs = label.used_arcs | {arc}
-    branch_state = _backward_branch_state(represented_frozen, used_arcs, restrictions, arc_customer_sets)
-    return _BackwardLabel(
-        path=path,
-        represented=represented_frozen,
-        truck_visited=truck_visited_frozen,
-        truck_load=truck_load,
-        used_arcs=used_arcs,
-        truck_served=frozenset(truck_served),
-        pad_served=frozenset(pad_served),
-        sr_counts=sr_counts,
-        branch_state=branch_state,
-        profile=profile,
-        cost_function=_BackwardCostFunction(profile, represented_frozen, sr_counts),
-        lower_envelope=_BackwardCostLowerEnvelope(represented_frozen),
-        leading_block_hub=leading_block_hub,
-        leading_block_count=leading_block_count,
-        leading_block_wait=leading_block_wait,
-        represented_mask=_customer_mask(represented_frozen, graph),
-        truck_node_mask=_truck_node_mask(truck_visited_frozen, graph),
-    )
-
-
-def _try_build_backward_label(
-    path: tuple[str, ...],
-    graph: TransformedGraph,
-    residual_customers: frozenset[str],
-    active_sr: tuple[tuple[str, str, str], ...] = tuple(),
-    restrictions: BranchRestrictions | None = None,
-    arc_customer_sets: dict[tuple[str, str], frozenset[str]] | None = None,
-) -> _BackwardLabel | None:
-    if restrictions is None:
-        restrictions = BranchRestrictions()
-    if arc_customer_sets is None:
-        arc_customer_sets = {arc: graph.arc_customer_set(arc) for arc in graph.arcs}
-    instance = graph.instance
-    if not path or path[-1] != instance.depot_sink:
-        return None
-    if instance.depot_source in path[1:]:
-        return None
-    represented: set[str] = set()
-    truck_visited: set[str] = set()
-    load = 0.0
-    active_block_hub: str | None = None
-    active_block_count = 0
-    for arc in zip(path, path[1:]):
-        if arc not in graph.arcs:
-            return None
-        i, j = arc
-        if arc in graph.hub_duplicate_arcs:
-            active_block_hub = i
-            active_block_count = 1
-        elif arc in graph.duplicate_duplicate_arcs:
-            hub = duplicate_hub(j)
-            if active_block_hub is None and is_duplicate(i):
-                active_block_hub = duplicate_hub(i)
-            if active_block_hub != hub:
-                return None
-            active_block_count += 1
-        elif arc in graph.duplicate_regular_arcs:
-            hub = duplicate_hub(i)
-            if active_block_hub is not None and active_block_hub != hub:
-                return None
-            active_block_hub = None
-            active_block_count = 0
-        elif arc in graph.truck_arcs:
-            active_block_hub = None
-            active_block_count = 0
-        if active_block_count > instance.drones_per_truck:
-            return None
-    for node in path[1:]:
-        if node in instance.customers + instance.hubs:
-            if node in truck_visited:
-                return None
-            truck_visited.add(node)
-        if is_customer_representation(node, instance):
-            customer = served_customer(node)
-            if customer not in residual_customers or customer in represented:
-                return None
-            if is_duplicate(node) and (duplicate_hub(node), customer) not in instance.drone_arcs:
-                return None
-            represented.add(customer)
-            load += instance.demand[customer]
-            if load > instance.truck_payload + PAYLOAD_TOLERANCE:
-                return None
-    leading_block_hub, leading_block_count, leading_block_wait = _backward_leading_block(path, graph)
-    profile, truck_served, pad_served = _backward_profile(path, graph)
-    sr_counts = tuple(
-        (triplet, len(frozenset(represented).intersection(triplet)))
-        for triplet in active_sr
-    )
-    branch_state = _backward_branch_state(
-        frozenset(represented),
-        frozenset(zip(path, path[1:])),
-        restrictions,
-        arc_customer_sets,
-    )
-    represented_frozen = frozenset(represented)
-    truck_visited_frozen = frozenset(truck_visited)
-    return _BackwardLabel(
-        path=path,
-        represented=represented_frozen,
-        truck_visited=truck_visited_frozen,
-        truck_load=load,
-        used_arcs=frozenset(zip(path, path[1:])),
-        truck_served=truck_served,
-        pad_served=pad_served,
-        sr_counts=sr_counts,
-        branch_state=branch_state,
-        profile=profile,
-        cost_function=_BackwardCostFunction(profile, represented_frozen, sr_counts),
-        lower_envelope=_BackwardCostLowerEnvelope(represented_frozen),
-        leading_block_hub=leading_block_hub,
-        leading_block_count=leading_block_count,
-        leading_block_wait=leading_block_wait,
-        represented_mask=_customer_mask(represented_frozen, graph),
-        truck_node_mask=_truck_node_mask(truck_visited_frozen, graph),
-    )
-
-
-def _backward_leading_block(path: tuple[str, ...], graph: TransformedGraph) -> tuple[str | None, int, float]:
-    hub: str | None = None
-    count = 0
-    wait = 0.0
-    instance = graph.instance
-    for i, j in zip(path, path[1:]):
-        arc = (i, j)
-        if arc in graph.hub_duplicate_arcs:
-            hub = i
-            count += 1
-            wait = max(wait, instance.drone_trip_time[(hub, duplicate_customer(j))])
-        elif arc in graph.duplicate_duplicate_arcs:
-            if hub is None and is_duplicate(i):
-                hub = duplicate_hub(i)
-            if hub != duplicate_hub(j):
-                return None, 0, 0.0
-            count += 1
-            wait = max(wait, instance.drone_trip_time[(hub, duplicate_customer(j))])
-        else:
-            break
-    if count == 0:
-        return None, 0, 0.0
-    return hub, count, wait
-
-
-def _build_backward_label(
-    path: tuple[str, ...],
-    graph: TransformedGraph,
-    residual_customers: frozenset[str],
-    active_sr: tuple[tuple[str, str, str], ...] = tuple(),
-    restrictions: BranchRestrictions | None = None,
-    arc_customer_sets: dict[tuple[str, str], frozenset[str]] | None = None,
-) -> _BackwardLabel:
-    label = _try_build_backward_label(path, graph, residual_customers, active_sr, restrictions, arc_customer_sets)
-    if label is None:
-        raise ValueError(f"invalid backward suffix path: {path}")
-    return label
-
-
-def _insert_nondominated_backward_label(
-    backward_by_node: dict[str, list[_BackwardLabel]],
-    backward_paths: set[tuple[str, ...]],
-    label: _BackwardLabel,
-    graph: TransformedGraph,
-    objective: ObjectiveData,
-    restrictions: BranchRestrictions,
-    arc_customer_sets: dict[tuple[str, str], frozenset[str]],
-    duals: PricingDuals,
-    farkas: bool,
-    counter: _DominanceCounter | None = None,
-    dominance_index: dict[_DominanceBucketKey, list[_BackwardLabel]] | None = None,
-    dominance_key_cache: dict[tuple[_DominanceBucketKey, bool], tuple[_DominanceBucketKey, ...]] | None = None,
-    small_dom_bucket_threshold: int = 100,
-    small_dom_cumulative_threshold: int = 500_000,
-    max_dom_bypass_calls: int = 2_000,
-) -> tuple[bool, int, int, int]:
-    if dominance_index is None:
-        dominance_index = {}
-        for labels in backward_by_node.values():
-            for incumbent in labels:
-                dominance_index.setdefault(_dominance_bucket_key(incumbent), []).append(incumbent)
-    if label.path in backward_paths:
-        return False, 1, 0, 0
-    meet = label.path[0]
-    comparable = backward_by_node.setdefault(meet, [])
-    dominance_tests = 0
-    for incumbent in _dominance_candidate_labels(
-        label,
-        dominance_index,
-        graph,
-        counter,
-        incumbent_may_dominate_label=True,
-        dominance_key_cache=dominance_key_cache,
-        small_dom_bucket_threshold=small_dom_bucket_threshold,
-        small_dom_cumulative_threshold=small_dom_cumulative_threshold,
-        max_dom_bypass_calls=max_dom_bypass_calls,
-    ):
-        dominance_tests += 1
-        if not _backward_dominance_prefilter(incumbent, label, counter):
-            continue
-        if _backward_dominates(incumbent, label, graph, objective, restrictions, arc_customer_sets, duals, farkas, counter):
-            return False, 1, 0, dominance_tests
-    survivors: list[_BackwardLabel] = []
-    purged_count = 0
-    purge_candidates = set(
-        _dominance_candidate_labels(
-            label,
-            dominance_index,
-            graph,
-            counter,
-            incumbent_may_dominate_label=False,
-            dominance_key_cache=dominance_key_cache,
-            small_dom_bucket_threshold=small_dom_bucket_threshold,
-            small_dom_cumulative_threshold=small_dom_cumulative_threshold,
-            max_dom_bypass_calls=max_dom_bypass_calls,
-        )
-    )
-    for incumbent in comparable:
-        if incumbent not in purge_candidates:
-            survivors.append(incumbent)
-            continue
-        dominance_tests += 1
-        if not _backward_dominance_prefilter(label, incumbent, counter):
-            survivors.append(incumbent)
-            continue
-        if _backward_dominates(label, incumbent, graph, objective, restrictions, arc_customer_sets, duals, farkas, counter):
-            purged_count += 1
-            backward_paths.discard(incumbent.path)
-            _remove_from_dominance_index(dominance_index, incumbent)
-        else:
-            survivors.append(incumbent)
-    survivors.append(label)
-    backward_by_node[meet] = survivors
-    backward_paths.add(label.path)
-    dominance_index.setdefault(_dominance_bucket_key(label), []).append(label)
-    return True, 0, purged_count, dominance_tests
-
-
-def _dominance_bucket_key(label: _BackwardLabel) -> _DominanceBucketKey:
-    meet = label.path[0]
-    physical_loc = duplicate_hub(meet) if is_duplicate(meet) else meet
-    return _DominanceBucketKey(
-        end_node=meet,
-        physical_loc=physical_loc,
-        active_pad=label.leading_block_hub,
-        block_pos=label.leading_block_count,
-        branch_state_hash=hash(label.branch_state),
-    )
-
-
-def _dominance_candidate_labels(
-    label: _BackwardLabel,
-    dominance_index: dict[_DominanceBucketKey, list[_BackwardLabel]],
-    graph: TransformedGraph,
-    counter: _DominanceCounter | None,
-    incumbent_may_dominate_label: bool,
-    dominance_key_cache: dict[tuple[_DominanceBucketKey, bool], tuple[_DominanceBucketKey, ...]] | None = None,
-    small_dom_bucket_threshold: int = 100,
-    small_dom_cumulative_threshold: int = 500_000,
-    max_dom_bypass_calls: int = 2_000,
-) -> list[_BackwardLabel]:
-    label_key = _dominance_bucket_key(label)
-    local_dom_size = len(dominance_index.get(label_key, ()))
-    dom_work_estimate = _estimate_dominance_work(
-        dominance_index,
-        graph,
-        incumbent_may_dominate_label,
-        dominance_key_cache,
-        counter,
-    )
-    if counter is not None:
-        counter.work_estimate = max(counter.work_estimate, dom_work_estimate)
-        if (
-            not counter.sticky_indexed
-            and (
-                local_dom_size > small_dom_bucket_threshold
-                or dom_work_estimate > small_dom_cumulative_threshold
-                or counter.small_bypass_calls >= max_dom_bypass_calls
-            )
-        ):
-            counter.sticky_indexed = True
-            counter.sticky_indexed_activations += 1
-    use_direct = (
-        (counter is None or not counter.sticky_indexed)
-        and
-        small_dom_bucket_threshold > 0
-        and local_dom_size <= small_dom_bucket_threshold
-        and dom_work_estimate <= small_dom_cumulative_threshold
-        and (counter is None or counter.small_bypass_calls < max_dom_bypass_calls)
-    )
-    if use_direct:
-        if counter is not None:
-            counter.small_bypass_calls += 1
-        keys = tuple(sorted(dominance_index, key=str))
-    else:
-        if counter is not None:
-            counter.indexed_activation_count += 1
-        cache_key = (label_key, incumbent_may_dominate_label)
-        if dominance_key_cache is not None and cache_key in dominance_key_cache:
-            keys = dominance_key_cache[cache_key]
-            if counter is not None:
-                counter.key_cache_hits += 1
-        else:
-            key_start = time.time()
-            keys = _compatible_dominance_keys(label_key, graph, incumbent_may_dominate_label)
-            if dominance_key_cache is not None:
-                dominance_key_cache[cache_key] = keys
-            if counter is not None:
-                counter.key_generation_time_seconds += time.time() - key_start
-                counter.key_cache_misses += 1
-        if counter is not None:
-            counter.compatible_keys_generated += len(keys)
-            counter.bucket_scans_avoided += max(len(dominance_index) - len(keys), 0)
-    candidates: list[_BackwardLabel] = []
-    for key in keys:
-        if counter is not None:
-            counter.compatible_key_lookups += 1
-        labels = dominance_index.get(key)
-        if not labels:
-            continue
-        pair_count = len(labels)
-        if counter is not None:
-            counter.bucket_pairs_considered += pair_count
-        if not _dominance_buckets_compatible(key, label_key, incumbent_may_dominate_label):
-            if counter is not None:
-                counter.bucket_pairs_rejected += pair_count
-                counter.stage_reject_key += pair_count
-            continue
-        if counter is not None:
-            counter.bucket_candidate_pairs += pair_count
-        candidates.extend(labels)
-    return candidates
-
-
-def _estimate_dominance_work(
-    dominance_index: dict[_DominanceBucketKey, list[_BackwardLabel]],
-    graph: TransformedGraph,
-    incumbent_may_dominate_label: bool,
-    dominance_key_cache: dict[tuple[_DominanceBucketKey, bool], tuple[_DominanceBucketKey, ...]] | None,
-    counter: _DominanceCounter | None,
-) -> int:
-    label_count = sum(len(labels) for labels in dominance_index.values())
-    return label_count * label_count
-
-
-def _compatible_dominance_keys(
-    label_key: _DominanceBucketKey,
-    graph: TransformedGraph,
-    incumbent_may_dominate_label: bool,
-) -> tuple[_DominanceBucketKey, ...]:
-    keys: set[_DominanceBucketKey] = set()
-    if incumbent_may_dominate_label:
-        if label_key.active_pad is None:
-            keys.add(
-                _DominanceBucketKey(
-                    label_key.end_node,
-                    label_key.physical_loc,
-                    None,
-                    0,
-                    label_key.branch_state_hash,
-                )
-            )
-        else:
-            keys.add(
-                _DominanceBucketKey(
-                    label_key.end_node,
-                    label_key.physical_loc,
-                    None,
-                    0,
-                    label_key.branch_state_hash,
-                )
-            )
-            for block_pos in range(label_key.block_pos + 1):
-                keys.add(
-                    _DominanceBucketKey(
-                        label_key.end_node,
-                        label_key.physical_loc,
-                        label_key.active_pad,
-                        block_pos,
-                        label_key.branch_state_hash,
-                    )
-                )
-    elif label_key.active_pad is None:
-        keys.add(
-            _DominanceBucketKey(
-                label_key.end_node,
-                label_key.physical_loc,
-                None,
-                0,
-                label_key.branch_state_hash,
-            )
-        )
-        for hub in graph.instance.hubs:
-            for block_pos in range(graph.instance.drones_per_truck + 1):
-                keys.add(
-                    _DominanceBucketKey(
-                        label_key.end_node,
-                        label_key.physical_loc,
-                        hub,
-                        block_pos,
-                        label_key.branch_state_hash,
-                    )
-                )
-    else:
-        for block_pos in range(label_key.block_pos, graph.instance.drones_per_truck + 1):
-            keys.add(
-                _DominanceBucketKey(
-                    label_key.end_node,
-                    label_key.physical_loc,
-                    label_key.active_pad,
-                    block_pos,
-                    label_key.branch_state_hash,
-                )
-            )
-    return tuple(sorted(keys, key=str))
-
-
-def _dominance_buckets_compatible(
-    incumbent_key: _DominanceBucketKey,
-    label_key: _DominanceBucketKey,
-    incumbent_may_dominate_label: bool,
-) -> bool:
-    if incumbent_key.end_node != label_key.end_node:
-        return False
-    if incumbent_key.physical_loc != label_key.physical_loc:
-        return False
-    if incumbent_key.branch_state_hash != label_key.branch_state_hash:
-        return False
-    dominator = incumbent_key if incumbent_may_dominate_label else label_key
-    dominated = label_key if incumbent_may_dominate_label else incumbent_key
-    if dominated.active_pad is None:
-        return dominator.active_pad is None
-    if dominator.active_pad is None:
-        return True
-    return dominator.active_pad == dominated.active_pad and dominator.block_pos <= dominated.block_pos
-
-
-def _remove_from_dominance_index(
-    dominance_index: dict[_DominanceBucketKey, list[_BackwardLabel]],
-    label: _BackwardLabel,
-) -> None:
-    key = _dominance_bucket_key(label)
-    labels = dominance_index.get(key)
-    if labels is None:
-        return
-    dominance_index[key] = [incumbent for incumbent in labels if incumbent.path != label.path]
-    if not dominance_index[key]:
-        del dominance_index[key]
-
-
-def _backward_dominance_prefilter(
-    a: _BackwardLabel,
-    b: _BackwardLabel,
-    counter: _DominanceCounter | None = None,
-) -> bool:
-    if counter is not None:
-        counter.prefilter_pairs += 1
-    if a.path[0] != b.path[0]:
-        if counter is not None:
-            counter.prefilter_rejected += 1
-            counter.stage_reject_key += 1
-        return False
-    if a.branch_state is not None and b.branch_state is not None and a.branch_state != b.branch_state:
-        if counter is not None:
-            counter.prefilter_rejected += 1
-            counter.stage_reject_branch += 1
-        return False
-    if a.represented_mask and b.represented_mask:
-        customer_included = (a.represented_mask & ~b.represented_mask) == 0
-    else:
-        customer_included = a.represented.issubset(b.represented)
-    if not customer_included:
-        if counter is not None:
-            counter.prefilter_rejected += 1
-            counter.stage_reject_customer += 1
-        return False
-    if not a.represented and a.represented != b.represented:
-        if counter is not None:
-            counter.prefilter_rejected += 1
-            counter.stage_reject_customer += 1
-        return False
-    if a.truck_node_mask and b.truck_node_mask:
-        truck_included = (a.truck_node_mask & ~b.truck_node_mask) == 0
-    else:
-        truck_included = a.truck_visited.issubset(b.truck_visited)
-    if not truck_included:
-        if counter is not None:
-            counter.prefilter_rejected += 1
-            counter.stage_reject_truck_node += 1
-        return False
-    if a.truck_load > b.truck_load + PAYLOAD_TOLERANCE:
-        if counter is not None:
-            counter.prefilter_rejected += 1
-            counter.stage_reject_payload += 1
-        return False
-    if a.leading_block_hub is not None and b.leading_block_hub is not None:
-        if a.leading_block_hub != b.leading_block_hub or a.leading_block_count > b.leading_block_count:
-            if counter is not None:
-                counter.prefilter_rejected += 1
-                counter.stage_reject_block += 1
-            return False
-    elif a.leading_block_hub is not None and b.leading_block_hub is None:
-        if counter is not None:
-            counter.prefilter_rejected += 1
-            counter.stage_reject_block += 1
-        return False
-    if counter is not None:
-        counter.full_tests += 1
-    return True
-
-
-def _backward_dominates(
-    a: _BackwardLabel,
-    b: _BackwardLabel,
-    graph: TransformedGraph,
-    objective: ObjectiveData,
-    restrictions: BranchRestrictions,
-    arc_customer_sets: dict[tuple[str, str], frozenset[str]],
-    duals: PricingDuals,
-    farkas: bool,
-    counter: _DominanceCounter | None = None,
-) -> bool:
-    if a.path[0] != b.path[0]:
-        return False
-    if not a.represented.issubset(b.represented):
-        return False
-    if not a.represented and a.represented != b.represented:
-        return False
-    if not a.truck_visited.issubset(b.truck_visited):
-        return False
-    if a.truck_load > b.truck_load + PAYLOAD_TOLERANCE:
-        return False
-    if not _backward_service_representation_includes(a, b):
-        return False
-    if not _leading_block_includes(a, b):
-        return False
-    if not _backward_branch_language_includes(a, b, restrictions, arc_customer_sets):
-        return False
-    if not _suffix_dual_contribution_nonincreasing(a, b, duals):
-        return False
-    if farkas and a.sr_counts != b.sr_counts:
-        return False
-    if not farkas and not _backward_profile_dominates(a, b):
-        return False
-    if counter is not None:
-        counter.cost_function_tests += 1
-    if not _backward_cost_function_dominates(a, b, graph, objective, duals, farkas):
-        if counter is not None:
-            counter.cost_function_rejected += 1
-            counter.stage_reject_cost += 1
-        return False
-    return (
-        a.path != b.path
-        or a.represented != b.represented
-        or a.truck_visited != b.truck_visited
-        or a.truck_load < b.truck_load
-        or a.leading_block_hub != b.leading_block_hub
-        or a.leading_block_count < b.leading_block_count
-        or a.cost_function != b.cost_function
-    )
-
-
-def _backward_service_representation_includes(a: _BackwardLabel, b: _BackwardLabel) -> bool:
-    if not a.truck_served.issubset(b.truck_served):
-        return False
-    if not a.pad_served.issubset(b.pad_served):
-        return False
-    if a.truck_served | frozenset(customer for _, customer in a.pad_served) != a.represented:
-        return False
-    for customer in a.represented:
-        if (customer in a.truck_served) != (customer in b.truck_served):
-            return False
-        a_pad = tuple(sorted(hub for hub, served in a.pad_served if served == customer))
-        b_pad = tuple(sorted(hub for hub, served in b.pad_served if served == customer))
-        if a_pad != b_pad:
-            return False
-    return True
-
-
-def _leading_block_includes(a: _BackwardLabel, b: _BackwardLabel) -> bool:
-    if b.leading_block_hub is None:
-        return a.leading_block_hub is None
-    if a.leading_block_hub is None:
-        return True
-    return a.leading_block_hub == b.leading_block_hub and a.leading_block_count <= b.leading_block_count
-
-
-def _backward_branch_language_includes(
-    a: _BackwardLabel,
-    b: _BackwardLabel,
-    restrictions: BranchRestrictions,
-    arc_customer_sets: dict[tuple[str, str], frozenset[str]],
-) -> bool:
-    if a.branch_state is None or b.branch_state is None:
-        return False
-    if a.branch_state != b.branch_state:
-        return False
-    if restrictions.route_forbidden and a.path != b.path:
-        return False
-    for p, q in restrictions.together_pairs:
-        a_pair = (p in a.represented, q in a.represented)
-        b_pair = (p in b.represented, q in b.represented)
-        if b_pair in {(True, False), (False, True)}:
-            if a_pair != b_pair:
-                return False
-        elif b_pair == (True, True) and a_pair not in {(True, True), (False, False)}:
-            return False
-        elif b_pair == (False, False) and a_pair != (False, False):
-            return False
-    if a.represented.intersection(restrictions.truck_service) != a.truck_served.intersection(restrictions.truck_service):
-        return False
-    if a.represented.intersection(restrictions.drone_service).intersection(a.truck_served):
-        return False
-    if a.pad_served.intersection(restrictions.pad_forbidden):
-        return False
-    for hub, customer in restrictions.pad_required:
-        if customer in a.represented and (hub, customer) not in a.pad_served:
-            return False
-    if a.used_arcs.intersection(restrictions.trans_arc_forbidden):
-        return False
-    for arc in restrictions.trans_arc_required:
-        if a.represented.intersection(arc_customer_sets[arc]) and arc not in a.used_arcs:
-            return False
-    return True
-
-
-def _suffix_dual_contribution_nonincreasing(a: _BackwardLabel, b: _BackwardLabel, duals: PricingDuals) -> bool:
-    if a.sr_counts and b.sr_counts:
-        a_counts = dict(a.sr_counts)
-        b_counts = dict(b.sr_counts)
-        for triplet in duals.nu:
-            if a_counts.get(triplet, 0) > b_counts.get(triplet, 0):
-                return False
-    for customer in b.represented - a.represented:
-        if duals.mu[customer] > PAPER_DOMINANCE_TOLERANCE:
-            return False
-    return True
-
-
-def _backward_profile_dominates(a: _BackwardLabel, b: _BackwardLabel) -> bool:
-    if a.profile is None or b.profile is None:
-        return False
-    if a.profile.drone_sorties > b.profile.drone_sorties:
-        return False
-    a_service = dict(a.profile.service_times)
-    b_service = dict(b.profile.service_times)
-    if not frozenset(a_service).issubset(b_service):
-        return False
-    for customer, expr in a_service.items():
-        if not _time_expr_leq_for_all(expr, b_service[customer]):
-            return False
-    return _time_expr_leq_for_all(a.profile.return_time, b.profile.return_time)
-
-
-def _backward_cost_function_dominates(
-    a: _BackwardLabel,
-    b: _BackwardLabel,
-    graph: TransformedGraph,
-    objective: ObjectiveData,
-    duals: PricingDuals,
-    farkas: bool,
-) -> bool:
-    if a.cost_function is None or b.cost_function is None:
-        return False
-    boundary_correction = 0.0 if farkas else _worst_case_backward_sr_boundary_correction(a, b, duals)
-    for interface in _backward_dominance_interfaces(a, b, graph, objective):
-        a_value = a.cost_function.evaluate(interface, graph, objective, duals, farkas) + boundary_correction
-        b_value = b.cost_function.evaluate(interface, graph, objective, duals, farkas)
-        if a_value > b_value + PAPER_DOMINANCE_TOLERANCE:
-            return False
-    return True
-
-
-def _worst_case_backward_sr_boundary_correction(
-    a: _BackwardLabel,
-    b: _BackwardLabel,
-    duals: PricingDuals,
-) -> float:
-    a_counts = dict(a.sr_counts)
-    b_counts = dict(b.sr_counts)
-    worst = 0.0
-    for triplet, dual in duals.nu.items():
-        a_suffix = a_counts.get(triplet, 0)
-        b_suffix = b_counts.get(triplet, 0)
-        triplet_worst = max(
-            -dual * (
-                ((prefix + a_suffix) // 2 - prefix // 2 - a_suffix // 2)
-                - ((prefix + b_suffix) // 2 - prefix // 2 - b_suffix // 2)
-            )
-            for prefix in range(len(triplet) + 1)
-        )
-        worst += triplet_worst
-    return worst
-
-
-def _backward_dominance_interfaces(
-    a: _BackwardLabel,
-    b: _BackwardLabel,
-    graph: TransformedGraph,
-    objective: ObjectiveData,
-) -> tuple[_BackwardInterface, ...]:
-    upper = objective.bounds.return_ub
-    service_exprs: list[tuple[str, _TimeExpr]] = []
-    for profile in (a.profile, b.profile):
-        if profile is None:
-            return tuple()
-        service_exprs.extend(profile.service_times)
-    wait_candidates = {
-        0.0,
-        a.leading_block_wait,
-        b.leading_block_wait,
-    }
-    wait_candidates.update(graph.instance.drone_trip_time.values())
-    time_candidates = {0.0, upper}
-    for customer, expr in service_exprs:
-        target = objective.bounds.arrival_lb[customer]
-        if expr.base in {"physical", "pad_arrival"}:
-            time_candidates.add(target - expr.offset)
-        elif expr.base == "wait":
-            for wait_value in wait_candidates:
-                time_candidates.add(target - max(wait_value, expr.wait_floor) - expr.offset)
-        else:
-            raise ValueError(f"unknown time expression base: {expr.base}")
-    bounded_times = sorted(value for value in time_candidates if 0.0 <= value <= upper)
-    bounded_waits = sorted(value for value in wait_candidates if 0.0 <= value <= upper)
-    interfaces: list[_BackwardInterface] = []
-    for physical_time in bounded_times:
-        for pad_arrival in bounded_times:
-            if pad_arrival > physical_time + PAPER_DOMINANCE_TOLERANCE:
-                continue
-            for wait_value in bounded_waits:
-                interfaces.append(
-                    _BackwardInterface(
-                        physical_time=physical_time,
-                        pad_arrival=pad_arrival,
-                        active_wait=wait_value,
-                    )
-                )
-    if not interfaces:
-        return (
-            _BackwardInterface(0.0, 0.0, 0.0),
-            _BackwardInterface(upper, upper, 0.0),
-        )
-    return tuple(interfaces)
-
-
-def _backward_profile(
-    path: tuple[str, ...],
-    graph: TransformedGraph,
-) -> tuple[_BackwardProfile, frozenset[str], frozenset[tuple[str, str]]]:
-    instance = graph.instance
-    physical_time = _TimeExpr("physical", 0.0)
-    active_pad: str | None = None
-    active_pad_arrival = physical_time
-    active_wait_floor = 0.0
-    if path and path[0] in instance.hubs:
-        active_pad = path[0]
-        active_pad_arrival = physical_time
-    elif path and is_duplicate(path[0]):
-        active_pad = duplicate_hub(path[0])
-        active_pad_arrival = _TimeExpr("pad_arrival", 0.0)
-
-    service_times: dict[str, _TimeExpr] = {}
-    truck_served: set[str] = set()
-    pad_served: set[tuple[str, str]] = set()
-
-    for i, j in zip(path, path[1:]):
-        arc = (i, j)
-        if arc in graph.truck_arcs:
-            physical_time = _time_expr_add(physical_time, instance.truck_time[arc])
-            active_pad = j if j in instance.hubs else active_pad
-            active_pad_arrival = physical_time if j in instance.hubs else active_pad_arrival
-            active_wait_floor = 0.0
-            if j in instance.customers:
-                truck_served.add(j)
-                service_times[j] = physical_time
-            continue
-        if arc in graph.hub_duplicate_arcs:
-            active_pad = i
-            active_pad_arrival = physical_time
-            active_wait_floor = 0.0
-            customer = duplicate_customer(j)
-            pad_served.add((active_pad, customer))
-            service_times[customer] = _time_expr_add(active_pad_arrival, instance.drone_time[(active_pad, customer)])
-            active_wait_floor = max(active_wait_floor, instance.drone_trip_time[(active_pad, customer)])
-            continue
-        if arc in graph.duplicate_duplicate_arcs:
-            hub = duplicate_hub(j)
-            if active_pad != hub:
-                raise ValueError("duplicate block hub mismatch in backward profile")
-            customer = duplicate_customer(j)
-            pad_served.add((active_pad, customer))
-            service_times[customer] = _time_expr_add(active_pad_arrival, instance.drone_time[(active_pad, customer)])
-            active_wait_floor = max(active_wait_floor, instance.drone_trip_time[(active_pad, customer)])
-            continue
-        if arc in graph.duplicate_regular_arcs:
-            hub = duplicate_hub(i)
-            if active_pad != hub:
-                raise ValueError("duplicate continuation hub mismatch in backward profile")
-            physical_time = _depart_after_wait(active_pad_arrival, active_wait_floor, instance.truck_time[(hub, j)])
-            active_pad = j if j in instance.hubs else active_pad
-            active_pad_arrival = physical_time if j in instance.hubs else active_pad_arrival
-            active_wait_floor = 0.0
-            if j in instance.customers:
-                truck_served.add(j)
-                service_times[j] = physical_time
-            continue
-        raise ValueError(f"unclassified transformed arc in backward profile: {arc}")
-
-    return (
-        _BackwardProfile(
-            service_times=tuple(sorted(service_times.items())),
-            return_time=physical_time,
-            drone_sorties=len(pad_served),
-        ),
-        frozenset(truck_served),
-        frozenset(pad_served),
-    )
-
-
-def _backward_branch_state(
-    represented: frozenset[str],
-    used_arcs: frozenset[tuple[str, str]],
-    restrictions: BranchRestrictions,
-    arc_customer_sets: dict[tuple[str, str], frozenset[str]],
-) -> _BranchState:
-    together = tuple(
-        (p in represented, q in represented)
-        for p, q in sorted(restrictions.together_pairs)
-    )
-    required_arcs = tuple(
-        (arc, bool(represented.intersection(arc_customer_sets[arc])), arc in used_arcs)
-        for arc in sorted(restrictions.trans_arc_required)
-    )
-    return _BranchState(together=together, required_arcs=required_arcs)
-
-
-def _time_expr_add(expr: _TimeExpr, offset: float) -> _TimeExpr:
-    return _TimeExpr(expr.base, expr.offset + offset, expr.wait_floor)
-
-
-def _depart_after_wait(arrival: _TimeExpr, wait_floor: float, travel_time: float) -> _TimeExpr:
-    if arrival.base == "physical":
-        return _TimeExpr("physical", arrival.offset + wait_floor + travel_time)
-    if arrival.base == "pad_arrival":
-        return _TimeExpr("wait", arrival.offset + travel_time, wait_floor)
-    if arrival.base == "wait":
-        return _TimeExpr("wait", arrival.offset + wait_floor + travel_time, arrival.wait_floor)
-    raise ValueError(f"unknown time expression base: {arrival.base}")
-
-
-def _time_expr_leq_for_all(a: _TimeExpr, b: _TimeExpr) -> bool:
-    if a.base != b.base:
-        return False
-    tolerance = PAPER_DOMINANCE_TOLERANCE
-    if a.base in {"physical", "pad_arrival"}:
-        return a.offset <= b.offset + tolerance
-    if a.base == "wait":
-        for wait_value in sorted({0.0, a.wait_floor, b.wait_floor}):
-            a_value = max(wait_value, a.wait_floor) + a.offset
-            b_value = max(wait_value, b.wait_floor) + b.offset
-            if a_value > b_value + tolerance:
-                return False
-        return a.offset <= b.offset + tolerance
-    raise ValueError(f"unknown time expression base: {a.base}")
-
-
-def _evaluate_time_expr(expr: _TimeExpr, label: _Label) -> float:
-    if expr.base == "physical":
-        return label.physical_time + expr.offset
-    if expr.base == "pad_arrival":
-        return label.active_pad_arrival + expr.offset
-    if expr.base == "wait":
-        return label.active_pad_arrival + max(label.active_wait, expr.wait_floor) + expr.offset
-    raise ValueError(f"unknown time expression base: {expr.base}")
-
-
-def _evaluate_time_expr_at_interface(expr: _TimeExpr, interface: _BackwardInterface) -> float:
-    if expr.base == "physical":
-        return interface.physical_time + expr.offset
-    if expr.base == "pad_arrival":
-        return interface.pad_arrival + expr.offset
-    if expr.base == "wait":
-        return interface.pad_arrival + max(interface.active_wait, expr.wait_floor) + expr.offset
-    raise ValueError(f"unknown time expression base: {expr.base}")
-
-
-def _backward_join_interface(
-    forward_label: _Label,
-    backward_label: _BackwardLabel,
-    graph: TransformedGraph,
-) -> _BackwardInterface:
-    meet = forward_label.path[-1]
-    if is_duplicate(meet):
-        if backward_label.leading_block_hub is None:
-            return _BackwardInterface(
-                physical_time=forward_label.physical_time,
-                pad_arrival=forward_label.active_pad_arrival,
-                active_wait=forward_label.active_wait,
-            )
-        return _BackwardInterface(
-            physical_time=forward_label.physical_time,
-            pad_arrival=forward_label.active_pad_arrival,
-            active_wait=max(forward_label.active_wait, backward_label.leading_block_wait),
-        )
-    if meet in graph.instance.hubs:
-        return _BackwardInterface(
-            physical_time=forward_label.physical_time,
-            pad_arrival=forward_label.physical_time,
-            active_wait=0.0,
-        )
-    return _BackwardInterface(
-        physical_time=forward_label.physical_time,
-        pad_arrival=forward_label.active_pad_arrival,
-        active_wait=0.0,
-    )
-
-
-def _suffix_sr_contribution(sr_counts: dict[tuple[str, str, str], int], duals: PricingDuals) -> float:
-    return sum(dual * (sr_counts.get(triplet, 0) // 2) for triplet, dual in duals.nu.items())
-
-
-def _sr_join_correction(
-    prefix_counts: dict[tuple[str, str, str], int],
-    suffix_counts: dict[tuple[str, str, str], int],
-    duals: PricingDuals,
-) -> float:
-    correction = 0.0
-    for triplet, dual in duals.nu.items():
-        prefix = prefix_counts.get(triplet, 0)
-        suffix = suffix_counts.get(triplet, 0)
-        correction -= dual * (((prefix + suffix) // 2) - (prefix // 2) - (suffix // 2))
-    return correction
-
 
 def _dual_solution_key(duals: PricingDuals) -> tuple[object, ...]:
     return (
@@ -6018,20 +3081,15 @@ def _dual_solution_key(duals: PricingDuals) -> tuple[object, ...]:
         tuple(sorted(duals.nu.items())),
     )
 
-
 def _branch_restriction_signature(restrictions: BranchRestrictions) -> tuple[object, ...]:
     return (
         tuple(sorted(restrictions.together_pairs)),
         tuple(sorted(restrictions.separate_pairs)),
-        tuple(sorted(restrictions.truck_service)),
-        tuple(sorted(restrictions.drone_service)),
         tuple(sorted(restrictions.pad_forbidden)),
         tuple(sorted(restrictions.pad_required)),
-        tuple(sorted(restrictions.trans_arc_forbidden)),
-        tuple(sorted(restrictions.trans_arc_required)),
-        tuple(sorted(restrictions.route_forbidden)),
+        tuple(sorted(restrictions.conditioned_arc_forbidden)),
+        tuple(sorted(restrictions.conditioned_arc_required)),
     )
-
 
 def _residual_customer_mask(objective: ObjectiveData, residual_customers: frozenset[str]) -> int:
     customer_index = {customer: index for index, customer in enumerate(sorted(objective.bounds.arrival_lb))}
@@ -6040,14 +3098,14 @@ def _residual_customer_mask(objective: ObjectiveData, residual_customers: frozen
         mask |= 1 << customer_index[customer]
     return mask
 
+def _objective_scale_signature(objective: ObjectiveData) -> tuple[object, ...]:
+    return tuple(sorted(objective.coeffs.__dict__.items()))
 
-def _objective_window_signature(objective: ObjectiveData) -> tuple[object, ...]:
+def _service_window_signature(objective: ObjectiveData) -> tuple[object, ...]:
     return (
         tuple(sorted(objective.bounds.arrival_lb.items())),
         tuple(sorted(objective.bounds.service_ub.items())),
-        tuple(sorted(objective.coeffs.__dict__.items())),
     )
-
 
 def _pricing_epoch(
     objective: ObjectiveData,
@@ -6056,879 +3114,34 @@ def _pricing_epoch(
     duals: PricingDuals,
     existing_routes: dict[tuple[str, ...], Route] | None,
     existing_column_paths: set[tuple[str, ...]] | None,
+    context: PricingEpochContext | None = None,
 ) -> PricingEpoch:
     active_paths = tuple(sorted(existing_column_paths or tuple()))
     route_keys = tuple(sorted(existing_routes or {}))
     active_sr_ids = tuple(sorted(duals.nu))
+    epoch_context = context or PricingEpochContext(
+        active_sr_version=len(active_sr_ids),
+        fixed_route_signature=tuple(),
+        active_column_version=active_paths,
+        rmp_structure_version=route_keys,
+    )
     return PricingEpoch(
         dual_signature=_dual_solution_key(duals),
         active_sr_ids=active_sr_ids,
-        sr_version=len(active_sr_ids),
+        sr_version=epoch_context.active_sr_version,
         residual_customer_mask=_residual_customer_mask(objective, residual_customers),
         branch_signature=_branch_restriction_signature(restrictions),
-        fixed_route_signature=active_paths,
-        active_column_version=len(active_paths),
-        rmp_structure_version=len(route_keys),
-        objective_window_version=_objective_window_signature(objective),
+        fixed_route_signature=epoch_context.fixed_route_signature,
+        active_column_version=epoch_context.active_column_version,
+        rmp_structure_version=epoch_context.rmp_structure_version,
+        objective_scale_version=_objective_scale_signature(objective),
+        service_window_version=_service_window_signature(objective),
     )
-
-
-def _candidate_from_forward_label(
-    label: _Label,
-    graph: TransformedGraph,
-    objective: ObjectiveData,
-    duals: PricingDuals,
-    farkas: bool,
-) -> _RouteCandidate:
-    return _RouteCandidate(
-        path=label.path,
-        reduced_cost=label.reduced_cost,
-        joined=False,
-        served=label.represented,
-        truck_served=label.truck_served,
-        pad_served=label.pad_served,
-        used_arcs=label.used_arcs,
-    )
-
-
-def _join_forward_backward(
-    forward_label: _Label,
-    backward_label: _BackwardLabel,
-    graph: TransformedGraph,
-    objective: ObjectiveData,
-    residual_customers: frozenset[str],
-    restrictions: BranchRestrictions,
-    arc_customer_sets: dict[tuple[str, str], frozenset[str]],
-    duals: PricingDuals,
-    farkas: bool,
-    reduced_cost: float | None = None,
-) -> _RouteCandidate | None:
-    if forward_label.path[-1] != backward_label.path[0]:
-        return None
-    if forward_label.represented.intersection(backward_label.represented):
-        return None
-    if not forward_label.represented and not backward_label.represented:
-        return None
-    meet_node = forward_label.path[-1]
-    shared_physical_meet = duplicate_hub(meet_node) if is_duplicate(meet_node) else meet_node
-    if forward_label.truck_visited.intersection(backward_label.truck_visited) - {shared_physical_meet}:
-        return None
-    instance = graph.instance
-    if forward_label.truck_load + backward_label.truck_load > instance.truck_payload + PAYLOAD_TOLERANCE:
-        return None
-    if backward_label.leading_block_hub is not None:
-        if forward_label.active_pad not in {None, backward_label.leading_block_hub}:
-            return None
-        if forward_label.block_count + backward_label.leading_block_count > instance.drones_per_truck:
-            return None
-    path = forward_label.path + backward_label.path[1:]
-    if not path or path[0] != instance.depot_source or path[-1] != instance.depot_sink:
-        return None
-    if not _path_physical_elementary(path, graph):
-        return None
-    served = forward_label.represented | backward_label.represented
-    truck_served = forward_label.truck_served | backward_label.truck_served
-    pad_served = forward_label.pad_served | backward_label.pad_served
-    used_arcs = forward_label.used_arcs | backward_label.used_arcs
-    if not served or not served.issubset(residual_customers):
-        return None
-    if not _candidate_branch_allowed(path, served, truck_served, pad_served, used_arcs, restrictions, arc_customer_sets):
-        return None
-    if reduced_cost is None:
-        reduced_cost = _joined_reduced_cost(forward_label, backward_label, graph, objective, duals, farkas)
-    return _RouteCandidate(
-        path=path,
-        reduced_cost=reduced_cost,
-        joined=True,
-        served=served,
-        truck_served=truck_served,
-        pad_served=pad_served,
-        used_arcs=used_arcs,
-    )
-
-
-def _joined_reduced_cost(
-    forward_label: _Label,
-    backward_label: _BackwardLabel,
-    graph: TransformedGraph,
-    objective: ObjectiveData,
-    duals: PricingDuals,
-    farkas: bool,
-) -> float:
-    if backward_label.cost_function is None:
-        raise ValueError("backward label is missing its suffix cost function")
-    interface = _backward_join_interface(forward_label, backward_label, graph)
-    reduced_cost = forward_label.reduced_cost + backward_label.cost_function.evaluate(
-        interface,
-        graph,
-        objective,
-        duals,
-        farkas,
-    )
-    suffix_sr_counts = dict(backward_label.sr_counts)
-    prefix_sr_counts = dict(forward_label.sr_counts)
-    return reduced_cost + _sr_join_correction(prefix_sr_counts, suffix_sr_counts, duals)
-
-
-def _join_lower_bound(
-    forward_label: _Label,
-    backward_label: _BackwardLabel,
-    graph: TransformedGraph,
-    duals: PricingDuals,
-    farkas: bool,
-    enable_join_lower_envelope: bool = True,
-) -> float:
-    if farkas or not enable_join_lower_envelope:
-        return float("-inf")
-    if backward_label.lower_envelope is None:
-        raise ValueError("backward label is missing its suffix lower envelope")
-    _backward_join_interface(forward_label, backward_label, graph)
-    return forward_label.reduced_cost + backward_label.lower_envelope.evaluate(duals, farkas=False)
-
-
-def _joined_reduced_cost_cached(
-    forward_label: _Label,
-    backward_label: _BackwardLabel,
-    graph: TransformedGraph,
-    objective: ObjectiveData,
-    duals: PricingDuals,
-    farkas: bool,
-    cache: _JoinEvalCache,
-    active_sr_version: int,
-    dual_solution_key: tuple[object, ...],
-    enable_cache: bool = True,
-) -> float:
-    if backward_label.cost_function is None:
-        raise ValueError("backward label is missing its suffix cost function")
-    interface = _backward_join_interface(forward_label, backward_label, graph)
-    prefix_sr_counts = tuple(sorted(forward_label.sr_counts))
-    suffix_sr_counts = tuple(sorted(backward_label.sr_counts))
-    key = _JoinEvalCacheKey(
-        backward_path=backward_label.path,
-        meet_node=forward_label.path[-1],
-        physical_time=interface.physical_time,
-        pad_arrival=interface.pad_arrival,
-        active_wait=interface.active_wait,
-        active_sr_version=active_sr_version,
-        dual_solution_key=dual_solution_key,
-        farkas=farkas,
-        prefix_sr_counts=prefix_sr_counts,
-        suffix_sr_counts=suffix_sr_counts,
-    )
-    cached = cache.values.get(key) if enable_cache else None
-    if cached is None:
-        if enable_cache:
-            cache.misses += 1
-            cache.suffix_profile_misses += 1
-            cache.interface_profile_misses += 1
-        suffix_value = backward_label.cost_function.evaluate(interface, graph, objective, duals, farkas)
-        sr_correction = _sr_join_correction(dict(prefix_sr_counts), dict(suffix_sr_counts), duals)
-        if enable_cache:
-            cache.values[key] = (suffix_value, sr_correction)
-    else:
-        cache.hits += 1
-        cache.suffix_profile_hits += 1
-        cache.interface_profile_hits += 1
-        suffix_value, sr_correction = cached
-    return forward_label.reduced_cost + suffix_value + sr_correction
-
-
-def _candidate_branch_allowed(
-    path: tuple[str, ...],
-    served: frozenset[str],
-    truck_served: frozenset[str],
-    pad_served: frozenset[tuple[str, str]],
-    used_arcs: frozenset[tuple[str, str]],
-    restrictions: BranchRestrictions,
-    arc_customer_sets: dict[tuple[str, str], frozenset[str]],
-) -> bool:
-    if path in restrictions.route_forbidden:
-        return False
-    for p, q in restrictions.together_pairs:
-        if (p in served) != (q in served):
-            return False
-    for p, q in restrictions.separate_pairs:
-        if p in served and q in served:
-            return False
-    for customer in restrictions.truck_service:
-        if customer in served and customer not in truck_served:
-            return False
-    for customer in restrictions.drone_service:
-        if customer in served and customer in truck_served:
-            return False
-    if pad_served.intersection(restrictions.pad_forbidden):
-        return False
-    for hub, customer in restrictions.pad_required:
-        if customer in served and (hub, customer) not in pad_served:
-            return False
-    if used_arcs.intersection(restrictions.trans_arc_forbidden):
-        return False
-    for arc in restrictions.trans_arc_required:
-        if served.intersection(arc_customer_sets[arc]) and arc not in used_arcs:
-            return False
-    return True
-
-
-def _join_rejection_stage(forward_label: _Label, backward_label: _BackwardLabel, graph: TransformedGraph) -> str | None:
-    if forward_label.path[-1] != backward_label.path[0]:
-        return "key"
-    if forward_label.represented_mask and backward_label.represented_mask:
-        if forward_label.represented_mask & backward_label.represented_mask:
-            return "customer"
-    elif forward_label.represented.intersection(backward_label.represented):
-        return "customer"
-    if not forward_label.represented and not backward_label.represented:
-        return "customer"
-    meet_node = forward_label.path[-1]
-    physical_loc = duplicate_hub(meet_node) if is_duplicate(meet_node) else meet_node
-    if forward_label.truck_visited.intersection(backward_label.truck_visited) - {physical_loc}:
-        return "truck_node"
-    if forward_label.truck_load + backward_label.truck_load > graph.instance.truck_payload + PAYLOAD_TOLERANCE:
-        return "payload"
-    if backward_label.leading_block_hub is not None:
-        if forward_label.active_pad not in {None, backward_label.leading_block_hub}:
-            return "block"
-        if forward_label.block_count + backward_label.leading_block_count > graph.instance.drones_per_truck:
-            return "block"
-    return None
-
-
-def _join_prefilter(forward_label: _Label, backward_label: _BackwardLabel, graph: TransformedGraph) -> bool:
-    return _join_rejection_stage(forward_label, backward_label, graph) is None
-
-
-def _path_physical_elementary(path: tuple[str, ...], graph: TransformedGraph) -> bool:
-    seen = {graph.instance.depot_source}
-    for node in path[1:]:
-        if node in graph.instance.customers + graph.instance.hubs:
-            if node in seen:
-                return False
-            seen.add(node)
-    return True
-
-
-def _increment_join_stage(counter: _JoinStageCounter | None, stage: str, amount: int = 1) -> None:
-    if counter is None:
-        return
-    if stage == "key":
-        counter.reject_key += amount
-    elif stage == "branch":
-        counter.reject_branch += amount
-    elif stage == "customer":
-        counter.reject_customer += amount
-    elif stage == "truck_node":
-        counter.reject_truck_node += amount
-    elif stage == "payload":
-        counter.reject_payload += amount
-    elif stage == "block":
-        counter.reject_block += amount
-    elif stage == "reduced_cost":
-        counter.reject_reduced_cost += amount
-    else:
-        raise RuntimeError(f"unknown join rejection stage {stage}")
-
-
-def _bucketed_join_pairs(
-    forward_labels: list[_Label],
-    backward_labels: list[_BackwardLabel],
-    graph: TransformedGraph,
-    compatible_key_cache: dict[_JoinLookupKey, tuple[_JoinLookupKey, ...]] | None = None,
-    small_join_pair_threshold: int = 5_000,
-    small_join_cumulative_threshold: int = 250_000,
-    max_join_bypass_calls: int = 1_000,
-    previous_join_bypass_calls: int = 0,
-    cumulative_pair_count: int | None = None,
-    payload_bin_width: float = 1.0,
-    force_indexed: bool = False,
-    stage_counter: _JoinStageCounter | None = None,
-) -> dict[str, object]:
-    total_pair_count = len(forward_labels) * len(backward_labels)
-    join_work_estimate = total_pair_count if cumulative_pair_count is None else cumulative_pair_count
-    use_direct = (
-        not force_indexed
-        and
-        total_pair_count <= small_join_pair_threshold
-        and join_work_estimate <= small_join_cumulative_threshold
-        and previous_join_bypass_calls < max_join_bypass_calls
-    )
-    if use_direct:
-        pairs: list[tuple[_Label, _BackwardLabel]] = []
-        label_pairs_rejected = 0
-        for forward_label in forward_labels:
-            for backward_label in backward_labels:
-                rejection_stage = _join_rejection_stage(forward_label, backward_label, graph)
-                if rejection_stage is None:
-                    pairs.append((forward_label, backward_label))
-                else:
-                    label_pairs_rejected += 1
-                    _increment_join_stage(stage_counter, rejection_stage)
-        return {
-            "pairs": pairs,
-            "bucket_pairs_considered": 0,
-            "bucket_pairs_rejected": 0,
-            "bucket_candidate_pairs": total_pair_count,
-            "compatible_keys_generated": 0,
-            "compatible_key_lookups": 0,
-            "bucket_scans_avoided": 0,
-            "key_generation_time_seconds": 0.0,
-            "key_cache_hits": 0,
-            "key_cache_misses": 0,
-            "join_graph_build_time_seconds": 0.0,
-            "subbucket_pairs_considered": 0,
-            "subbucket_pairs_rejected": 0,
-            "small_bypass_calls": 1,
-            "local_bypass_calls": 1,
-            "cumulative_bypass_calls": 1,
-            "indexed_activation_count": 0,
-            "join_work_estimate": join_work_estimate,
-            "label_pairs_materialized": total_pair_count,
-            "label_pairs_rejected": label_pairs_rejected,
-            "candidate_pairs_accepted": len(pairs),
-        }
-    forward_buckets = _join_buckets(forward_labels, graph, forward=True)
-    backward_buckets = _join_buckets(backward_labels, graph, forward=False)
-    backward_by_lookup: dict[_JoinLookupKey, list[_JoinBucket]] = {}
-    for backward_bucket in backward_buckets:
-        backward_by_lookup.setdefault(_join_lookup_key(backward_bucket.key), []).append(backward_bucket)
-    pairs: list[tuple[_Label, _BackwardLabel]] = []
-    bucket_pairs_considered = 0
-    bucket_pairs_rejected = 0
-    bucket_candidate_pairs = 0
-    compatible_keys_generated = 0
-    compatible_key_lookups = 0
-    bucket_scans_avoided = 0
-    key_generation_time = 0.0
-    key_cache_hits = 0
-    key_cache_misses = 0
-    graph_build_start = time.time()
-    join_graph: dict[int, tuple[_JoinBucket, ...]] = {}
-    label_pairs_materialized = 0
-    label_pairs_rejected = 0
-    for index, forward_bucket in enumerate(forward_buckets):
-        forward_lookup_key = _join_lookup_key(forward_bucket.key)
-        if compatible_key_cache is not None and forward_lookup_key in compatible_key_cache:
-            compatible_keys = compatible_key_cache[forward_lookup_key]
-            key_cache_hits += 1
-        else:
-            key_start = time.time()
-            compatible_keys = _compatible_join_lookup_keys(forward_bucket.key, graph)
-            key_generation_time += time.time() - key_start
-            if compatible_key_cache is not None:
-                compatible_key_cache[forward_lookup_key] = compatible_keys
-            key_cache_misses += 1
-        compatible_keys_generated += len(compatible_keys)
-        probed_bucket_count = sum(len(backward_by_lookup[lookup_key]) for lookup_key in compatible_keys if lookup_key in backward_by_lookup)
-        bucket_scans_avoided += max(len(backward_buckets) - probed_bucket_count, 0)
-        compatible_buckets: list[_JoinBucket] = []
-        for lookup_key in compatible_keys:
-            compatible_key_lookups += 1
-            compatible_buckets.extend(backward_by_lookup.get(lookup_key, ()))
-        join_graph[index] = tuple(compatible_buckets)
-    join_graph_build_time = time.time() - graph_build_start
-    subbucket_pairs_considered = 0
-    subbucket_pairs_rejected = 0
-    for index, forward_bucket in enumerate(forward_buckets):
-        forward_subbuckets = _join_subbuckets(forward_bucket, payload_bin_width)
-        for backward_bucket in join_graph[index]:
-            bucket_pairs_considered += 1
-            pair_count = len(forward_bucket.labels) * len(backward_bucket.labels)
-            if not _join_buckets_compatible(forward_bucket, backward_bucket, graph):
-                bucket_pairs_rejected += pair_count
-                _increment_join_stage(
-                    stage_counter,
-                    _join_bucket_rejection_stage(forward_bucket, backward_bucket, graph) or "key",
-                    pair_count,
-                )
-                continue
-            bucket_candidate_pairs += pair_count
-            backward_subbuckets = _join_subbuckets(backward_bucket, payload_bin_width)
-            for forward_subbucket in forward_subbuckets:
-                for backward_subbucket in backward_subbuckets:
-                    subbucket_pair_count = len(forward_subbucket.labels) * len(backward_subbucket.labels)
-                    subbucket_pairs_considered += 1
-                    if forward_subbucket.min_payload + backward_subbucket.min_payload > graph.instance.truck_payload + PAYLOAD_TOLERANCE:
-                        subbucket_pairs_rejected += subbucket_pair_count
-                        _increment_join_stage(stage_counter, "payload", subbucket_pair_count)
-                        continue
-                    for forward_label in forward_subbucket.labels:
-                        max_backward_payload = graph.instance.truck_payload - forward_label.truck_load
-                        for backward_label in backward_subbucket.labels_by_payload:
-                            if backward_label.truck_load > max_backward_payload + PAYLOAD_TOLERANCE:
-                                break
-                            label_pairs_materialized += 1
-                            rejection_stage = _join_rejection_stage(forward_label, backward_label, graph)
-                            if rejection_stage is None:
-                                pairs.append((forward_label, backward_label))
-                            else:
-                                label_pairs_rejected += 1
-                                _increment_join_stage(stage_counter, rejection_stage)
-    return {
-        "pairs": pairs,
-        "bucket_pairs_considered": bucket_pairs_considered,
-        "bucket_pairs_rejected": bucket_pairs_rejected,
-        "bucket_candidate_pairs": bucket_candidate_pairs,
-        "compatible_keys_generated": compatible_keys_generated,
-        "compatible_key_lookups": compatible_key_lookups,
-        "bucket_scans_avoided": bucket_scans_avoided,
-        "key_generation_time_seconds": key_generation_time,
-        "key_cache_hits": key_cache_hits,
-        "key_cache_misses": key_cache_misses,
-        "join_graph_build_time_seconds": join_graph_build_time,
-        "subbucket_pairs_considered": subbucket_pairs_considered,
-        "subbucket_pairs_rejected": subbucket_pairs_rejected,
-        "small_bypass_calls": 0,
-        "local_bypass_calls": 0,
-        "cumulative_bypass_calls": 0,
-        "indexed_activation_count": 1,
-        "join_work_estimate": join_work_estimate,
-        "label_pairs_materialized": label_pairs_materialized,
-        "label_pairs_rejected": label_pairs_rejected,
-        "candidate_pairs_accepted": len(pairs),
-    }
-
-
-def _bucketed_join_generators(
-    forward_labels: list[_Label],
-    backward_labels: list[_BackwardLabel],
-    graph: TransformedGraph,
-    duals: PricingDuals,
-    farkas: bool,
-    compatible_key_cache: dict[_JoinLookupKey, tuple[_JoinLookupKey, ...]] | None = None,
-    small_join_pair_threshold: int = 5_000,
-    small_join_cumulative_threshold: int = 250_000,
-    max_join_bypass_calls: int = 1_000,
-    previous_join_bypass_calls: int = 0,
-    cumulative_pair_count: int | None = None,
-    payload_bin_width: float = 1.0,
-    force_indexed: bool = False,
-    stage_counter: _JoinStageCounter | None = None,
-    pricing_tolerance: float = 0.0,
-    enable_join_lower_envelope: bool = True,
-    enable_bucket_join_envelope: bool = True,
-) -> dict[str, object]:
-    total_pair_count = len(forward_labels) * len(backward_labels)
-    join_work_estimate = total_pair_count if cumulative_pair_count is None else cumulative_pair_count
-    use_direct = (
-        not force_indexed
-        and total_pair_count <= small_join_pair_threshold
-        and join_work_estimate <= small_join_cumulative_threshold
-        and previous_join_bypass_calls < max_join_bypass_calls
-    )
-    if use_direct:
-        generator = _make_join_generator(
-            "pair_batch",
-            tuple(forward_labels),
-            tuple(backward_labels),
-            duals,
-            farkas,
-            enable_join_lower_envelope,
-        )
-        return {
-            "generators": [generator],
-            "bucket_pairs_considered": 0,
-            "bucket_pairs_rejected": 0,
-            "bucket_candidate_pairs": total_pair_count,
-            "bucket_lower_envelope_rejects": 0,
-            "compatible_keys_generated": 0,
-            "compatible_key_lookups": 0,
-            "bucket_scans_avoided": 0,
-            "key_generation_time_seconds": 0.0,
-            "key_cache_hits": 0,
-            "key_cache_misses": 0,
-            "join_graph_build_time_seconds": 0.0,
-            "subbucket_pairs_considered": 0,
-            "subbucket_pairs_rejected": 0,
-            "small_bypass_calls": 1,
-            "local_bypass_calls": 1,
-            "cumulative_bypass_calls": 1,
-            "indexed_activation_count": 0,
-            "join_work_estimate": join_work_estimate,
-            "label_pairs_rejected": 0,
-            "candidate_pairs_accepted": total_pair_count,
-        }
-
-    forward_buckets = _join_buckets(forward_labels, graph, forward=True)
-    backward_buckets = _join_buckets(backward_labels, graph, forward=False)
-    backward_by_lookup: dict[_JoinLookupKey, list[_JoinBucket]] = {}
-    for backward_bucket in backward_buckets:
-        backward_by_lookup.setdefault(_join_lookup_key(backward_bucket.key), []).append(backward_bucket)
-    generators: list[_JoinGenerator] = []
-    bucket_pairs_considered = 0
-    bucket_pairs_rejected = 0
-    bucket_candidate_pairs = 0
-    bucket_lower_envelope_rejects = 0
-    compatible_keys_generated = 0
-    compatible_key_lookups = 0
-    bucket_scans_avoided = 0
-    key_generation_time = 0.0
-    key_cache_hits = 0
-    key_cache_misses = 0
-    graph_build_start = time.time()
-    join_graph: dict[int, tuple[_JoinBucket, ...]] = {}
-    for index, forward_bucket in enumerate(forward_buckets):
-        forward_lookup_key = _join_lookup_key(forward_bucket.key)
-        if compatible_key_cache is not None and forward_lookup_key in compatible_key_cache:
-            compatible_keys = compatible_key_cache[forward_lookup_key]
-            key_cache_hits += 1
-        else:
-            key_start = time.time()
-            compatible_keys = _compatible_join_lookup_keys(forward_bucket.key, graph)
-            key_generation_time += time.time() - key_start
-            if compatible_key_cache is not None:
-                compatible_key_cache[forward_lookup_key] = compatible_keys
-            key_cache_misses += 1
-        compatible_keys_generated += len(compatible_keys)
-        probed_bucket_count = sum(len(backward_by_lookup[lookup_key]) for lookup_key in compatible_keys if lookup_key in backward_by_lookup)
-        bucket_scans_avoided += max(len(backward_buckets) - probed_bucket_count, 0)
-        compatible_buckets: list[_JoinBucket] = []
-        for lookup_key in compatible_keys:
-            compatible_key_lookups += 1
-            compatible_buckets.extend(backward_by_lookup.get(lookup_key, ()))
-        join_graph[index] = tuple(compatible_buckets)
-    join_graph_build_time = time.time() - graph_build_start
-
-    for index, forward_bucket in enumerate(forward_buckets):
-        for backward_bucket in join_graph[index]:
-            bucket_pairs_considered += 1
-            pair_count = len(forward_bucket.labels) * len(backward_bucket.labels)
-            if not _join_buckets_compatible(forward_bucket, backward_bucket, graph):
-                bucket_pairs_rejected += pair_count
-                _increment_join_stage(
-                    stage_counter,
-                    _join_bucket_rejection_stage(forward_bucket, backward_bucket, graph) or "key",
-                    pair_count,
-                )
-                continue
-            bucket_candidate_pairs += pair_count
-            generator = _make_join_generator(
-                "bucket",
-                tuple(forward_bucket.labels),  # type: ignore[arg-type]
-                tuple(backward_bucket.labels),  # type: ignore[arg-type]
-                duals,
-                farkas,
-                enable_join_lower_envelope,
-            )
-            if (
-                enable_bucket_join_envelope
-                and not farkas
-                and enable_join_lower_envelope
-                and generator.lower_bound >= -pricing_tolerance
-            ):
-                bucket_lower_envelope_rejects += pair_count
-                _increment_join_stage(stage_counter, "reduced_cost", pair_count)
-                continue
-            generators.append(generator)
-
-    return {
-        "generators": generators,
-        "bucket_pairs_considered": bucket_pairs_considered,
-        "bucket_pairs_rejected": bucket_pairs_rejected,
-        "bucket_candidate_pairs": bucket_candidate_pairs,
-        "bucket_lower_envelope_rejects": bucket_lower_envelope_rejects,
-        "compatible_keys_generated": compatible_keys_generated,
-        "compatible_key_lookups": compatible_key_lookups,
-        "bucket_scans_avoided": bucket_scans_avoided,
-        "key_generation_time_seconds": key_generation_time,
-        "key_cache_hits": key_cache_hits,
-        "key_cache_misses": key_cache_misses,
-        "join_graph_build_time_seconds": join_graph_build_time,
-        "subbucket_pairs_considered": 0,
-        "subbucket_pairs_rejected": 0,
-        "small_bypass_calls": 0,
-        "local_bypass_calls": 0,
-        "cumulative_bypass_calls": 0,
-        "indexed_activation_count": 1,
-        "join_work_estimate": join_work_estimate,
-        "label_pairs_rejected": 0,
-        "candidate_pairs_accepted": bucket_candidate_pairs,
-    }
-
-
-def _make_join_generator(
-    level: str,
-    forward_labels: tuple[_Label, ...],
-    backward_labels: tuple[_BackwardLabel, ...],
-    duals: PricingDuals,
-    farkas: bool,
-    enable_join_lower_envelope: bool,
-) -> _JoinGenerator:
-    return _JoinGenerator(
-        level=level,
-        lower_bound=_join_group_lower_bound(forward_labels, backward_labels, duals, farkas, enable_join_lower_envelope),
-        forward_labels=forward_labels,
-        backward_labels=backward_labels,
-        estimated_pair_count=len(forward_labels) * len(backward_labels),
-    )
-
-
-def _join_group_lower_bound(
-    forward_labels: tuple[_Label, ...],
-    backward_labels: tuple[_BackwardLabel, ...],
-    duals: PricingDuals,
-    farkas: bool,
-    enable_join_lower_envelope: bool = True,
-) -> float:
-    if farkas or not enable_join_lower_envelope:
-        return float("-inf")
-    if not forward_labels or not backward_labels:
-        return float("inf")
-    min_forward = min(label.reduced_cost for label in forward_labels)
-    min_suffix = float("inf")
-    for label in backward_labels:
-        if label.lower_envelope is None:
-            raise ValueError("backward label is missing its suffix lower envelope")
-        min_suffix = min(min_suffix, label.lower_envelope.evaluate(duals, farkas=False))
-    return min_forward + min_suffix
-
-
-def _split_join_generator(
-    generator: _JoinGenerator,
-    graph: TransformedGraph,
-    duals: PricingDuals,
-    farkas: bool,
-    payload_bin_width: float,
-    pricing_tolerance: float,
-    enable_join_lower_envelope: bool,
-    enable_bucket_join_envelope: bool,
-) -> dict[str, object]:
-    forward_bucket = _make_join_bucket(_join_bucket_key(generator.forward_labels[0], graph, True), list(generator.forward_labels))
-    backward_bucket = _make_join_bucket(_join_bucket_key(generator.backward_labels[0], graph, False), list(generator.backward_labels))
-    generators: list[_JoinGenerator] = []
-    subbucket_pairs_considered = 0
-    subbucket_pairs_rejected = 0
-    subbucket_lower_envelope_rejects = 0
-    for forward_subbucket in _join_subbuckets(forward_bucket, payload_bin_width):
-        for backward_subbucket in _join_subbuckets(backward_bucket, payload_bin_width):
-            pair_count = len(forward_subbucket.labels) * len(backward_subbucket.labels)
-            subbucket_pairs_considered += 1
-            if forward_subbucket.min_payload + backward_subbucket.min_payload > graph.instance.truck_payload + PAYLOAD_TOLERANCE:
-                subbucket_pairs_rejected += pair_count
-                continue
-            subgenerator = _make_join_generator(
-                "subbucket",
-                tuple(forward_subbucket.labels),  # type: ignore[arg-type]
-                tuple(backward_subbucket.labels),  # type: ignore[arg-type]
-                duals,
-                farkas,
-                enable_join_lower_envelope,
-            )
-            if (
-                enable_bucket_join_envelope
-                and not farkas
-                and enable_join_lower_envelope
-                and subgenerator.lower_bound >= -pricing_tolerance
-            ):
-                subbucket_lower_envelope_rejects += pair_count
-                continue
-            generators.append(subgenerator)
-    return {
-        "generators": generators,
-        "subbucket_pairs_considered": subbucket_pairs_considered,
-        "subbucket_pairs_rejected": subbucket_pairs_rejected,
-        "subbucket_lower_envelope_rejects": subbucket_lower_envelope_rejects,
-    }
-
-
-def _iter_join_generator_pairs(
-    generator: _JoinGenerator,
-    graph: TransformedGraph,
-):
-    backward_by_payload = sorted(generator.backward_labels, key=lambda label: (label.truck_load, label.path))
-    for forward_label in sorted(generator.forward_labels, key=lambda label: (label.reduced_cost, label.truck_load, label.path)):
-        max_backward_payload = graph.instance.truck_payload - forward_label.truck_load
-        for backward_label in backward_by_payload:
-            if backward_label.truck_load > max_backward_payload + PAYLOAD_TOLERANCE:
-                break
-            yield forward_label, backward_label
-
-
-def _join_buckets(
-    labels: list[_Label] | list[_BackwardLabel],
-    graph: TransformedGraph,
-    forward: bool,
-) -> list[_JoinBucket]:
-    grouped: dict[_JoinBucketKey, list[_Label] | list[_BackwardLabel]] = {}
-    for label in labels:
-        key = _join_bucket_key(label, graph, forward)
-        grouped.setdefault(key, []).append(label)
-    return [_make_join_bucket(key, grouped[key]) for key in sorted(grouped, key=str)]
-
-
-def _estimate_join_work(
-    forward_by_node: dict[str, list[_Label]],
-    backward_by_node: dict[str, list[_BackwardLabel]],
-) -> int:
-    return sum(
-        len(forward_by_node[node]) * len(backward_by_node[node])
-        for node in forward_by_node.keys() & backward_by_node.keys()
-    )
-
-
-def _join_bucket_key(
-    label: _Label | _BackwardLabel,
-    graph: TransformedGraph,
-    forward: bool,
-) -> _JoinBucketKey:
-    meet_node = label.path[-1] if forward else label.path[0]
-    physical_loc = duplicate_hub(meet_node) if is_duplicate(meet_node) else meet_node
-    if forward:
-        active_pad = label.active_pad  # type: ignore[union-attr]
-        block_pos = _block_position(label, graph)  # type: ignore[arg-type]
-    else:
-        active_pad = label.leading_block_hub  # type: ignore[union-attr]
-        block_pos = label.leading_block_count  # type: ignore[union-attr]
-    return _JoinBucketKey(
-        meet_node=meet_node,
-        physical_loc=physical_loc,
-        active_pad=active_pad,
-        block_pos_class=block_pos,
-        branch_state_hash=hash(label.branch_state) if label.branch_state is not None else 0,
-        payload_bucket=0,
-    )
-
-
-def _make_join_bucket(
-    key: _JoinBucketKey,
-    labels: list[_Label] | list[_BackwardLabel],
-) -> _JoinBucket:
-    if not labels:
-        raise ValueError("join bucket cannot be empty")
-    union_customers = frozenset().union(*(label.represented for label in labels))
-    intersection_customers = frozenset(labels[0].represented)
-    union_truck_nodes = frozenset().union(*(label.truck_visited for label in labels))
-    intersection_truck_nodes = frozenset(labels[0].truck_visited)
-    for label in labels[1:]:
-        intersection_customers = intersection_customers.intersection(label.represented)
-        intersection_truck_nodes = intersection_truck_nodes.intersection(label.truck_visited)
-    return _JoinBucket(
-        key=key,
-        labels=labels,
-        labels_by_payload=sorted(labels, key=lambda label: (label.truck_load, label.path)),
-        union_customer_set=union_customers,
-        intersection_customer_set=intersection_customers,
-        union_truck_node_set=union_truck_nodes,
-        intersection_truck_node_set=intersection_truck_nodes,
-        min_payload=min(label.truck_load for label in labels),
-        max_payload=max(label.truck_load for label in labels),
-    )
-
-
-def _join_subbuckets(bucket: _JoinBucket, payload_bin_width: float) -> list[_JoinSubbucket]:
-    grouped: dict[_JoinSubbucketKey, list[_Label] | list[_BackwardLabel]] = {}
-    for label in bucket.labels:
-        key = _JoinSubbucketKey(
-            payload_bin=int(label.truck_load // payload_bin_width),
-            active_pad=bucket.key.active_pad,
-            block_pos_class=bucket.key.block_pos_class,
-            branch_state_hash=bucket.key.branch_state_hash,
-            physical_mask_class=hash(frozenset(label.truck_visited)),
-        )
-        grouped.setdefault(key, []).append(label)
-    subbuckets: list[_JoinSubbucket] = []
-    for key in sorted(grouped, key=str):
-        labels = grouped[key]
-        subbuckets.append(
-            _JoinSubbucket(
-                key=key,
-                labels=labels,
-                labels_by_payload=sorted(labels, key=lambda item: (item.truck_load, item.path)),
-                min_payload=min(label.truck_load for label in labels),
-                max_payload=max(label.truck_load for label in labels),
-            )
-        )
-    return subbuckets
-
-
-def _join_lookup_key(key: _JoinBucketKey) -> _JoinLookupKey:
-    return _JoinLookupKey(
-        meet_node=key.meet_node,
-        physical_loc=key.physical_loc,
-        active_pad=key.active_pad,
-        block_pos_class=key.block_pos_class,
-    )
-
-
-def _compatible_join_lookup_keys(forward_key: _JoinBucketKey, graph: TransformedGraph) -> tuple[_JoinLookupKey, ...]:
-    keys: set[_JoinLookupKey] = {
-        _JoinLookupKey(forward_key.meet_node, forward_key.physical_loc, None, 0)
-    }
-    remaining_block_slots = graph.instance.drones_per_truck - forward_key.block_pos_class
-    if remaining_block_slots >= 0:
-        if forward_key.active_pad is None:
-            for hub in graph.instance.hubs:
-                for block_pos in range(remaining_block_slots + 1):
-                    keys.add(_JoinLookupKey(forward_key.meet_node, forward_key.physical_loc, hub, block_pos))
-        else:
-            for block_pos in range(remaining_block_slots + 1):
-                keys.add(_JoinLookupKey(forward_key.meet_node, forward_key.physical_loc, forward_key.active_pad, block_pos))
-    return tuple(sorted(keys, key=str))
-
-
-def _join_buckets_compatible(
-    forward_bucket: _JoinBucket,
-    backward_bucket: _JoinBucket,
-    graph: TransformedGraph,
-) -> bool:
-    return _join_bucket_rejection_stage(forward_bucket, backward_bucket, graph) is None
-
-
-def _join_bucket_rejection_stage(
-    forward_bucket: _JoinBucket,
-    backward_bucket: _JoinBucket,
-    graph: TransformedGraph,
-) -> str | None:
-    if forward_bucket.key.meet_node != backward_bucket.key.meet_node:
-        return "key"
-    if forward_bucket.key.physical_loc != backward_bucket.key.physical_loc:
-        return "key"
-    if forward_bucket.intersection_customer_set.intersection(backward_bucket.intersection_customer_set):
-        return "customer"
-    repeated_truck_nodes = forward_bucket.intersection_truck_node_set.intersection(
-        backward_bucket.intersection_truck_node_set
-    ) - {forward_bucket.key.physical_loc}
-    if repeated_truck_nodes:
-        return "truck_node"
-    if forward_bucket.min_payload + backward_bucket.min_payload > graph.instance.truck_payload + PAYLOAD_TOLERANCE:
-        return "payload"
-    backward_pad = backward_bucket.key.active_pad
-    if backward_pad is not None:
-        forward_pad = forward_bucket.key.active_pad
-        if forward_pad is not None and forward_pad != backward_pad:
-            return "block"
-        if forward_bucket.key.block_pos_class + backward_bucket.key.block_pos_class > graph.instance.drones_per_truck:
-            return "block"
-    return None
-
-
-def _candidate_route_cost_from_reduced_cost(
-    candidate: _RouteCandidate,
-    duals: PricingDuals,
-    farkas: bool,
-) -> float | None:
-    if farkas:
-        return None
-    return (
-        candidate.reduced_cost
-        + sum(duals.mu[customer] for customer in candidate.served)
-        + sum(dual * (len(candidate.served.intersection(triplet)) // 2) for triplet, dual in duals.nu.items())
-        + duals.kappa
-    )
-
-
-def _activation_mode(bypass_calls: int, indexed_calls: int) -> str:
-    if bypass_calls and indexed_calls:
-        return "mixed"
-    if indexed_calls:
-        return "indexed_dominated"
-    if bypass_calls:
-        return "direct_dominated"
-    return "none"
-
 
 def _pricing_status_from_reason(termination_reason: str, has_columns: bool) -> str:
     if termination_reason in {"productive_batch_found", "closure_negative_batch_found"}:
         return PRICING_STATUS_NEGATIVE_BATCH
-    if termination_reason in {"complete_label_and_join_exhaustion", "exact_pricing_complete"}:
+    if termination_reason in {"exhausted_no_negative", "exact_pricing_complete"}:
         return PRICING_STATUS_EXHAUSTED_NO_NEGATIVE
     if termination_reason == "time_limit_with_columns":
         return PRICING_STATUS_TIME_LIMIT_WITH_COLUMNS
@@ -6938,10 +3151,9 @@ def _pricing_status_from_reason(termination_reason: str, has_columns: bool) -> s
             if has_columns
             else PRICING_STATUS_TIME_LIMIT_NO_COLUMNS
         )
-    if termination_reason == "interrupted_after_first_hit":
-        return "INTERRUPTED"
+    if termination_reason == "time_limit_no_columns":
+        return PRICING_STATUS_TIME_LIMIT_NO_COLUMNS
     return "UNSPECIFIED"
-
 
 def _known_signature_costs(
     existing_routes: dict[tuple[str, ...], Route] | None,
@@ -6961,7 +3173,6 @@ def _known_signature_costs(
         coeff_signature = route_coefficient_signature(signature)
         costs[coeff_signature] = min(costs.get(coeff_signature, float("inf")), route.cost)
     return costs
-
 
 def _duplicate_dominated_by_existing(
     route: Route,
@@ -6984,7 +3195,6 @@ def _duplicate_dominated_by_existing(
         return True, signature
     return False, signature
 
-
 def _pricing_result(
     routes: list[Route],
     reduced_costs: list[float],
@@ -7003,716 +3213,43 @@ def _pricing_result(
     termination_reason: str | None = None,
     certification_mode: str | None = None,
     elapsed_seconds: float = 0.0,
-    pricing_engine: str = "forward_labeling",
-    forward_labels_generated: int | None = None,
-    backward_labels_generated: int = 0,
-    backward_dominance_tests: int = 0,
-    backward_labels_dominated: int = 0,
-    backward_cost_function_build_time_seconds: float = 0.0,
-    backward_cost_function_eval_time_seconds: float = 0.0,
-    join_sr_correction_time_seconds: float = 0.0,
-    join_active_block_time_seconds: float = 0.0,
-    joined_reduced_cost_evaluations: int = 0,
-    backward_dominance_cost_tests: int = 0,
-    backward_dominance_cost_rejected: int = 0,
-    backward_exclusive_resource_violations: int = 0,
-    join_pairs_tested: int = 0,
-    joined_routes_accepted: int = 0,
-    forward_labeling_time_seconds: float | None = None,
-    backward_labeling_time_seconds: float = 0.0,
-    join_time_seconds: float = 0.0,
-    parallel_labeling_used: bool = False,
-    parallel_workers: int = 1,
-    parallel_calls: int = 0,
-    signature_cache_hits: int = 0,
-    signature_cache_misses: int = 0,
-    core_signature_cache_hits: int = 0,
-    core_signature_cache_misses: int = 0,
-    active_signature_cache_hits: int = 0,
-    active_signature_cache_misses: int = 0,
-    sr_coeff_cache_hits: int = 0,
-    sr_coeff_cache_misses: int = 0,
-    active_sr_key_cache_hits: int = 0,
-    active_sr_key_cache_misses: int = 0,
-    active_sr_coeffs_computed: int = 0,
-    triplet_masks_built: int = 0,
-    dominance_prefilter_pairs: int = 0,
-    dominance_prefilter_rejected: int = 0,
-    dominance_bucket_pairs_considered: int = 0,
-    dominance_bucket_pairs_rejected: int = 0,
-    dominance_bucket_candidate_pairs: int = 0,
-    dominance_bucket_queries: int = 0,
-    dominance_bucket_skipped_by_mask: int = 0,
-    dominance_bucket_skipped_by_scalar: int = 0,
-    dominance_bucket_skipped_by_branch: int = 0,
-    dominance_bucket_skipped_by_deadline: int = 0,
-    dominance_bucket_skipped_by_return_credit: int = 0,
-    dom_frontier_queries: int = 0,
-    dom_frontier_keys_scanned: int = 0,
-    dom_frontier_keys_skipped_by_mask: int = 0,
-    dom_frontier_keys_skipped_by_branch: int = 0,
-    dom_frontier_keys_skipped_by_deadline: int = 0,
-    dom_frontier_keys_skipped_by_return_credit: int = 0,
-    frontier_cells_created: int = 0,
-    frontier_cells_split: int = 0,
-    frontier_cell_lb_min_at_stop: float | None = None,
-    frontier_cell_lb_closed: int = 0,
-    frontier_cell_lb_invalidations: int = 0,
-    mask_trie_subset_queries: int = 0,
-    mask_trie_superset_queries: int = 0,
-    mask_trie_returned_items: int = 0,
-    mask_subset_queries: int = 0,
-    mask_superset_queries: int = 0,
-    mask_query_cache_hits: int = 0,
-    mask_query_cache_misses: int = 0,
-    cell_splits: int = 0,
-    cell_pair_products_before_split: int = 0,
-    cell_pairs_considered: int = 0,
-    cell_pairs_rejected_by_mask: int = 0,
-    cell_pairs_rejected_by_envelope: int = 0,
-    cell_pairs_rejected_by_lb: int = 0,
-    cell_pairs_rejected_by_closure_lb: int = 0,
-    label_pairs_materialized: int = 0,
-    labels_certified_by_cell_lb: int = 0,
-    full_same_node_tests: int = 0,
-    full_physical_location_tests: int = 0,
-    labels_deleted_same_node: int = 0,
-    labels_deleted_physical_location: int = 0,
-    closure_queue_pushes: int = 0,
-    closure_queue_pops: int = 0,
-    closure_queue_min_key_at_stop: float | None = None,
-    certification_tasks_exhausted_by_cell_lb: int = 0,
-    certification_tasks_closed_by_cell_lb: int = 0,
-    certification_tasks_exhausted_by_label_search: int = 0,
-    resource_reward_bound_calls: int = 0,
-    resource_reward_bound_time: float = 0.0,
-    resource_reward_bound_fallbacks: int = 0,
-    pricing_mode_productive_or_certification: str = "productive",
-    physdom_cell_pairs_considered: int = 0,
-    physdom_cell_pairs_rejected_by_mask: int = 0,
-    physdom_cell_pairs_rejected_by_envelope: int = 0,
-    physdom_label_pairs_materialized: int = 0,
-    physdom_full_tests: int = 0,
-    physdom_deletions: int = 0,
-    physdom_time: float = 0.0,
-    physdom_time_per_deletion: float = 0.0,
-    return_credit_incompatible_pairs: int = 0,
-    dom_pairs_avoided_before_materialization: int = 0,
-    dom_candidate_pairs_materialized: int = 0,
-    dom_full_tests_same_node: int = 0,
-    dom_full_tests_physical_location: int = 0,
-    dom_labels_deleted_same_node: int = 0,
-    dom_labels_deleted_physical_location: int = 0,
-    dominance_compatible_keys_generated: int = 0,
-    dominance_compatible_key_lookups: int = 0,
-    dominance_bucket_scans_avoided: int = 0,
-    dominance_key_generation_time_seconds: float = 0.0,
-    backward_full_dominance_tests: int = 0,
-    join_prefilter_pairs: int = 0,
-    join_prefilter_rejected: int = 0,
-    join_bucket_pairs_considered: int = 0,
-    join_bucket_pairs_rejected: int = 0,
-    join_bucket_candidate_pairs: int = 0,
-    join_compatible_keys_generated: int = 0,
-    join_compatible_key_lookups: int = 0,
-    join_bucket_scans_avoided: int = 0,
-    join_key_generation_time_seconds: float = 0.0,
-    join_key_cache_hits: int = 0,
-    join_key_cache_misses: int = 0,
-    join_graph_build_time_seconds: float = 0.0,
-    join_subbucket_pairs_considered: int = 0,
-    join_subbucket_pairs_rejected: int = 0,
-    join_small_bypass_calls: int = 0,
-    join_local_bypass_calls: int = 0,
-    join_cumulative_bypass_calls: int = 0,
-    join_indexed_activation_count: int = 0,
-    join_work_estimate: int = 0,
-    join_candidate_pairs_accepted: int = 0,
-    join_activation_mode: str = "none",
-    join_label_pairs_materialized: int = 0,
-    join_full_decodes: int = 0,
-    lazy_rejected_before_decode: int = 0,
-    fully_decoded_routes: int = 0,
-    duplicate_equivalent_rejected: int = 0,
-    cost_dominated_rejected: int = 0,
-    signature_build_time_seconds: float = 0.0,
-    sr_coeff_build_time_seconds: float = 0.0,
-    duplicate_lookup_time_seconds: float = 0.0,
-    route_decode_time_seconds: float = 0.0,
-    reduced_cost_verification_time_seconds: float = 0.0,
-    dominance_key_cache_hits: int = 0,
-    dominance_key_cache_misses: int = 0,
-    dominance_small_bypass_calls: int = 0,
-    dominance_bypass_calls: int = 0,
-    dominance_indexed_activation_count: int = 0,
-    dominance_work_estimate: int = 0,
-    dominance_activation_mode: str = "none",
-    sticky_indexed_join_activations: int = 0,
-    sticky_indexed_dominance_activations: int = 0,
-    join_stage_reject_key: int = 0,
-    join_stage_reject_branch: int = 0,
-    join_stage_reject_customer: int = 0,
-    join_stage_reject_truck_node: int = 0,
-    join_stage_reject_payload: int = 0,
-    join_stage_reject_block: int = 0,
-    join_stage_reject_reduced_cost: int = 0,
-    dominance_stage_reject_key: int = 0,
-    dominance_stage_reject_branch: int = 0,
-    dominance_stage_reject_customer: int = 0,
-    dominance_stage_reject_truck_node: int = 0,
-    dominance_stage_reject_payload: int = 0,
-    dominance_stage_reject_block: int = 0,
-    dominance_stage_reject_time: int = 0,
-    dominance_stage_reject_cost: int = 0,
+    pricing_engine: str = "source_neighbor_parallel_forward",
     pricing_mode: str = "productive",
-    pricing_yield_ratio: float = 0.0,
-    side_pool_routes: list[Route] | None = None,
-    side_pool_reduced_costs: list[float] | None = None,
-    side_pool_candidates_seen: int = 0,
-    side_pool_routes_retained: int = 0,
-    side_pool_routes_rejected_by_budget: int = 0,
-    join_pairs_key_compatible: int = 0,
-    join_pairs_after_bitset_filters: int = 0,
-    join_lower_envelope_rejects: int = 0,
-    join_bucket_lower_envelope_rejects: int = 0,
-    join_subbucket_lower_envelope_rejects: int = 0,
-    join_pair_lower_envelope_rejects: int = 0,
-    join_queue_pushes: int = 0,
-    join_queue_pops: int = 0,
-    join_generator_queue_pushes: int = 0,
-    join_generator_queue_pops: int = 0,
-    join_generator_splits: int = 0,
-    join_materialized_pairs: int = 0,
-    join_exact_rc_evals: int = 0,
-    join_exact_rc_time_seconds: float = 0.0,
-    interface_cache_hits: int = 0,
-    interface_cache_misses: int = 0,
-    suffix_profile_cache_hits: int = 0,
-    suffix_profile_cache_misses: int = 0,
-    interface_profile_cache_hits: int = 0,
-    interface_profile_cache_misses: int = 0,
-    pricing_status: str | None = None,
-    productive_calls: int = 0,
-    certification_calls: int = 0,
-    negative_routes_verified: int = 0,
-    negative_routes_inserted: int | None = None,
-    pricing_worker_backend: str = "serial",
-    process_cpu_time_seconds: float = 0.0,
-    cpu_core_equivalent: float = 0.0,
-    worker_id: int | None = None,
-    source_neighbor_count: int = 0,
-    source_neighbor_block_sizes: tuple[int, ...] = tuple(),
-    first_hit_worker_id: int | None = None,
-    first_hit_exits: int = 0,
-    interrupted_worker_calls: int = 0,
-    certification_worker_calls: int = 0,
-    productive_worker_calls: int = 0,
-    per_worker_elapsed_seconds: tuple[tuple[int, float], ...] = tuple(),
-    per_worker_cpu_time_seconds: tuple[tuple[int, float], ...] = tuple(),
-    per_worker_labels_generated: tuple[tuple[int, int], ...] = tuple(),
-    per_worker_labels_dominated: tuple[tuple[int, int], ...] = tuple(),
-    per_worker_labels_pruned: tuple[tuple[int, int], ...] = tuple(),
-    per_worker_completed_labels: tuple[tuple[int, int], ...] = tuple(),
-    per_worker_verified_negative_routes: tuple[tuple[int, int], ...] = tuple(),
-    pricing_pool_startup_time_seconds: float = 0.0,
-    pricing_pool_startup_count: int = 0,
-    pricing_pool_reused_calls: int = 0,
-    pricing_pool_shutdown_time_seconds: float = 0.0,
-    pricing_task_submission_time_seconds: float = 0.0,
-    pricing_worker_payload_count: int = 0,
-    pricing_worker_response_count: int = 0,
-    pricing_candidate_paths_before_merge: int = 0,
-    pricing_candidate_paths_after_merge: int = 0,
-    pricing_decoded_routes_in_main: int = 0,
-    pricing_verified_routes_in_main: int = 0,
-    pricing_batch_target: int = 0,
-    pricing_returned_batch_size: int = 0,
-    pricing_first_hit_enabled: bool = False,
-    pricing_stale_response_rejections: int = 0,
-    pricing_worker_cpu_time_seconds: float = 0.0,
-    pricing_main_process_cpu_time_seconds: float = 0.0,
-    pricing_main_merge_time_seconds: float = 0.0,
-    core_subspace_count: int = 0,
-    core_empty_blocks: int = 0,
-    core_best_reduced_costs: tuple[tuple[int, float], ...] = tuple(),
-    min_core_reduced_cost: float | None = None,
-    productive_first_hit_core_id: int | None = None,
-    productive_interrupted_cores: int = 0,
-    certification_core_closed_count: int = 0,
-    certification_core_unresolved_count: int = 0,
-    root_closed_by_all_cores: bool = False,
-    stale_worker_results_discarded: int = 0,
-    number_of_productive_restarts: int = 0,
-    number_of_certification_calls: int = 0,
-    number_of_certification_failures_due_to_negative_column: int = 0,
-    number_of_certification_timeouts_unresolved: int = 0,
-    productive_slice_seconds: float = 0.0,
-    productive_slice_deadline_used: bool = False,
-    adaptive_slice_seconds: float = 0.0,
-    productive_yield_window_rate: float = 0.0,
-    stabilized_dual_enabled: bool = False,
-    stabilized_candidates_returned: int = 0,
-    true_dual_rejected_candidates: int = 0,
-    mean_worker_rc_minus_true_rc: float = 0.0,
-    max_abs_worker_true_rc_discrepancy: float = 0.0,
-    prefix_task_depth: int = 1,
-    productive_time_limit_with_columns: int = 0,
-    productive_time_limit_no_columns: int = 0,
-    source_neighbor_task_count: int = 0,
-    source_neighbor_task_sizes: tuple[int, ...] = tuple(),
-    local_worker_candidate_quota: int = 0,
-    diversity_quota: int = 0,
-    diversity_selected_routes: int = 0,
-    diversity_selected_customers: int = 0,
-    verified_candidates_by_source_neighbor: tuple[tuple[str, int], ...] = tuple(),
-    selected_candidates_by_source_neighbor: tuple[tuple[str, int], ...] = tuple(),
-    pricing_initial_source_neighbors: int = 0,
-    pricing_initial_task_count: int = 0,
-    pricing_initial_block_loads: tuple[float, ...] = tuple(),
-    pricing_initial_load_imbalance_max_mean: float = 0.0,
-    pricing_empty_initial_blocks: int = 0,
-    pricing_idle_worker_seconds: float = 0.0,
-    pricing_dynamic_split_candidates: int = 0,
-    pricing_dynamic_splits_performed: int = 0,
-    pricing_dynamic_split_rejected_close_to_closure: int = 0,
-    pricing_dynamic_split_rejected_small_queue: int = 0,
-    pricing_dynamic_split_rejected_short_elapsed: int = 0,
-    pricing_dynamic_split_rejected_low_workload: int = 0,
-    pricing_dynamic_child_tasks_created: int = 0,
-    pricing_labels_transferred_to_idle_workers: int = 0,
-    pricing_split_overhead_time: float = 0.0,
-    pricing_leaf_tasks_closed: int = 0,
-    pricing_leaf_tasks_stale_discarded: int = 0,
-    pricing_best_active_task_gap: float = 0.0,
-    pricing_open_labels_by_task_max: int = 0,
-    worker_busy_time_by_id: tuple[tuple[int, float], ...] = tuple(),
-    worker_idle_time_by_id: tuple[tuple[int, float], ...] = tuple(),
-    worker_task_count_by_id: tuple[tuple[int, int], ...] = tuple(),
-    epoch_invalidations_due_to_route_insert: int = 0,
-    epoch_invalidations_due_to_dual_change: int = 0,
-    epoch_invalidations_due_to_sr_change: int = 0,
-    epoch_invalidations_due_to_branch_change: int = 0,
-    epoch_invalidations_due_to_residual_change: int = 0,
-    stale_task_reuse_attempts: int = 0,
-    stale_task_reuse_blocked: int = 0,
-    cross_task_dominance_attempts: int = 0,
-    cross_task_dominance_blocked: int = 0,
-    extensions_attempted: int = 0,
-    extensions_rejected_by_deadline: int = 0,
-    deadline_reachability_removed: int = 0,
-    reward_set_size_before_deadline: int = 0,
-    reward_set_size_after_deadline: int = 0,
-    deadline_reward_bound_calls: int = 0,
-    deadline_dominance_prefilter_skips: int = 0,
-    routes_rejected_by_deadline_in_master: int = 0,
-    forward_dominance_tests: int = 0,
-    forward_same_node_dominance_tests: int = 0,
-    forward_physical_location_dominance_tests: int = 0,
-    forward_physical_location_dominance_rejections: int = 0,
-    forward_return_time_credit_checks: int = 0,
-    forward_return_time_credit_checks_skipped: int = 0,
-    forward_branch_language_failures: int = 0,
-    forward_mask_scalar_prefilter_failures: int = 0,
-    dom_gate_pairs_seen: int = 0,
-    dom_gate_mask_failures: int = 0,
-    dom_gate_scalar_failures: int = 0,
-    dom_gate_branch_failures: int = 0,
-    dom_gate_deadline_failures: int = 0,
-    labels_dominated_same_node: int = 0,
-    labels_dominated_physical: int = 0,
-    dom_prefilter_pairs: int = 0,
-    dom_prefilter_mask_fail: int = 0,
-    dom_prefilter_branch_fail: int = 0,
-    dom_prefilter_payload_fail: int = 0,
-    dom_prefilter_block_fail: int = 0,
-    dom_prefilter_return_credit_fail: int = 0,
-    dom_full_tests: int = 0,
-    dom_full_rejections: int = 0,
-    physical_location_full_tests: int = 0,
-    physical_location_rejections: int = 0,
+    **diagnostic_values: object,
 ) -> PricingResult:
-    if forward_labels_generated is None:
-        forward_labels_generated = labels_generated
-    if forward_labeling_time_seconds is None:
-        forward_labeling_time_seconds = elapsed_seconds
-    if termination_reason is None:
-        termination_reason = "exact_pricing_complete" if exact_completion else "productive_batch_found"
-    if pricing_status is None:
-        pricing_status = _pricing_status_from_reason(termination_reason, bool(routes))
-    if negative_routes_inserted is None:
-        negative_routes_inserted = len(routes)
-    if productive_calls == 0 and certification_calls == 0:
-        if pricing_mode == "closure":
-            certification_calls = 1
-        else:
-            productive_calls = 1
-    if certification_mode is None:
-        if exact_completion:
-            certification_mode = (
-                "bidirectional_complete_meet_node"
-                if pricing_engine == "bidirectional_forward_backward"
-                else "complete_forward_fallback"
-            )
-        else:
-            certification_mode = "not_certified_productive"
+    reason = termination_reason or ("exhausted_no_negative" if exact_completion else "pricing_interrupted")
+    certification = certification_mode or (
+        "certified_exhaustive_forward_tasks" if exact_completion else "not_certified"
+    )
     diagnostics = PricingDiagnostics(
         labels_generated=labels_generated,
         labels_dominated=labels_dominated,
         labels_pruned=labels_pruned,
-        labels_purged=labels_purged,
-        stale_labels_skipped=stale_labels_skipped,
-        standard_bound_pruned=standard_bound_pruned,
-        farkas_bound_pruned=farkas_bound_pruned,
         max_queue_size=max_queue_size,
         complete_routes_generated=complete_routes_generated,
         returned_routes=len(routes),
         best_reduced_cost=best_cost,
         exact_completion=exact_completion,
-        termination_reason=termination_reason,
-        certification_mode=certification_mode,
+        termination_reason=reason,
+        certification_mode=certification,
+        labels_purged=labels_purged,
+        stale_labels_skipped=stale_labels_skipped,
+        standard_bound_pruned=standard_bound_pruned,
+        farkas_bound_pruned=farkas_bound_pruned,
         elapsed_seconds=elapsed_seconds,
         pricing_engine=pricing_engine,
-        forward_labels_generated=forward_labels_generated,
-        backward_labels_generated=backward_labels_generated,
-        backward_dominance_tests=backward_dominance_tests,
-        backward_labels_dominated=backward_labels_dominated,
-        backward_cost_function_build_time_seconds=backward_cost_function_build_time_seconds,
-        backward_cost_function_eval_time_seconds=backward_cost_function_eval_time_seconds,
-        join_sr_correction_time_seconds=join_sr_correction_time_seconds,
-        join_active_block_time_seconds=join_active_block_time_seconds,
-        joined_reduced_cost_evaluations=joined_reduced_cost_evaluations,
-        backward_dominance_cost_tests=backward_dominance_cost_tests,
-        backward_dominance_cost_rejected=backward_dominance_cost_rejected,
-        backward_exclusive_resource_violations=backward_exclusive_resource_violations,
-        join_pairs_tested=join_pairs_tested,
-        joined_routes_accepted=joined_routes_accepted,
-        forward_labeling_time_seconds=forward_labeling_time_seconds,
-        backward_labeling_time_seconds=backward_labeling_time_seconds,
-        join_time_seconds=join_time_seconds,
-        parallel_labeling_used=parallel_labeling_used,
-        parallel_workers=parallel_workers,
-        parallel_calls=parallel_calls,
-        signature_cache_hits=signature_cache_hits,
-        signature_cache_misses=signature_cache_misses,
-        core_signature_cache_hits=core_signature_cache_hits,
-        core_signature_cache_misses=core_signature_cache_misses,
-        active_signature_cache_hits=active_signature_cache_hits,
-        active_signature_cache_misses=active_signature_cache_misses,
-        sr_coeff_cache_hits=sr_coeff_cache_hits,
-        sr_coeff_cache_misses=sr_coeff_cache_misses,
-        active_sr_key_cache_hits=active_sr_key_cache_hits,
-        active_sr_key_cache_misses=active_sr_key_cache_misses,
-        active_sr_coeffs_computed=active_sr_coeffs_computed,
-        triplet_masks_built=triplet_masks_built,
-        dominance_prefilter_pairs=dominance_prefilter_pairs,
-        dominance_prefilter_rejected=dominance_prefilter_rejected,
-        dominance_bucket_pairs_considered=dominance_bucket_pairs_considered,
-        dominance_bucket_pairs_rejected=dominance_bucket_pairs_rejected,
-        dominance_bucket_candidate_pairs=dominance_bucket_candidate_pairs,
-        dominance_bucket_queries=dominance_bucket_queries,
-        dominance_bucket_skipped_by_mask=dominance_bucket_skipped_by_mask,
-        dominance_bucket_skipped_by_scalar=dominance_bucket_skipped_by_scalar,
-        dominance_bucket_skipped_by_branch=dominance_bucket_skipped_by_branch,
-        dominance_bucket_skipped_by_deadline=dominance_bucket_skipped_by_deadline,
-        dominance_bucket_skipped_by_return_credit=dominance_bucket_skipped_by_return_credit,
-        dom_frontier_queries=dom_frontier_queries,
-        dom_frontier_keys_scanned=dom_frontier_keys_scanned,
-        dom_frontier_keys_skipped_by_mask=dom_frontier_keys_skipped_by_mask,
-        dom_frontier_keys_skipped_by_branch=dom_frontier_keys_skipped_by_branch,
-        dom_frontier_keys_skipped_by_deadline=dom_frontier_keys_skipped_by_deadline,
-        dom_frontier_keys_skipped_by_return_credit=dom_frontier_keys_skipped_by_return_credit,
-        frontier_cells_created=frontier_cells_created,
-        frontier_cells_split=frontier_cells_split,
-        frontier_cell_lb_min_at_stop=frontier_cell_lb_min_at_stop,
-        frontier_cell_lb_closed=frontier_cell_lb_closed,
-        frontier_cell_lb_invalidations=frontier_cell_lb_invalidations,
-        mask_trie_subset_queries=mask_trie_subset_queries,
-        mask_trie_superset_queries=mask_trie_superset_queries,
-        mask_trie_returned_items=mask_trie_returned_items,
-        mask_subset_queries=mask_subset_queries,
-        mask_superset_queries=mask_superset_queries,
-        mask_query_cache_hits=mask_query_cache_hits,
-        mask_query_cache_misses=mask_query_cache_misses,
-        cell_splits=cell_splits,
-        cell_pair_products_before_split=cell_pair_products_before_split,
-        cell_pairs_considered=cell_pairs_considered,
-        cell_pairs_rejected_by_mask=cell_pairs_rejected_by_mask,
-        cell_pairs_rejected_by_envelope=cell_pairs_rejected_by_envelope,
-        cell_pairs_rejected_by_lb=cell_pairs_rejected_by_lb,
-        cell_pairs_rejected_by_closure_lb=cell_pairs_rejected_by_closure_lb,
-        label_pairs_materialized=label_pairs_materialized,
-        labels_certified_by_cell_lb=labels_certified_by_cell_lb,
-        full_same_node_tests=full_same_node_tests,
-        full_physical_location_tests=full_physical_location_tests,
-        labels_deleted_same_node=labels_deleted_same_node,
-        labels_deleted_physical_location=labels_deleted_physical_location,
-        closure_queue_pushes=closure_queue_pushes,
-        closure_queue_pops=closure_queue_pops,
-        closure_queue_min_key_at_stop=closure_queue_min_key_at_stop,
-        certification_tasks_exhausted_by_cell_lb=certification_tasks_exhausted_by_cell_lb,
-        certification_tasks_closed_by_cell_lb=certification_tasks_closed_by_cell_lb,
-        certification_tasks_exhausted_by_label_search=certification_tasks_exhausted_by_label_search,
-        resource_reward_bound_calls=resource_reward_bound_calls,
-        resource_reward_bound_time=resource_reward_bound_time,
-        resource_reward_bound_fallbacks=resource_reward_bound_fallbacks,
-        pricing_mode_productive_or_certification=pricing_mode_productive_or_certification,
-        physdom_cell_pairs_considered=physdom_cell_pairs_considered,
-        physdom_cell_pairs_rejected_by_mask=physdom_cell_pairs_rejected_by_mask,
-        physdom_cell_pairs_rejected_by_envelope=physdom_cell_pairs_rejected_by_envelope,
-        physdom_label_pairs_materialized=physdom_label_pairs_materialized,
-        physdom_full_tests=physdom_full_tests,
-        physdom_deletions=physdom_deletions,
-        physdom_time=physdom_time,
-        physdom_time_per_deletion=physdom_time_per_deletion,
-        return_credit_incompatible_pairs=return_credit_incompatible_pairs,
-        dom_pairs_avoided_before_materialization=dom_pairs_avoided_before_materialization,
-        dom_candidate_pairs_materialized=dom_candidate_pairs_materialized,
-        dom_full_tests_same_node=dom_full_tests_same_node,
-        dom_full_tests_physical_location=dom_full_tests_physical_location,
-        dom_labels_deleted_same_node=dom_labels_deleted_same_node,
-        dom_labels_deleted_physical_location=dom_labels_deleted_physical_location,
-        dominance_compatible_keys_generated=dominance_compatible_keys_generated,
-        dominance_compatible_key_lookups=dominance_compatible_key_lookups,
-        dominance_bucket_scans_avoided=dominance_bucket_scans_avoided,
-        dominance_key_generation_time_seconds=dominance_key_generation_time_seconds,
-        backward_full_dominance_tests=backward_full_dominance_tests,
-        join_prefilter_pairs=join_prefilter_pairs,
-        join_prefilter_rejected=join_prefilter_rejected,
-        join_bucket_pairs_considered=join_bucket_pairs_considered,
-        join_bucket_pairs_rejected=join_bucket_pairs_rejected,
-        join_bucket_candidate_pairs=join_bucket_candidate_pairs,
-        join_compatible_keys_generated=join_compatible_keys_generated,
-        join_compatible_key_lookups=join_compatible_key_lookups,
-        join_bucket_scans_avoided=join_bucket_scans_avoided,
-        join_key_generation_time_seconds=join_key_generation_time_seconds,
-        join_key_cache_hits=join_key_cache_hits,
-        join_key_cache_misses=join_key_cache_misses,
-        join_graph_build_time_seconds=join_graph_build_time_seconds,
-        join_subbucket_pairs_considered=join_subbucket_pairs_considered,
-        join_subbucket_pairs_rejected=join_subbucket_pairs_rejected,
-        join_small_bypass_calls=join_small_bypass_calls,
-        join_local_bypass_calls=join_local_bypass_calls,
-        join_cumulative_bypass_calls=join_cumulative_bypass_calls,
-        join_indexed_activation_count=join_indexed_activation_count,
-        join_work_estimate=join_work_estimate,
-        join_candidate_pairs_accepted=join_candidate_pairs_accepted,
-        join_activation_mode=join_activation_mode,
-        join_label_pairs_materialized=join_label_pairs_materialized,
-        join_full_decodes=join_full_decodes,
-        lazy_rejected_before_decode=lazy_rejected_before_decode,
-        fully_decoded_routes=fully_decoded_routes,
-        duplicate_equivalent_rejected=duplicate_equivalent_rejected,
-        cost_dominated_rejected=cost_dominated_rejected,
-        signature_build_time_seconds=signature_build_time_seconds,
-        sr_coeff_build_time_seconds=sr_coeff_build_time_seconds,
-        duplicate_lookup_time_seconds=duplicate_lookup_time_seconds,
-        route_decode_time_seconds=route_decode_time_seconds,
-        reduced_cost_verification_time_seconds=reduced_cost_verification_time_seconds,
-        dominance_key_cache_hits=dominance_key_cache_hits,
-        dominance_key_cache_misses=dominance_key_cache_misses,
-        dominance_small_bypass_calls=dominance_small_bypass_calls,
-        dominance_bypass_calls=dominance_bypass_calls,
-        dominance_indexed_activation_count=dominance_indexed_activation_count,
-        dominance_work_estimate=dominance_work_estimate,
-        dominance_activation_mode=dominance_activation_mode,
-        sticky_indexed_join_activations=sticky_indexed_join_activations,
-        sticky_indexed_dominance_activations=sticky_indexed_dominance_activations,
-        join_stage_reject_key=join_stage_reject_key,
-        join_stage_reject_branch=join_stage_reject_branch,
-        join_stage_reject_customer=join_stage_reject_customer,
-        join_stage_reject_truck_node=join_stage_reject_truck_node,
-        join_stage_reject_payload=join_stage_reject_payload,
-        join_stage_reject_block=join_stage_reject_block,
-        join_stage_reject_reduced_cost=join_stage_reject_reduced_cost,
-        dominance_stage_reject_key=dominance_stage_reject_key,
-        dominance_stage_reject_branch=dominance_stage_reject_branch,
-        dominance_stage_reject_customer=dominance_stage_reject_customer,
-        dominance_stage_reject_truck_node=dominance_stage_reject_truck_node,
-        dominance_stage_reject_payload=dominance_stage_reject_payload,
-        dominance_stage_reject_block=dominance_stage_reject_block,
-        dominance_stage_reject_time=dominance_stage_reject_time,
-        dominance_stage_reject_cost=dominance_stage_reject_cost,
+        forward_labels_generated=labels_generated,
+        forward_labeling_time_seconds=elapsed_seconds,
         pricing_mode=pricing_mode,
-        pricing_yield_ratio=pricing_yield_ratio,
-        side_pool_routes_returned=0 if side_pool_routes is None else len(side_pool_routes),
-        side_pool_reduced_cost_min=(
-            None
-            if not side_pool_reduced_costs
-            else min(side_pool_reduced_costs)
-        ),
-        side_pool_candidates_seen=side_pool_candidates_seen,
-        side_pool_routes_retained=side_pool_routes_retained,
-        side_pool_routes_rejected_by_budget=side_pool_routes_rejected_by_budget,
-        join_pairs_key_compatible=join_pairs_key_compatible,
-        join_pairs_after_bitset_filters=join_pairs_after_bitset_filters,
-        join_lower_envelope_rejects=join_lower_envelope_rejects,
-        join_bucket_lower_envelope_rejects=join_bucket_lower_envelope_rejects,
-        join_subbucket_lower_envelope_rejects=join_subbucket_lower_envelope_rejects,
-        join_pair_lower_envelope_rejects=join_pair_lower_envelope_rejects,
-        join_queue_pushes=join_queue_pushes,
-        join_queue_pops=join_queue_pops,
-        join_generator_queue_pushes=join_generator_queue_pushes,
-        join_generator_queue_pops=join_generator_queue_pops,
-        join_generator_splits=join_generator_splits,
-        join_materialized_pairs=join_materialized_pairs,
-        join_exact_rc_evals=join_exact_rc_evals,
-        join_exact_rc_time_seconds=join_exact_rc_time_seconds,
-        interface_cache_hits=interface_cache_hits,
-        interface_cache_misses=interface_cache_misses,
-        suffix_profile_cache_hits=suffix_profile_cache_hits,
-        suffix_profile_cache_misses=suffix_profile_cache_misses,
-        interface_profile_cache_hits=interface_profile_cache_hits,
-        interface_profile_cache_misses=interface_profile_cache_misses,
-        pricing_status=pricing_status,
-        productive_calls=productive_calls,
-        certification_calls=certification_calls,
-        negative_routes_verified=negative_routes_verified,
-        negative_routes_inserted=negative_routes_inserted,
-        pricing_worker_backend=pricing_worker_backend,
-        process_cpu_time_seconds=process_cpu_time_seconds,
-        cpu_core_equivalent=cpu_core_equivalent,
-        worker_id=worker_id,
-        source_neighbor_count=source_neighbor_count,
-        source_neighbor_block_sizes=source_neighbor_block_sizes,
-        first_hit_worker_id=first_hit_worker_id,
-        first_hit_exits=first_hit_exits,
-        interrupted_worker_calls=interrupted_worker_calls,
-        certification_worker_calls=certification_worker_calls,
-        productive_worker_calls=productive_worker_calls,
-        per_worker_elapsed_seconds=per_worker_elapsed_seconds,
-        per_worker_cpu_time_seconds=per_worker_cpu_time_seconds,
-        per_worker_labels_generated=per_worker_labels_generated,
-        per_worker_labels_dominated=per_worker_labels_dominated,
-        per_worker_labels_pruned=per_worker_labels_pruned,
-        per_worker_completed_labels=per_worker_completed_labels,
-        per_worker_verified_negative_routes=per_worker_verified_negative_routes,
-        pricing_pool_startup_time_seconds=pricing_pool_startup_time_seconds,
-        pricing_pool_startup_count=pricing_pool_startup_count,
-        pricing_pool_reused_calls=pricing_pool_reused_calls,
-        pricing_pool_shutdown_time_seconds=pricing_pool_shutdown_time_seconds,
-        pricing_task_submission_time_seconds=pricing_task_submission_time_seconds,
-        pricing_worker_payload_count=pricing_worker_payload_count,
-        pricing_worker_response_count=pricing_worker_response_count,
-        pricing_candidate_paths_before_merge=pricing_candidate_paths_before_merge,
-        pricing_candidate_paths_after_merge=pricing_candidate_paths_after_merge,
-        pricing_decoded_routes_in_main=pricing_decoded_routes_in_main,
-        pricing_verified_routes_in_main=pricing_verified_routes_in_main,
-        pricing_batch_target=pricing_batch_target,
-        pricing_returned_batch_size=pricing_returned_batch_size,
-        pricing_first_hit_enabled=pricing_first_hit_enabled,
-        pricing_stale_response_rejections=pricing_stale_response_rejections,
-        pricing_worker_cpu_time_seconds=pricing_worker_cpu_time_seconds,
-        pricing_main_process_cpu_time_seconds=pricing_main_process_cpu_time_seconds,
-        pricing_main_merge_time_seconds=pricing_main_merge_time_seconds,
-        core_subspace_count=core_subspace_count,
-        core_empty_blocks=core_empty_blocks,
-        core_best_reduced_costs=core_best_reduced_costs,
-        min_core_reduced_cost=min_core_reduced_cost,
-        productive_first_hit_core_id=productive_first_hit_core_id,
-        productive_interrupted_cores=productive_interrupted_cores,
-        certification_core_closed_count=certification_core_closed_count,
-        certification_core_unresolved_count=certification_core_unresolved_count,
-        root_closed_by_all_cores=root_closed_by_all_cores,
-        stale_worker_results_discarded=stale_worker_results_discarded,
-        number_of_productive_restarts=number_of_productive_restarts,
-        number_of_certification_calls=number_of_certification_calls,
-        number_of_certification_failures_due_to_negative_column=number_of_certification_failures_due_to_negative_column,
-        number_of_certification_timeouts_unresolved=number_of_certification_timeouts_unresolved,
-        productive_slice_seconds=productive_slice_seconds,
-        productive_slice_deadline_used=productive_slice_deadline_used,
-        adaptive_slice_seconds=adaptive_slice_seconds,
-        productive_yield_window_rate=productive_yield_window_rate,
-        stabilized_dual_enabled=stabilized_dual_enabled,
-        stabilized_candidates_returned=stabilized_candidates_returned,
-        true_dual_rejected_candidates=true_dual_rejected_candidates,
-        mean_worker_rc_minus_true_rc=mean_worker_rc_minus_true_rc,
-        max_abs_worker_true_rc_discrepancy=max_abs_worker_true_rc_discrepancy,
-        prefix_task_depth=prefix_task_depth,
-        productive_time_limit_with_columns=productive_time_limit_with_columns,
-        productive_time_limit_no_columns=productive_time_limit_no_columns,
-        source_neighbor_task_count=source_neighbor_task_count,
-        source_neighbor_task_sizes=source_neighbor_task_sizes,
-        local_worker_candidate_quota=local_worker_candidate_quota,
-        diversity_quota=diversity_quota,
-        diversity_selected_routes=diversity_selected_routes,
-        diversity_selected_customers=diversity_selected_customers,
-        verified_candidates_by_source_neighbor=verified_candidates_by_source_neighbor,
-        selected_candidates_by_source_neighbor=selected_candidates_by_source_neighbor,
-        pricing_initial_source_neighbors=pricing_initial_source_neighbors,
-        pricing_initial_task_count=pricing_initial_task_count,
-        pricing_initial_block_loads=pricing_initial_block_loads,
-        pricing_initial_load_imbalance_max_mean=pricing_initial_load_imbalance_max_mean,
-        pricing_empty_initial_blocks=pricing_empty_initial_blocks,
-        pricing_idle_worker_seconds=pricing_idle_worker_seconds,
-        pricing_dynamic_split_candidates=pricing_dynamic_split_candidates,
-        pricing_dynamic_splits_performed=pricing_dynamic_splits_performed,
-        pricing_dynamic_split_rejected_close_to_closure=pricing_dynamic_split_rejected_close_to_closure,
-        pricing_dynamic_split_rejected_small_queue=pricing_dynamic_split_rejected_small_queue,
-        pricing_dynamic_split_rejected_short_elapsed=pricing_dynamic_split_rejected_short_elapsed,
-        pricing_dynamic_split_rejected_low_workload=pricing_dynamic_split_rejected_low_workload,
-        pricing_dynamic_child_tasks_created=pricing_dynamic_child_tasks_created,
-        pricing_labels_transferred_to_idle_workers=pricing_labels_transferred_to_idle_workers,
-        pricing_split_overhead_time=pricing_split_overhead_time,
-        pricing_leaf_tasks_closed=pricing_leaf_tasks_closed,
-        pricing_leaf_tasks_stale_discarded=pricing_leaf_tasks_stale_discarded,
-        pricing_best_active_task_gap=pricing_best_active_task_gap,
-        pricing_open_labels_by_task_max=pricing_open_labels_by_task_max,
-        worker_busy_time_by_id=worker_busy_time_by_id,
-        worker_idle_time_by_id=worker_idle_time_by_id,
-        worker_task_count_by_id=worker_task_count_by_id,
-        epoch_invalidations_due_to_route_insert=epoch_invalidations_due_to_route_insert,
-        epoch_invalidations_due_to_dual_change=epoch_invalidations_due_to_dual_change,
-        epoch_invalidations_due_to_sr_change=epoch_invalidations_due_to_sr_change,
-        epoch_invalidations_due_to_branch_change=epoch_invalidations_due_to_branch_change,
-        epoch_invalidations_due_to_residual_change=epoch_invalidations_due_to_residual_change,
-        stale_task_reuse_attempts=stale_task_reuse_attempts,
-        stale_task_reuse_blocked=stale_task_reuse_blocked,
-        cross_task_dominance_attempts=cross_task_dominance_attempts,
-        cross_task_dominance_blocked=cross_task_dominance_blocked,
-        extensions_attempted=extensions_attempted,
-        extensions_rejected_by_deadline=extensions_rejected_by_deadline,
-        deadline_reachability_removed=deadline_reachability_removed,
-        reward_set_size_before_deadline=reward_set_size_before_deadline,
-        reward_set_size_after_deadline=reward_set_size_after_deadline,
-        deadline_reward_bound_calls=deadline_reward_bound_calls,
-        deadline_dominance_prefilter_skips=deadline_dominance_prefilter_skips,
-        routes_rejected_by_deadline_in_master=routes_rejected_by_deadline_in_master,
-        forward_dominance_tests=forward_dominance_tests,
-        forward_same_node_dominance_tests=forward_same_node_dominance_tests,
-        forward_physical_location_dominance_tests=forward_physical_location_dominance_tests,
-        forward_physical_location_dominance_rejections=forward_physical_location_dominance_rejections,
-        forward_return_time_credit_checks=forward_return_time_credit_checks,
-        forward_return_time_credit_checks_skipped=forward_return_time_credit_checks_skipped,
-        forward_branch_language_failures=forward_branch_language_failures,
-        forward_mask_scalar_prefilter_failures=forward_mask_scalar_prefilter_failures,
-        dom_gate_pairs_seen=dom_gate_pairs_seen,
-        dom_gate_mask_failures=dom_gate_mask_failures,
-        dom_gate_scalar_failures=dom_gate_scalar_failures,
-        dom_gate_branch_failures=dom_gate_branch_failures,
-        dom_gate_deadline_failures=dom_gate_deadline_failures,
-        labels_dominated_same_node=labels_dominated_same_node,
-        labels_dominated_physical=labels_dominated_physical,
-        dom_prefilter_pairs=dom_prefilter_pairs,
-        dom_prefilter_mask_fail=dom_prefilter_mask_fail,
-        dom_prefilter_branch_fail=dom_prefilter_branch_fail,
-        dom_prefilter_payload_fail=dom_prefilter_payload_fail,
-        dom_prefilter_block_fail=dom_prefilter_block_fail,
-        dom_prefilter_return_credit_fail=dom_prefilter_return_credit_fail,
-        dom_full_tests=dom_full_tests,
-        dom_full_rejections=dom_full_rejections,
-        physical_location_full_tests=physical_location_full_tests,
-        physical_location_rejections=physical_location_rejections,
+        pricing_status=_pricing_status_from_reason(reason, bool(routes)),
+        productive_calls=1 if pricing_mode == "productive" else 0,
+        certification_calls=1 if pricing_mode == "closure" else 0,
+        negative_routes_verified=len(routes),
+        negative_routes_inserted=len(routes),
+        pricing_returned_batch_size=len(routes),
+        **diagnostic_values,
     )
-    return PricingResult(
-        tuple(routes),
-        tuple(reduced_costs),
-        best_route,
-        best_cost,
-        diagnostics,
-        tuple(side_pool_routes or ()),
-        tuple(side_pool_reduced_costs or ()),
-    )
-
+    return PricingResult(tuple(routes), tuple(reduced_costs), best_route, best_cost, diagnostics)
 
 def route_reduced_cost(route: Route, duals: PricingDuals) -> float:
     return (
@@ -7722,14 +3259,12 @@ def route_reduced_cost(route: Route, duals: PricingDuals) -> float:
         - duals.kappa
     )
 
-
 def route_farkas_reduced_cost(route: Route, duals: PricingDuals) -> float:
     return (
         -duals.kappa
         - sum(duals.mu[customer] for customer in route.served)
         - sum(dual * route.sr_coeff(triplet) for triplet, dual in duals.nu.items())
     )
-
 
 def _extension_allowed(
     label: _Label,
@@ -7743,7 +3278,7 @@ def _extension_allowed(
     arc = (node, next_node)
     if next_node == instance.depot_source:
         return False
-    if arc in restrictions.trans_arc_forbidden:
+    if not graph.arc_compatible_with_active_pad(arc, label.active_pad):
         return False
     if next_node in instance.customers + instance.hubs and next_node in label.truck_visited:
         return False
@@ -7753,31 +3288,76 @@ def _extension_allowed(
             return False
         if label.truck_load + instance.demand[customer] > instance.truck_payload + PAYLOAD_TOLERANCE:
             return False
-        if customer in restrictions.truck_service and is_duplicate(next_node):
-            return False
-        if customer in restrictions.drone_service and next_node == customer:
-            return False
+        drone_pad = None
+        if is_duplicate(next_node):
+            drone_pad = node if arc in graph.hub_duplicate_arcs else label.active_pad
         required_pads = [hub for hub, c in restrictions.pad_required if c == customer]
-        if required_pads and (not is_duplicate(next_node) or duplicate_hub(next_node) not in required_pads):
+        if required_pads and (not is_duplicate(next_node) or drone_pad not in required_pads):
             return False
-        if is_duplicate(next_node) and (duplicate_hub(next_node), customer) in restrictions.pad_forbidden:
+        if is_duplicate(next_node) and (drone_pad, customer) in restrictions.pad_forbidden:
             return False
         for p, q in restrictions.separate_pairs:
             if customer == p and q in label.represented:
                 return False
             if customer == q and p in label.represented:
                 return False
+    next_customer = served_customer(next_node) if is_customer_representation(next_node, instance) else None
+    extended_represented = label.represented | ({next_customer} if next_customer is not None else set())
+    for customer, i, j in restrictions.conditioned_arc_forbidden:
+        conditioned_arc = (i, j)
+        if arc == conditioned_arc and customer in extended_represented:
+            return False
+        if next_customer == customer and conditioned_arc in label.used_arcs:
+            return False
+    extended_used_arcs = label.used_arcs | {arc}
+    extended_truck_visited = label.truck_visited | (
+        {next_node} if next_node in instance.customers + instance.hubs else set()
+    )
+    next_active_pad = (
+        node
+        if arc in graph.hub_duplicate_arcs
+        else next_node
+        if next_node in instance.hubs
+        else label.active_pad
+    )
+    for customer, i, j in restrictions.conditioned_arc_required:
+        required_arc = (i, j)
+        if customer not in extended_represented or required_arc in extended_used_arcs:
+            continue
+        if not _conditioned_arc_can_still_occur(
+            i,
+            j,
+            next_node,
+            next_active_pad,
+            frozenset(extended_represented),
+            frozenset(extended_truck_visited),
+            graph,
+        ):
+            return False
     if is_duplicate(next_node):
-        hub = duplicate_hub(next_node)
         customer = duplicate_customer(next_node)
-        if label.active_pad not in {None, hub}:
-            return False
         if label.block_count + 1 > instance.drones_per_truck:
-            return False
-        if (hub, customer) not in instance.drone_arcs:
             return False
     return True
 
+
+def _conditioned_arc_can_still_occur(
+    tail: str,
+    head: str,
+    endpoint: str,
+    active_pad: str | None,
+    represented: frozenset[str],
+    truck_visited: frozenset[str],
+    graph: TransformedGraph,
+) -> bool:
+    required_arc = (tail, head)
+    if endpoint == tail:
+        return required_arc in graph.arcs and graph.arc_compatible_with_active_pad(required_arc, active_pad)
+    if tail in graph.instance.nodes:
+        return tail not in truck_visited
+    if is_duplicate(tail):
+        return duplicate_customer(tail) not in represented
+    raise RuntimeError(f"conditioned branch uses unknown transformed-arc tail {tail}")
 
 def _extension_rejected_by_service_deadline(
     label: _Label,
@@ -7793,7 +3373,6 @@ def _extension_rejected_by_service_deadline(
         return False
     return service_time > objective.bounds.service_ub[customer] + 1e-9
 
-
 def _tentative_extension_service_time(label: _Label, next_node: str, graph: TransformedGraph) -> float | None:
     instance = graph.instance
     node = label.path[-1]
@@ -7801,18 +3380,17 @@ def _tentative_extension_service_time(label: _Label, next_node: str, graph: Tran
     if arc in graph.truck_arcs and next_node in instance.customers:
         return label.physical_time + instance.truck_time[arc]
     if arc in graph.hub_duplicate_arcs:
-        hub = duplicate_hub(next_node)
+        hub = node
         customer = duplicate_customer(next_node)
         return label.physical_time + instance.drone_time[(hub, customer)]
     if arc in graph.duplicate_duplicate_arcs:
-        hub = duplicate_hub(next_node)
+        hub = label.active_pad
         customer = duplicate_customer(next_node)
         return label.active_pad_arrival + instance.drone_time[(hub, customer)]
     if arc in graph.duplicate_regular_arcs and next_node in instance.customers:
-        hub = duplicate_hub(node)
+        hub = label.active_pad
         return label.active_pad_arrival + label.active_wait + instance.truck_time[(hub, next_node)]
     return None
-
 
 def _extend(
     label: _Label,
@@ -7823,7 +3401,6 @@ def _extend(
     active_sr: tuple[tuple[str, str, str], ...],
     farkas: bool,
     restrictions: BranchRestrictions | None = None,
-    arc_customer_sets: dict[tuple[str, str], frozenset[str]] | None = None,
 ) -> _Label:
     instance = graph.instance
     node = label.path[-1]
@@ -7859,7 +3436,7 @@ def _extend(
         elif next_node == instance.depot_sink and not farkas:
             reduced_cost += objective.coeffs.return_time * physical_time
     elif arc in graph.hub_duplicate_arcs or arc in graph.duplicate_duplicate_arcs:
-        hub = duplicate_hub(next_node)
+        hub = node if arc in graph.hub_duplicate_arcs else active_pad
         customer = duplicate_customer(next_node)
         if arc in graph.hub_duplicate_arcs:
             active_pad = hub
@@ -7877,7 +3454,7 @@ def _extend(
         truck_load += instance.demand[customer]
         service_times[customer] = service_time
     elif arc in graph.duplicate_regular_arcs:
-        hub = duplicate_hub(node)
+        hub = active_pad
         physical_time = active_pad_arrival + active_wait + instance.truck_time[(hub, next_node)]
         if next_node in instance.customers + instance.hubs:
             truck_visited.add(next_node)
@@ -7899,9 +3476,11 @@ def _extend(
     represented_frozen = frozenset(represented)
     truck_visited_frozen = frozenset(truck_visited)
     used_arcs = label.used_arcs | {arc}
-    branch_state = None
-    if restrictions is not None and arc_customer_sets is not None:
-        branch_state = _branch_state_from_resources(represented_frozen, used_arcs, restrictions, arc_customer_sets)
+    branch_state = (
+        _branch_state_from_resources(represented_frozen, used_arcs, restrictions)
+        if restrictions is not None
+        else None
+    )
     return _Label(
         path=label.path + (next_node,),
         represented=represented_frozen,
@@ -7922,7 +3501,6 @@ def _extend(
         truck_node_mask=_truck_node_mask(truck_visited_frozen, graph),
         branch_state=branch_state,
     )
-
 
 def _add_customer_cost(
     customer: str,
@@ -7945,23 +3523,29 @@ def _add_customer_cost(
                 reduced_cost -= duals.nu[triplet]
     return reduced_cost
 
-
 def _complete_allowed(
     label: _Label,
     graph: TransformedGraph,
     restrictions: BranchRestrictions,
-    arc_customer_sets: dict[tuple[str, str], frozenset[str]],
 ) -> bool:
-    if label.path in restrictions.route_forbidden:
-        return False
+    return _completion_resources_allowed(label.represented, label.used_arcs, restrictions)
+
+
+def _completion_resources_allowed(
+    represented: frozenset[str],
+    used_arcs: frozenset[tuple[str, str]],
+    restrictions: BranchRestrictions,
+) -> bool:
     for p, q in restrictions.together_pairs:
-        if (p in label.represented) != (q in label.represented):
+        if (p in represented) != (q in represented):
             return False
-    for arc in restrictions.trans_arc_required:
-        if label.represented.intersection(arc_customer_sets[arc]) and arc not in label.used_arcs:
+    for customer, i, j in restrictions.conditioned_arc_forbidden:
+        if customer in represented and (i, j) in used_arcs:
+            return False
+    for customer, i, j in restrictions.conditioned_arc_required:
+        if customer in represented and (i, j) not in used_arcs:
             return False
     return True
-
 
 def _materialize_best_route(
     best_route: Route | None,
@@ -7974,49 +3558,28 @@ def _materialize_best_route(
         return best_route
     return route_from_path(next_route_id, best_path, graph, objective)
 
-
 def _label_branch_state(
     label: _Label,
     restrictions: BranchRestrictions,
-    arc_customer_sets: dict[tuple[str, str], frozenset[str]],
 ) -> _BranchState:
-    return label.branch_state or _branch_state(label, restrictions, arc_customer_sets)
-
-
-def _forward_dom_key(
-    label: _Label,
-    graph: TransformedGraph,
-    restrictions: BranchRestrictions,
-    arc_customer_sets: dict[tuple[str, str], frozenset[str]],
-) -> _ForwardDomKey:
-    return _ForwardDomKey(
-        endpoint=label.path[-1],
-        physical_location=_physical_location(label),
-        active_pad=label.active_pad,
-        block_position=_block_position(label, graph),
-        branch_state_key=_label_branch_state(label, restrictions, arc_customer_sets),
-    )
-
+    return label.branch_state or _branch_state(label, restrictions)
 
 def _frontier_time_resource(label: _Label) -> float:
     return label.active_pad_arrival if label.active_pad is not None else label.physical_time
-
 
 def _frontier_bin(value: float, width: float = 1.0) -> int:
     if not isfinite(value):
         raise RuntimeError("frontier resource bin received a nonfinite value")
     return int(value // width)
 
-
 def _forward_frontier_key(
     label: _Label,
     graph: TransformedGraph,
     objective: ObjectiveData,
     restrictions: BranchRestrictions,
-    arc_customer_sets: dict[tuple[str, str], frozenset[str]],
     deadline_counters: _DeadlinePricingCounters,
 ) -> _ForwardFrontierKey:
-    branch_key = _label_branch_state(label, restrictions, arc_customer_sets)
+    branch_key = _label_branch_state(label, restrictions)
     represented_mask = label.represented_mask or _customer_mask(label.represented, graph)
     truck_node_mask = label.truck_node_mask or _truck_node_mask(label.truck_visited, graph)
     resource_time = _frontier_time_resource(label)
@@ -8039,14 +3602,12 @@ def _forward_frontier_key(
         wait_bin=_frontier_bin(label.active_wait),
     )
 
-
 def _rebuild_forward_frontier_for_location(
     kept_labels: dict[str, list[_Label]],
     location: str,
     graph: TransformedGraph,
     objective: ObjectiveData,
     restrictions: BranchRestrictions,
-    arc_customer_sets: dict[tuple[str, str], frozenset[str]],
     deadline_counters: _DeadlinePricingCounters | None,
     shortest: dict[tuple[str, str], float] | None = None,
     bounds: _PricingBounds | None = None,
@@ -8057,14 +3618,9 @@ def _rebuild_forward_frontier_for_location(
     customer_bit_count = len(graph.instance.customers)
     truck_bit_count = len((graph.instance.depot_source, *graph.instance.hubs, *graph.instance.customers, graph.instance.depot_sink))
     for stored in kept_labels.get(location, []):
-        key = _forward_frontier_key(stored, graph, objective, restrictions, arc_customer_sets, deadline_counters)
-        lower_bound = (
-            _closure_reduced_cost_lower_bound(stored, graph, objective, shortest, bounds, None)
-            if shortest is not None and bounds is not None
-            else stored.reduced_cost
-        )
+        key = _forward_frontier_key(stored, graph, objective, restrictions, deadline_counters)
         frontiers.buckets.setdefault(key, []).append(stored)
-        frontiers.cells.setdefault(key, _ForwardFrontierCell()).add(stored, lower_bound)
+        frontiers.cells.setdefault(key, _ForwardFrontierCell()).add(stored)
         branch_masks = frontiers.by_branch_customer_mask.setdefault(key.branch_language_key, {})
         keys_for_mask = branch_masks.setdefault(key.customer_mask, [])
         if key not in keys_for_mask:
@@ -8085,7 +3641,6 @@ def _rebuild_forward_frontier_for_location(
     deadline_counters.frontier_index[location] = frontiers
     _refresh_frontier_cell_summary(deadline_counters)
 
-
 def _refresh_frontier_cell_summary(deadline_counters: _DeadlinePricingCounters) -> None:
     cells = [
         cell
@@ -8097,16 +3652,6 @@ def _refresh_frontier_cell_summary(deadline_counters: _DeadlinePricingCounters) 
         deadline_counters.frontier_cells_split,
         sum(1 for cell in cells if len(cell.labels) > deadline_counters.max_frontier_cell_size),
     )
-    finite_lbs = [cell.cell_lb for cell in cells if isfinite(cell.cell_lb)]
-    deadline_counters.frontier_cell_lb_min_at_stop = min(finite_lbs, default=None)
-    deadline_counters.closure_queue_min_key_at_stop = min(finite_lbs, default=None)
-    deadline_counters.frontier_cell_lb_closed = sum(
-        1 for cell in cells if isfinite(cell.cell_lb) and cell.cell_lb >= -1e-7
-    )
-    deadline_counters.labels_certified_by_cell_lb = sum(
-        len(cell.labels) for cell in cells if isfinite(cell.cell_lb) and cell.cell_lb >= -1e-7
-    )
-
 
 def _frontier_return_credit_gate_reason(
     a_key: _ForwardFrontierKey,
@@ -8131,7 +3676,6 @@ def _frontier_return_credit_gate_reason(
         return "return_credit"
     return None
 
-
 def _frontier_key_gate_reason(
     possible_dominator_key: _ForwardFrontierKey,
     target_key: _ForwardFrontierKey,
@@ -8151,7 +3695,6 @@ def _frontier_key_gate_reason(
     if target_key.deadline_reachable_mask & ~possible_dominator_key.deadline_reachable_mask:
         return "deadline"
     return None
-
 
 def _frontier_cell_gate_reason(
     possible_dominator_key: _ForwardFrontierKey,
@@ -8173,20 +3716,16 @@ def _frontier_cell_gate_reason(
         return "envelope"
     return None
 
-
-def _frontier_cell_attribute(label: _Label, lower_bound: float, dimension: str) -> float:
+def _frontier_cell_attribute(label: _Label, dimension: str) -> float:
     if dimension == "payload":
         return label.truck_load
     if dimension == "time":
         return _frontier_time_resource(label)
     if dimension == "wait":
         return label.active_wait
-    if dimension == "lb":
-        return lower_bound
     if dimension == "mask_cardinality":
         return float((label.represented_mask or 0).bit_count())
     raise RuntimeError(f"unknown frontier split dimension: {dimension}")
-
 
 def _frontier_cell_spread(cell: _ForwardFrontierCell, dimension: str) -> float:
     if dimension == "payload":
@@ -8195,39 +3734,29 @@ def _frontier_cell_spread(cell: _ForwardFrontierCell, dimension: str) -> float:
         return cell.max_time - cell.min_time
     if dimension == "wait":
         return cell.max_wait - cell.min_wait
-    if dimension == "lb":
-        return cell.max_cell_lb - cell.cell_lb
     if dimension == "mask_cardinality":
         counts = [(label.represented_mask or 0).bit_count() for label in cell.labels]
         return float(max(counts, default=0) - min(counts, default=0))
     raise RuntimeError(f"unknown frontier split dimension: {dimension}")
 
-
 def _split_frontier_cell_once(cell: _ForwardFrontierCell) -> tuple[_ForwardFrontierCell, ...]:
     if len(cell.labels) <= 1:
         return (cell,)
-    dimensions = ("payload", "time", "wait", "lb", "mask_cardinality")
+    dimensions = ("payload", "time", "wait", "mask_cardinality")
     dimension = max(dimensions, key=lambda item: _frontier_cell_spread(cell, item))
     if _frontier_cell_spread(cell, dimension) <= 0.0:
         return (cell,)
-    pairs = sorted(
-        zip(cell.labels, cell.lower_bounds),
-        key=lambda item: (
-            _frontier_cell_attribute(item[0], item[1], dimension),
-            item[0].path,
-        ),
-    )
+    pairs = sorted(cell.labels, key=lambda label: (_frontier_cell_attribute(label, dimension), label.path))
     midpoint = len(pairs) // 2
     if midpoint <= 0 or midpoint >= len(pairs):
         return (cell,)
     children = []
     for chunk in (pairs[:midpoint], pairs[midpoint:]):
         child = _ForwardFrontierCell()
-        for label, lower_bound in chunk:
-            child.add(label, lower_bound)
+        for label in chunk:
+            child.add(label)
         children.append(child)
     return tuple(children)
-
 
 def _refined_frontier_cells(
     cell: _ForwardFrontierCell,
@@ -8258,34 +3787,10 @@ def _refined_frontier_cells(
         work.extend((child, depth + 1) for child in children)
     return tuple(refined)
 
-
-def _single_label_frontier_cell(
-    label: _Label,
-    graph: TransformedGraph,
-    objective: ObjectiveData,
-    shortest: dict[tuple[str, str], float] | None,
-    bounds: _PricingBounds | None,
-) -> _ForwardFrontierCell:
-    lower_bound = (
-        _closure_reduced_cost_lower_bound(label, graph, objective, shortest, bounds, None)
-        if shortest is not None and bounds is not None
-        else label.reduced_cost
-    )
+def _single_label_frontier_cell(label: _Label) -> _ForwardFrontierCell:
     cell = _ForwardFrontierCell()
-    cell.add(label, lower_bound)
+    cell.add(label)
     return cell
-
-
-def _frontier_customer_mask_compatible(
-    possible_dominator_mask: int,
-    target_mask: int,
-) -> bool:
-    if possible_dominator_mask & ~target_mask:
-        return False
-    if possible_dominator_mask == 0 and possible_dominator_mask != target_mask:
-        return False
-    return True
-
 
 def _frontier_candidate_key_stats(
     index: _ForwardFrontierLocationIndex,
@@ -8350,7 +3855,6 @@ def _frontier_candidate_key_stats(
     mask_skipped_labels = branch_label_count - candidate_label_count
     return candidate_keys, branch_skipped_labels, mask_skipped_keys, mask_skipped_labels, candidate_key_count
 
-
 def _dominance_frontier_candidates(
     kept_labels: dict[str, list[_Label]],
     location: str,
@@ -8358,7 +3862,6 @@ def _dominance_frontier_candidates(
     graph: TransformedGraph,
     objective: ObjectiveData,
     restrictions: BranchRestrictions,
-    arc_customer_sets: dict[tuple[str, str], frozenset[str]],
     deadline_counters: _DeadlinePricingCounters | None,
     *,
     label_may_dominate_stored: bool,
@@ -8377,14 +3880,13 @@ def _dominance_frontier_candidates(
             graph,
             objective,
             restrictions,
-            arc_customer_sets,
             deadline_counters,
             shortest,
             bounds,
         )
         frontiers = deadline_counters.frontier_index.get(location, _ForwardFrontierLocationIndex())
-    label_key = _forward_frontier_key(label, graph, objective, restrictions, arc_customer_sets, deadline_counters)
-    label_cell = _single_label_frontier_cell(label, graph, objective, shortest, bounds)
+    label_key = _forward_frontier_key(label, graph, objective, restrictions, deadline_counters)
+    label_cell = _single_label_frontier_cell(label)
     candidate_keys, branch_skipped_labels, mask_skipped_keys, mask_skipped_labels, candidate_key_count = (
         _frontier_candidate_key_stats(
             frontiers,
@@ -8411,9 +3913,7 @@ def _dominance_frontier_candidates(
         stored_cell = frontiers.cells[stored_key]
         for refined_cell in _refined_frontier_cells(stored_cell, deadline_counters):
             stored_labels = refined_cell.labels
-            if label_may_dominate_stored and isfinite(refined_cell.cell_lb) and refined_cell.cell_lb >= -PAPER_DOMINANCE_TOLERANCE:
-                reason = "lb"
-            elif label_may_dominate_stored:
+            if label_may_dominate_stored:
                 reason = _frontier_cell_gate_reason(label_key, label_cell, stored_key, refined_cell, graph)
             else:
                 reason = _frontier_cell_gate_reason(stored_key, refined_cell, label_key, label_cell, graph)
@@ -8433,10 +3933,6 @@ def _dominance_frontier_candidates(
                     deadline_counters.cell_pairs_rejected_by_envelope += 1
                     if not same_regular:
                         deadline_counters.physdom_cell_pairs_rejected_by_envelope += 1
-                elif reason == "lb":
-                    deadline_counters.cell_pairs_rejected_by_lb += 1
-                    deadline_counters.cell_pairs_rejected_by_closure_lb += 1
-                    deadline_counters.labels_certified_by_cell_lb += len(stored_labels)
                 else:
                     reason_counts[reason] += 1
                     if reason == "mask":
@@ -8455,14 +3951,12 @@ def _dominance_frontier_candidates(
     deadline_counters.label_pairs_materialized += len(candidates)
     return candidates
 
-
 def _dominance_pair_gate_reason(
     a: _Label,
     b: _Label,
     graph: TransformedGraph,
     objective: ObjectiveData,
     restrictions: BranchRestrictions,
-    arc_customer_sets: dict[tuple[str, str], frozenset[str]],
     deadline_counters: _DeadlinePricingCounters | None,
 ) -> str | None:
     comparable, _ = _block_comparable_return_credit(a, b, graph)
@@ -8474,7 +3968,7 @@ def _dominance_pair_gate_reason(
         return "mask"
     if not a.represented and a.represented != b.represented:
         return "mask"
-    if _branch_state(a, restrictions, arc_customer_sets) != _branch_state(b, restrictions, arc_customer_sets):
+    if _branch_state(a, restrictions) != _branch_state(b, restrictions):
         return "branch"
     if deadline_counters is not None:
         a_mask = _cached_deadline_reachable_mask(a, graph, objective, deadline_counters)
@@ -8490,14 +3984,12 @@ def _dominance_pair_gate_reason(
         return "scalar"
     return None
 
-
 def _dominance_gate_candidates(
     possible_dominators: list[_Label],
     label: _Label,
     graph: TransformedGraph,
     objective: ObjectiveData,
     restrictions: BranchRestrictions,
-    arc_customer_sets: dict[tuple[str, str], frozenset[str]],
     deadline_counters: _DeadlinePricingCounters | None,
 ) -> list[_Label]:
     if deadline_counters is not None:
@@ -8519,7 +4011,6 @@ def _dominance_gate_candidates(
             graph,
             objective,
             restrictions,
-            arc_customer_sets,
             deadline_counters,
         )
         if reason is None:
@@ -8538,19 +4029,18 @@ def _dominance_gate_candidates(
         deadline_counters.dominance_bucket_skipped_by_return_credit += reason_counts["return_credit"]
     return candidates
 
-
 def _insert_nondominated_standard_label(
     kept_labels: dict[str, list[_Label]],
     label: _Label,
     graph: TransformedGraph,
-    objective: ObjectiveData,
     duals: PricingDuals,
-    restrictions: BranchRestrictions,
-    arc_customer_sets: dict[tuple[str, str], frozenset[str]],
+    extension_context: _DominanceExtensionContext,
     deadline_counters: _DeadlinePricingCounters | None = None,
     shortest: dict[tuple[str, str], float] | None = None,
     bounds: _PricingBounds | None = None,
 ) -> tuple[bool, int, int]:
+    objective = extension_context.objective
+    restrictions = extension_context.restrictions
     location = _physical_location(label)
     comparable = kept_labels.setdefault(location, [])
     frontier_dominators = _dominance_frontier_candidates(
@@ -8560,7 +4050,6 @@ def _insert_nondominated_standard_label(
         graph,
         objective,
         restrictions,
-        arc_customer_sets,
         deadline_counters,
         label_may_dominate_stored=False,
         shortest=shortest,
@@ -8572,11 +4061,10 @@ def _insert_nondominated_standard_label(
         graph,
         objective,
         restrictions,
-        arc_customer_sets,
         deadline_counters,
     )
     if any(
-        _paper_dominates(incumbent, label, graph, objective, duals, restrictions, arc_customer_sets, deadline_counters)
+        _paper_dominates(incumbent, label, graph, duals, extension_context, deadline_counters)
         for incumbent in possible_dominators
     ):
         return False, 1, 0
@@ -8587,7 +4075,6 @@ def _insert_nondominated_standard_label(
         graph,
         objective,
         restrictions,
-        arc_customer_sets,
         deadline_counters,
         label_may_dominate_stored=True,
         shortest=shortest,
@@ -8604,11 +4091,10 @@ def _insert_nondominated_standard_label(
                 graph,
                 objective,
                 restrictions,
-                arc_customer_sets,
                 deadline_counters,
             )
             is None
-            and _paper_dominates(label, incumbent, graph, objective, duals, restrictions, arc_customer_sets, deadline_counters)
+            and _paper_dominates(label, incumbent, graph, duals, extension_context, deadline_counters)
         ):
             dominated_count += 1
         else:
@@ -8621,29 +4107,26 @@ def _insert_nondominated_standard_label(
         graph,
         objective,
         restrictions,
-        arc_customer_sets,
         deadline_counters,
         shortest,
         bounds,
     )
     return True, 0, dominated_count
 
-
 def _insert_nondominated_farkas_label(
     kept_labels: dict[str, list[_Label]],
     label: _Label,
     graph: TransformedGraph,
-    restrictions: BranchRestrictions,
-    arc_customer_sets: dict[tuple[str, str], frozenset[str]],
+    extension_context: _DominanceExtensionContext,
 ) -> tuple[bool, int, int]:
     location = _physical_location(label)
     comparable = kept_labels.setdefault(location, [])
-    if any(_farkas_dominates(incumbent, label, graph, restrictions, arc_customer_sets) for incumbent in comparable):
+    if any(_farkas_dominates(incumbent, label, graph, extension_context) for incumbent in comparable):
         return False, 1, 0
     survivors = []
     dominated_count = 0
     for incumbent in comparable:
-        if _farkas_dominates(label, incumbent, graph, restrictions, arc_customer_sets):
+        if _farkas_dominates(label, incumbent, graph, extension_context):
             dominated_count += 1
         else:
             survivors.append(incumbent)
@@ -8651,17 +4134,16 @@ def _insert_nondominated_farkas_label(
     kept_labels[location] = survivors
     return True, 0, dominated_count
 
-
 def _paper_dominates(
     a: _Label,
     b: _Label,
     graph: TransformedGraph,
-    objective: ObjectiveData,
     duals: PricingDuals,
-    restrictions: BranchRestrictions,
-    arc_customer_sets: dict[tuple[str, str], frozenset[str]],
+    extension_context: _DominanceExtensionContext,
     deadline_counters: _DeadlinePricingCounters | None = None,
 ) -> bool:
+    objective = extension_context.objective
+    restrictions = extension_context.restrictions
     if deadline_counters is not None:
         deadline_counters.forward_dominance_tests += 1
         deadline_counters.dom_gate_pairs_seen += 1
@@ -8696,9 +4178,16 @@ def _paper_dominates(
             deadline_counters.dom_prefilter_mask_fail += 1
             deadline_counters.forward_return_time_credit_checks_skipped += 1
         return False
-    if _branch_state(a, restrictions, arc_customer_sets) != _branch_state(b, restrictions, arc_customer_sets):
+    if _branch_state(a, restrictions) != _branch_state(b, restrictions):
         if deadline_counters is not None:
             deadline_counters.forward_branch_language_failures += 1
+            deadline_counters.dom_gate_branch_failures += 1
+            deadline_counters.dom_prefilter_branch_fail += 1
+            deadline_counters.forward_return_time_credit_checks_skipped += 1
+        return False
+    if not _branch_interface_compatible(a, b, graph, extension_context):
+        if deadline_counters is not None:
+            deadline_counters.forward_branch_interface_failures += 1
             deadline_counters.dom_gate_branch_failures += 1
             deadline_counters.dom_prefilter_branch_fail += 1
             deadline_counters.forward_return_time_credit_checks_skipped += 1
@@ -8789,14 +4278,13 @@ def _paper_dominates(
         deadline_counters.physdom_time += time.perf_counter() - physdom_start
     return dominated
 
-
 def _farkas_dominates(
     a: _Label,
     b: _Label,
     graph: TransformedGraph,
-    restrictions: BranchRestrictions,
-    arc_customer_sets: dict[tuple[str, str], frozenset[str]],
+    extension_context: _DominanceExtensionContext,
 ) -> bool:
+    restrictions = extension_context.restrictions
     comparable, _ = _block_comparable_return_credit(a, b, graph)
     if not comparable:
         return False
@@ -8808,7 +4296,9 @@ def _farkas_dominates(
         return False
     if a.truck_load > b.truck_load or a.block_count > b.block_count:
         return False
-    if _branch_state(a, restrictions, arc_customer_sets) != _branch_state(b, restrictions, arc_customer_sets):
+    if _branch_state(a, restrictions) != _branch_state(b, restrictions):
+        return False
+    if not _branch_interface_compatible(a, b, graph, extension_context):
         return False
     if a.sr_counts != b.sr_counts:
         return False
@@ -8831,7 +4321,6 @@ def _farkas_dominates(
         or a.reduced_cost < b.reduced_cost
     )
 
-
 def _block_comparable_return_credit(a: _Label, b: _Label, graph: TransformedGraph) -> tuple[bool, float]:
     a_node = a.path[-1]
     b_node = b.path[-1]
@@ -8849,60 +4338,158 @@ def _block_comparable_return_credit(a: _Label, b: _Label, graph: TransformedGrap
         return False, 0.0
     return True, max(b.active_pad_arrival - a.active_pad_arrival, 0.0)
 
-
 def _same_original_node(a: _Label, b: _Label, graph: TransformedGraph) -> bool:
     node = a.path[-1]
     return node == b.path[-1] and node in graph.instance.nodes
 
-
 def _physical_location(label: _Label) -> str:
     node = label.path[-1]
-    return duplicate_hub(node) if is_duplicate(node) else node
-
+    if is_duplicate(node):
+        if label.active_pad is None:
+            raise ValueError("duplicate label has no active pad")
+        return label.active_pad
+    return node
 
 def _block_position(label: _Label, graph: TransformedGraph) -> int:
     node = label.path[-1]
     if node in graph.instance.hubs:
         return 0
     if is_duplicate(node):
-        return graph.order[(duplicate_hub(node), duplicate_customer(node))] + 1
+        if label.active_pad is None:
+            raise ValueError("duplicate label has no active pad")
+        return graph.order[(label.active_pad, duplicate_customer(node))] + 1
     return 0
-
 
 def _branch_state(
     label: _Label,
     restrictions: BranchRestrictions,
-    arc_customer_sets: dict[tuple[str, str], frozenset[str]],
 ) -> _BranchState:
-    return _branch_state_from_resources(label.represented, label.used_arcs, restrictions, arc_customer_sets)
-
+    return _branch_state_from_resources(label.represented, label.used_arcs, restrictions)
 
 def _branch_state_from_resources(
     represented: frozenset[str],
     used_arcs: frozenset[tuple[str, str]],
     restrictions: BranchRestrictions,
-    arc_customer_sets: dict[tuple[str, str], frozenset[str]],
 ) -> _BranchState:
     together = tuple(
         (p in represented, q in represented)
         for p, q in sorted(restrictions.together_pairs)
     )
-    required_arcs = tuple(
-        (arc, bool(represented.intersection(arc_customer_sets[arc])), arc in used_arcs)
-        for arc in sorted(restrictions.trans_arc_required)
+    conditioned_arcs = tuple(
+        (customer, (i, j), required, customer in represented, (i, j) in used_arcs)
+        for required, branches in (
+            (False, restrictions.conditioned_arc_forbidden),
+            (True, restrictions.conditioned_arc_required),
+        )
+        for customer, i, j in sorted(branches)
     )
-    return _BranchState(together=together, required_arcs=required_arcs)
+    return _BranchState(together=together, conditioned_arcs=conditioned_arcs)
 
+def _branch_interface_compatible(
+    dominating: _Label,
+    dominated: _Label,
+    graph: TransformedGraph,
+    extension_context: _DominanceExtensionContext,
+) -> bool:
+    dominating_endpoint = dominating.path[-1]
+    dominated_endpoint = dominated.path[-1]
+    if dominating_endpoint == dominated_endpoint:
+        return True
+
+    restrictions = extension_context.restrictions
+    if _branch_state(dominating, restrictions) != _branch_state(dominated, restrictions):
+        return False
+
+    dominated_successors = _feasible_first_successors(dominated, graph, extension_context)
+    dominating_successors = frozenset(_feasible_first_successors(dominating, graph, extension_context))
+    for successor in dominated_successors:
+        if successor not in dominating_successors:
+            return False
+        dominating_represented, dominating_used_arcs = _first_extension_resources(
+            dominating,
+            successor,
+            graph,
+        )
+        dominated_represented, dominated_used_arcs = _first_extension_resources(
+            dominated,
+            successor,
+            graph,
+        )
+
+        dominating_next_state = _branch_state_from_resources(
+            dominating_represented,
+            dominating_used_arcs,
+            restrictions,
+        )
+        dominated_next_state = _branch_state_from_resources(
+            dominated_represented,
+            dominated_used_arcs,
+            restrictions,
+        )
+        if dominating_next_state != dominated_next_state:
+            return False
+    return True
+
+
+def _feasible_first_successors(
+    label: _Label,
+    graph: TransformedGraph,
+    extension_context: _DominanceExtensionContext,
+) -> tuple[str, ...]:
+    cached = extension_context.feasible_first_successors.get(label)
+    if cached is not None:
+        return cached
+
+    feasible: list[str] = []
+    for successor in graph.out_arcs.get(label.path[-1], tuple()):
+        if not _extension_allowed(
+            label,
+            successor,
+            graph,
+            extension_context.residual_customers,
+            extension_context.restrictions,
+        ):
+            continue
+        if _extension_rejected_by_service_deadline(
+            label,
+            successor,
+            graph,
+            extension_context.objective,
+        ):
+            continue
+        if successor == graph.instance.depot_sink:
+            represented, used_arcs = _first_extension_resources(label, successor, graph)
+            if not represented or not _completion_resources_allowed(
+                represented,
+                used_arcs,
+                extension_context.restrictions,
+            ):
+                continue
+        feasible.append(successor)
+
+    result = tuple(feasible)
+    extension_context.feasible_first_successors[label] = result
+    return result
+
+
+def _first_extension_resources(
+    label: _Label,
+    successor: str,
+    graph: TransformedGraph,
+) -> tuple[frozenset[str], frozenset[tuple[str, str]]]:
+    represented = label.represented
+    if is_customer_representation(successor, graph.instance):
+        represented = represented | {served_customer(successor)}
+    return represented, label.used_arcs | {(label.path[-1], successor)}
 
 def _sr_extra_penalty_bound(a: _Label, b: _Label, duals: PricingDuals) -> float:
     a_counts = dict(a.sr_counts)
     b_counts = dict(b.sr_counts)
     penalty = 0.0
     for triplet, dual in duals.nu.items():
-        if dual < 0.0 and a_counts.get(triplet, 0) in {1, 3} and b_counts.get(triplet, 0) in {0, 2}:
+        if dual < 0.0 and a_counts.get(triplet, 0) == 1 and b_counts.get(triplet, 0) == 2:
             penalty += dual
     return penalty
-
 
 def _shortest_truck_times(graph: TransformedGraph) -> dict[tuple[str, str], float]:
     shortest = dict(nx.all_pairs_dijkstra_path_length(graph.instance.truck_graph(), weight="weight"))
@@ -8911,7 +4498,6 @@ def _shortest_truck_times(graph: TransformedGraph) -> dict[tuple[str, str], floa
         for i in graph.instance.nodes
         for j in graph.instance.nodes
     }
-
 
 def _queue_key(
     label: _Label,
@@ -8924,13 +4510,13 @@ def _queue_key(
     deadline_counters: _DeadlinePricingCounters | None = None,
 ) -> float:
     if farkas:
-        return label.reduced_cost
+        return _farkas_completion_lower_bound(label, graph, objective, shortest, bounds, deadline_counters)
     if not use_standard_acceleration:
         return label.reduced_cost
     return _closure_reduced_cost_lower_bound(label, graph, objective, shortest, bounds, deadline_counters)
 
 
-def _closure_reduced_cost_lower_bound(
+def _farkas_completion_lower_bound(
     label: _Label,
     graph: TransformedGraph,
     objective: ObjectiveData,
@@ -8938,16 +4524,10 @@ def _closure_reduced_cost_lower_bound(
     bounds: _PricingBounds,
     deadline_counters: _DeadlinePricingCounters | None = None,
 ) -> float:
-    completion_return = _completion_return_lb(label, graph, shortest)
-    reward = (
-        _resource_restricted_reward_bound(label, graph, bounds, objective, shortest, deadline_counters)
-        if deadline_counters is None or deadline_counters.enable_resource_restricted_closure_bound
-        else _dual_reward_bound(label, graph, bounds, objective, shortest, deadline_counters)
-    )
-    return label.reduced_cost + objective.coeffs.return_time * completion_return - reward
+    reward = _dual_reward_bound(label, graph, bounds, objective, shortest, deadline_counters)
+    return label.reduced_cost - reward
 
-
-def _knapsack_reduced_cost_lower_bound(
+def _closure_reduced_cost_lower_bound(
     label: _Label,
     graph: TransformedGraph,
     objective: ObjectiveData,
@@ -8959,16 +4539,6 @@ def _knapsack_reduced_cost_lower_bound(
     reward = _dual_reward_bound(label, graph, bounds, objective, shortest, deadline_counters)
     return label.reduced_cost + objective.coeffs.return_time * completion_return - reward
 
-
-def _farkas_reduced_cost_lower_bound(
-    label: _Label,
-    graph: TransformedGraph,
-    bounds: _PricingBounds,
-) -> float:
-    reward = _dual_reward_bound(label, graph, bounds)
-    return label.reduced_cost - reward
-
-
 def _completion_return_lb(
     label: _Label,
     graph: TransformedGraph,
@@ -8977,10 +4547,9 @@ def _completion_return_lb(
     instance = graph.instance
     node = label.path[-1]
     if is_duplicate(node):
-        hub = duplicate_hub(node)
+        hub = label.active_pad
         return label.active_pad_arrival + label.active_wait + shortest[(hub, instance.depot_sink)]
     return label.physical_time + shortest[(node, instance.depot_sink)]
-
 
 def _dual_reward_bound(
     label: _Label,
@@ -8992,7 +4561,7 @@ def _dual_reward_bound(
 ) -> float:
     instance = graph.instance
     residual_payload = instance.truck_payload - label.truck_load + PAYLOAD_TOLERANCE
-    current = duplicate_hub(label.path[-1]) if is_duplicate(label.path[-1]) else label.path[-1]
+    current = label.active_pad if is_duplicate(label.path[-1]) else label.path[-1]
     items_before_deadline = tuple(
         item
         for item in bounds.reward_items_by_location.get(current, tuple())
@@ -9013,66 +4582,7 @@ def _dual_reward_bound(
             deadline_counters.deadline_reachability_removed += len(items_before_deadline) - len(items)
     if not items:
         return 0.0
-    payload_reward = _payload_reward_bound(items, residual_payload)
-    cardinality_limit = _max_additional_reward_customers(label, graph, items)
-    cardinality_reward = _cardinality_reward_bound(items, cardinality_limit)
-    return min(payload_reward, cardinality_reward)
-
-
-def _resource_restricted_reward_bound(
-    label: _Label,
-    graph: TransformedGraph,
-    bounds: _PricingBounds,
-    objective: ObjectiveData,
-    shortest: dict[tuple[str, str], float],
-    deadline_counters: _DeadlinePricingCounters | None = None,
-) -> float:
-    start = time.perf_counter()
-    if deadline_counters is not None:
-        deadline_counters.resource_reward_bound_calls += 1
-    instance = graph.instance
-    residual_payload = instance.truck_payload - label.truck_load + PAYLOAD_TOLERANCE
-    current = duplicate_hub(label.path[-1]) if is_duplicate(label.path[-1]) else label.path[-1]
-    items_before_deadline = tuple(
-        item
-        for item in bounds.reward_items_by_location.get(current, tuple())
-        if item.customer not in label.represented and item.demand <= residual_payload
-    )
-    truck_reachable: list[_RewardItem] = []
-    drone_reachable: list[_RewardItem] = []
-    union_by_customer: dict[str, _RewardItem] = {}
-    for item in items_before_deadline:
-        truck_ok = _customer_truck_deadline_reachable_from_label(label, item.customer, graph, objective, shortest)
-        drone_ok = _customer_drone_deadline_reachable_from_label(label, item.customer, graph, objective, shortest)
-        if not (truck_ok or drone_ok):
-            continue
-        union_by_customer[item.customer] = item
-        if truck_ok:
-            truck_reachable.append(item)
-        if drone_ok:
-            drone_reachable.append(item)
-    if deadline_counters is not None:
-        deadline_counters.deadline_reward_bound_calls += 1
-        deadline_counters.reward_set_size_before_deadline += len(items_before_deadline)
-        deadline_counters.reward_set_size_after_deadline += len(union_by_customer)
-        deadline_counters.deadline_reachability_removed += len(items_before_deadline) - len(union_by_customer)
-    if not union_by_customer:
-        if deadline_counters is not None:
-            deadline_counters.resource_reward_bound_time += time.perf_counter() - start
-        return 0.0
-    union_items = tuple(sorted(union_by_customer.values(), key=lambda item: (-item.density, item.customer)))
-    payload_reward = _payload_reward_bound(union_items, residual_payload)
-    truck_slots = _truck_slot_limit(label, graph, truck_reachable)
-    drone_slots = _drone_slot_limit(label, graph)
-    total_slot_reward = _cardinality_reward_bound(union_items, truck_slots + drone_slots)
-    mode_reward = _cardinality_reward_bound(tuple(truck_reachable), truck_slots) + _cardinality_reward_bound(
-        tuple(drone_reachable),
-        drone_slots,
-    )
-    if deadline_counters is not None:
-        deadline_counters.resource_reward_bound_time += time.perf_counter() - start
-    return min(payload_reward, total_slot_reward, mode_reward)
-
+    return _payload_reward_bound(items, residual_payload)
 
 def _payload_reward_bound(items: tuple[_RewardItem, ...], residual_payload: float) -> float:
     remaining = residual_payload
@@ -9089,65 +4599,6 @@ def _payload_reward_bound(items: tuple[_RewardItem, ...], residual_payload: floa
             reward += value * remaining / demand
             break
     return reward
-
-
-def _max_additional_reward_customers(
-    label: _Label,
-    graph: TransformedGraph,
-    items: tuple[_RewardItem, ...],
-) -> int:
-    instance = graph.instance
-    candidate_customers = frozenset(item.customer for item in items)
-    direct_capacity = sum(1 for customer in candidate_customers if customer not in label.truck_visited)
-    current_block_capacity = 0
-    if is_duplicate(label.path[-1]):
-        current_block_capacity = instance.drones_per_truck - label.block_count
-    unvisited_hub_capacity = instance.drones_per_truck * sum(
-        1 for hub in instance.hubs if hub not in label.truck_visited
-    )
-    structural_capacity = direct_capacity + current_block_capacity + unvisited_hub_capacity
-    return min(len(items), max(0, structural_capacity))
-
-
-def _truck_slot_limit(
-    label: _Label,
-    graph: TransformedGraph,
-    truck_reachable: list[_RewardItem],
-) -> int:
-    return min(len(truck_reachable), sum(1 for item in truck_reachable if item.customer not in label.truck_visited))
-
-
-def _drone_slot_limit(label: _Label, graph: TransformedGraph) -> int:
-    instance = graph.instance
-    node = label.path[-1]
-    location = duplicate_hub(node) if is_duplicate(node) else node
-    current_block_capacity = 0
-    if label.active_pad is not None and location == label.active_pad:
-        current_block_capacity = max(0, instance.drones_per_truck - label.block_count)
-    elif node in instance.hubs:
-        current_block_capacity = instance.drones_per_truck
-    future_hub_capacity = instance.drones_per_truck * sum(
-        1 for hub in instance.hubs if hub != location and hub not in label.truck_visited
-    )
-    return current_block_capacity + future_hub_capacity
-
-
-def _cardinality_reward_bound(items: tuple[_RewardItem, ...], cardinality_limit: int) -> float:
-    if cardinality_limit <= 0:
-        return 0.0
-    reward = 0.0
-    remaining = float(cardinality_limit)
-    for item in sorted(items, key=lambda item: (-item.reward, item.customer)):
-        if remaining <= 0.0:
-            break
-        if remaining >= 1.0:
-            reward += item.reward
-            remaining -= 1.0
-        else:
-            reward += item.reward * remaining
-            break
-    return reward
-
 
 def _build_pricing_bounds(
     graph: TransformedGraph,
@@ -9170,7 +4621,6 @@ def _build_pricing_bounds(
         reward_items_by_location[location] = tuple(sorted(items, key=lambda item: (-item.density, item.customer)))
     return _PricingBounds(reward_items_by_location=reward_items_by_location)
 
-
 def _customer_reachable_from_location(
     customer: str,
     location: str,
@@ -9190,73 +4640,31 @@ def _customer_reachable_from_location(
         for hub in instance.hubs
     )
 
-
-def _customer_truck_deadline_reachable_from_label(
+def _together_branch_partner_unreachable(
     label: _Label,
-    customer: str,
     graph: TransformedGraph,
     objective: ObjectiveData,
     shortest: dict[tuple[str, str], float],
+    residual_customers: frozenset[str],
+    restrictions: BranchRestrictions,
 ) -> bool:
-    if customer in label.represented or customer in label.truck_visited:
+    if not restrictions.together_pairs:
         return False
-    instance = graph.instance
-    node = label.path[-1]
-    location = duplicate_hub(node) if is_duplicate(node) else node
-    departure = label.active_pad_arrival + label.active_wait if is_duplicate(node) else label.physical_time
-    if not isfinite(shortest[(location, customer)]) or not isfinite(shortest[(customer, instance.depot_sink)]):
-        return False
-    upper = objective.bounds.service_ub[customer]
-    return not isfinite(upper) or departure + shortest[(location, customer)] <= upper + 1e-9
-
-
-def _customer_drone_deadline_reachable_from_label(
-    label: _Label,
-    customer: str,
-    graph: TransformedGraph,
-    objective: ObjectiveData,
-    shortest: dict[tuple[str, str], float],
-) -> bool:
-    if customer in label.represented:
-        return False
-    instance = graph.instance
-    if instance.demand[customer] > instance.drone_payload:
-        return False
-    node = label.path[-1]
-    location = duplicate_hub(node) if is_duplicate(node) else node
-    departure = label.active_pad_arrival + label.active_wait if is_duplicate(node) else label.physical_time
-    upper = objective.bounds.service_ub[customer]
-
-    def time_ok(service_time: float) -> bool:
-        return not isfinite(upper) or service_time <= upper + 1e-9
-
-    if (
-        label.active_pad is not None
-        and location == label.active_pad
-        and label.block_count < instance.drones_per_truck
-        and (label.active_pad, customer) in instance.drone_arcs
-        and instance.drone_trip_time[(label.active_pad, customer)] <= instance.drone_endurance
-        and time_ok(label.active_pad_arrival + instance.drone_time[(label.active_pad, customer)])
-    ):
-        return True
-    if (
-        node in instance.hubs
-        and (node, customer) in instance.drone_arcs
-        and instance.drone_trip_time[(node, customer)] <= instance.drone_endurance
-        and time_ok(label.physical_time + instance.drone_time[(node, customer)])
-    ):
-        return True
-    for hub in instance.hubs:
-        if hub == location or hub in label.truck_visited:
+    residual_payload = graph.instance.truck_payload - label.truck_load + PAYLOAD_TOLERANCE
+    location = _physical_location(label)
+    for p, q in restrictions.together_pairs:
+        p_represented = p in label.represented
+        q_represented = q in label.represented
+        if p_represented == q_represented:
             continue
-        if (hub, customer) not in instance.drone_arcs:
-            continue
-        if (
-            isfinite(shortest[(location, hub)])
-            and isfinite(shortest[(hub, instance.depot_sink)])
-            and instance.drone_trip_time[(hub, customer)] <= instance.drone_endurance
-            and time_ok(departure + shortest[(location, hub)] + instance.drone_time[(hub, customer)])
-        ):
+        missing = q if p_represented else p
+        if missing not in residual_customers:
+            return True
+        if graph.instance.demand[missing] > residual_payload:
+            return True
+        if not _customer_reachable_from_location(missing, location, graph, shortest):
+            return True
+        if not _customer_deadline_reachable_from_label(label, missing, graph, objective, shortest):
             return True
     return False
 
@@ -9275,7 +4683,7 @@ def _customer_deadline_reachable_from_label(
         return True
     instance = graph.instance
     node = label.path[-1]
-    location = duplicate_hub(node) if is_duplicate(node) else node
+    location = label.active_pad if is_duplicate(node) else node
     departure = label.active_pad_arrival + label.active_wait if is_duplicate(node) else label.physical_time
     best = float("inf")
     if customer not in label.truck_visited and isfinite(shortest[(location, customer)]):
@@ -9290,7 +4698,6 @@ def _customer_deadline_reachable_from_label(
             best = min(best, departure + shortest[(location, hub)] + instance.drone_time[(hub, customer)])
     return best <= upper + 1e-9
 
-
 def _deadline_reachable_mask(
     label: _Label,
     graph: TransformedGraph,
@@ -9302,7 +4709,6 @@ def _deadline_reachable_mask(
         if _customer_deadline_reachable_from_label(label, customer, graph, objective, shortest):
             mask |= 1 << index
     return mask
-
 
 def _cached_deadline_reachable_mask(
     label: _Label,

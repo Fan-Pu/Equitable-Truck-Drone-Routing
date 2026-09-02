@@ -1,0 +1,15 @@
+{
+  "case_id": "pilot20_PC_seed105",
+  "solver": "bpc",
+  "attempt": "attempt_001",
+  "started_at": "2026-08-31 21:14:10",
+  "ended_at": "2026-08-31 21:14:46",
+  "exit_code": 0,
+  "completed": true,
+  "instance_snapshot_sha256": "6dd138d9c5476d3639a061490324702a5315c5d0f3ca9d00357adefadcf69a51",
+  "instance_snapshot_verified": true,
+  "result_file": "D:\\GitHub\\Equitable-Truck-Drone-Routing\\numerical_experiments\\medium_crossover_pilot_final_campaign\\pilot_n20\\cases\\pilot20_PC_seed105\\bpc\\attempt_001\\thvrpd-seed=105.json",
+  "stdout_file": "D:\\GitHub\\Equitable-Truck-Drone-Routing\\numerical_experiments\\medium_crossover_pilot_final_campaign\\pilot_n20\\cases\\pilot20_PC_seed105\\bpc\\attempt_001\\runner_stdout.log",
+  "stderr_file": "D:\\GitHub\\Equitable-Truck-Drone-Routing\\numerical_experiments\\medium_crossover_pilot_final_campaign\\pilot_n20\\cases\\pilot20_PC_seed105\\bpc\\attempt_001\\runner_stderr.log",
+  "resource_usage_file": "D:\\GitHub\\Equitable-Truck-Drone-Routing\\numerical_experiments\\medium_crossover_pilot_final_campaign\\pilot_n20\\cases\\pilot20_PC_seed105\\bpc\\attempt_001\\resource_usage.json"
+}

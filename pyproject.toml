@@ -16,6 +16,7 @@ dependencies = [
   "sortedcontainers",
   "colorama",
   "pytest",
+  "psutil",
 ]
 
 [tool.pytest.ini_options]

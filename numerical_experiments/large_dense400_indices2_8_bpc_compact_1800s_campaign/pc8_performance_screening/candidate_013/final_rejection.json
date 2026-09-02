@@ -1,0 +1,11 @@
+{
+  "accepted": false,
+  "reason": "final_cross_solver_bound_contradiction",
+  "snapshot_sha256": "a6ac92e876cb59bbf793ac5ca7e70ffaba7308974ec654a7b44100a6b0b8dfca",
+  "bpc_status": "optimal",
+  "bpc_objective": 0.10390609167813672,
+  "bpc_lower_bound": 0.10390609167813672,
+  "compact_status_code": 9,
+  "compact_objective": 0.10083110657384792,
+  "witness": "The validated compact incumbent is lower than the BPC lower bound, so the final realization cannot be accepted as a correct low-gap BPC result."
+}

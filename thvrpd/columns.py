@@ -57,8 +57,6 @@ class BranchRouteIndex:
     all_paths: frozenset[tuple[str, ...]]
     signatures: dict[tuple[str, ...], BranchObservableSignature]
     by_customer: dict[str, frozenset[tuple[str, ...]]]
-    by_truck_customer: dict[str, frozenset[tuple[str, ...]]]
-    by_drone_customer: dict[str, frozenset[tuple[str, ...]]]
     by_pad: dict[tuple[str, str], frozenset[tuple[str, ...]]]
     by_arc: dict[tuple[str, str], frozenset[tuple[str, ...]]]
 
@@ -204,35 +202,22 @@ def build_branch_route_index(
 ) -> BranchRouteIndex:
     signatures: dict[tuple[str, ...], BranchObservableSignature] = {}
     by_customer: dict[str, set[tuple[str, ...]]] = defaultdict(set)
-    by_truck_customer: dict[str, set[tuple[str, ...]]] = defaultdict(set)
-    by_drone_customer: dict[str, set[tuple[str, ...]]] = defaultdict(set)
     by_pad: dict[tuple[str, str], set[tuple[str, ...]]] = defaultdict(set)
     by_arc: dict[tuple[str, str], set[tuple[str, ...]]] = defaultdict(set)
-    branch_arcs = {
-        arc
-        for arc in graph.arcs
-        if graph.arc_customer_set(arc).intersection(residual_customers)
-    }
     for path in sorted(paths):
         route = routes[path]
         signatures[path] = branch_observable_signature(route, graph, residual_customers, cache)
         for customer in route.served.intersection(residual_customers):
             by_customer[customer].add(path)
-        for customer in route.truck_served.intersection(residual_customers):
-            by_truck_customer[customer].add(path)
-        for customer in route.drone_served.intersection(residual_customers):
-            by_drone_customer[customer].add(path)
         for hub, customer in route.pad_served:
             if customer in residual_customers:
                 by_pad[(hub, customer)].add(path)
-        for arc in route.used_arcs.intersection(branch_arcs):
+        for arc in route.used_arcs:
             by_arc[arc].add(path)
     return BranchRouteIndex(
         all_paths=frozenset(paths),
         signatures=signatures,
         by_customer=_freeze_path_index(by_customer),
-        by_truck_customer=_freeze_path_index(by_truck_customer),
-        by_drone_customer=_freeze_path_index(by_drone_customer),
         by_pad=_freeze_path_index(by_pad),
         by_arc=_freeze_path_index(by_arc),
     )
@@ -254,8 +239,6 @@ def extend_branch_route_index(
         all_paths=index.all_paths | delta.all_paths,
         signatures={**index.signatures, **delta.signatures},
         by_customer=_merge_path_index(index.by_customer, delta.by_customer),
-        by_truck_customer=_merge_path_index(index.by_truck_customer, delta.by_truck_customer),
-        by_drone_customer=_merge_path_index(index.by_drone_customer, delta.by_drone_customer),
         by_pad=_merge_path_index(index.by_pad, delta.by_pad),
         by_arc=_merge_path_index(index.by_arc, delta.by_arc),
     )
@@ -264,16 +247,13 @@ def extend_branch_route_index(
 def query_branch_route_index(
     index: BranchRouteIndex,
     restrictions: BranchRestrictions,
-    arc_customer_sets: dict[tuple[str, str], frozenset[str]],
 ) -> tuple[set[tuple[str, ...]], dict[str, int]]:
     candidates = set(index.all_paths)
     rejection_counts = {
-        "route_forbidden": 0,
         "together": 0,
         "separate": 0,
-        "service_mode": 0,
         "launch_pad": 0,
-        "transformed_arc": 0,
+        "conditioned_arc": 0,
     }
 
     def reject(reason: str, paths: set[tuple[str, ...]] | frozenset[tuple[str, ...]]) -> None:
@@ -282,33 +262,26 @@ def query_branch_route_index(
             candidates.difference_update(removed)
             rejection_counts[reason] += len(removed)
 
-    for path in restrictions.route_forbidden:
-        reject("route_forbidden", {path})
     for p, q in restrictions.together_pairs:
         p_paths = index.by_customer.get(p, frozenset())
         q_paths = index.by_customer.get(q, frozenset())
         reject("together", set(p_paths).symmetric_difference(q_paths))
     for p, q in restrictions.separate_pairs:
         reject("separate", set(index.by_customer.get(p, frozenset())).intersection(index.by_customer.get(q, frozenset())))
-    for customer in restrictions.truck_service:
-        served = index.by_customer.get(customer, frozenset())
-        truck = index.by_truck_customer.get(customer, frozenset())
-        reject("service_mode", set(served).difference(truck))
-    for customer in restrictions.drone_service:
-        reject("service_mode", index.by_truck_customer.get(customer, frozenset()))
     for hub, customer in restrictions.pad_forbidden:
         reject("launch_pad", index.by_pad.get((hub, customer), frozenset()))
     for hub, customer in restrictions.pad_required:
         served = index.by_customer.get(customer, frozenset())
         pad = index.by_pad.get((hub, customer), frozenset())
         reject("launch_pad", set(served).difference(pad))
-    for arc in restrictions.trans_arc_forbidden:
-        reject("transformed_arc", index.by_arc.get(arc, frozenset()))
-    for arc in restrictions.trans_arc_required:
-        impacted: set[tuple[str, ...]] = set()
-        for customer in arc_customer_sets[arc]:
-            impacted.update(index.by_customer.get(customer, frozenset()))
-        reject("transformed_arc", impacted.difference(index.by_arc.get(arc, frozenset())))
+    for customer, i, j in restrictions.conditioned_arc_forbidden:
+        reject(
+            "conditioned_arc",
+            set(index.by_customer.get(customer, frozenset())).intersection(index.by_arc.get((i, j), frozenset())),
+        )
+    for customer, i, j in restrictions.conditioned_arc_required:
+        served = index.by_customer.get(customer, frozenset())
+        reject("conditioned_arc", set(served).difference(index.by_arc.get((i, j), frozenset())))
     return candidates, rejection_counts
 
 

@@ -1,0 +1,1237 @@
+{
+  "attempt": 23,
+  "realized_seed": 23000077,
+  "accepted": true,
+  "acceptance_status": "warm_start_certified",
+  "instance_snapshot_file": "D:\\GitHub\\Equitable-Truck-Drone-Routing\\numerical_experiments\\large_dense400_indices2_8_bpc_compact_1800s_campaign\\pc8_performance_screening\\candidate_023\\warm_start\\candidate_snapshot.json",
+  "instance_snapshot_sha256": "cfa0796c4b9aa87a54475ebeb6c085c8864448969058965caaf7c1c47a6b2d9d",
+  "instance_physical_fingerprint": "1d94cd41f18299e7d8b0d47c41228f181b59618a6c83167cde0a4a037aa5a7de",
+  "gurobi_version": "12.0.1",
+  "root_compact_limit_seconds": 60.0,
+  "first_incumbent_deadline_seconds": 45.0,
+  "screening_repetitions_required": 2,
+  "screening_repetitions_completed": 2,
+  "threads": 0,
+  "status": "success",
+  "status_code": 9,
+  "objective": 0.14469110917391595,
+  "bound": -0.07991882538551989,
+  "gap": 1.552340954753889,
+  "node_count": 1582.0,
+  "iteration_count": 466389.0,
+  "first_incumbent_time": 21.5310001373291,
+  "timing": {
+    "model_build_time": 0.22529149055480957,
+    "solve_time": 60.05256390571594,
+    "route_decode_time": 0.003514528274536133
+  },
+  "route_paths": [
+    [
+      "Source",
+      "C17",
+      "H3",
+      "C9",
+      "H2",
+      "C26",
+      "C15",
+      "C14",
+      "Sink"
+    ],
+    [
+      "Source",
+      "C1",
+      "C20",
+      "C6",
+      "H2",
+      "C18",
+      "Sink"
+    ],
+    [
+      "Source",
+      "C19",
+      "H2",
+      "DUP:C10",
+      "DUP:C16",
+      "DUP:C22",
+      "DUP:C30",
+      "C4",
+      "Sink"
+    ],
+    [
+      "Source",
+      "C13",
+      "C7",
+      "H1",
+      "DUP:C29",
+      "C5",
+      "Sink"
+    ],
+    [
+      "Source",
+      "C11",
+      "C24",
+      "C12",
+      "C28",
+      "Sink"
+    ],
+    [
+      "Source",
+      "C23",
+      "H1",
+      "C25",
+      "C3",
+      "H3",
+      "DUP:C2",
+      "DUP:C8",
+      "DUP:C21",
+      "C27",
+      "Sink"
+    ]
+  ],
+  "validation": {
+    "incumbent_present": true,
+    "valid": true,
+    "route_count": 6,
+    "routes": [
+      {
+        "id": 0,
+        "path": [
+          "Source",
+          "C17",
+          "H3",
+          "C9",
+          "H2",
+          "C26",
+          "C15",
+          "C14",
+          "Sink"
+        ],
+        "truck_path": [
+          "Source",
+          "C17",
+          "H3",
+          "C9",
+          "H2",
+          "C26",
+          "C15",
+          "C14",
+          "Sink"
+        ],
+        "drone_blocks": {},
+        "served": [
+          "C14",
+          "C15",
+          "C17",
+          "C26",
+          "C9"
+        ],
+        "truck_served": [
+          "C14",
+          "C15",
+          "C17",
+          "C26",
+          "C9"
+        ],
+        "service_times": {
+          "C17": 10.419677540392694,
+          "C9": 55.72360189846982,
+          "C26": 83.01183421123865,
+          "C15": 90.49143003551454,
+          "C14": 99.071297168865
+        },
+        "return_time": 152.65974706209457,
+        "drone_sorties": 0,
+        "delay_square_sum": 4538.84569401425,
+        "operating_cost": 20.0,
+        "shifted_delay_contribution": 0.019901893006352422,
+        "shifted_return_contribution": 0.004540735740443189,
+        "shifted_cost_contribution": 0.031578947368421054,
+        "shifted_cost": 0.056021576115216666
+      },
+      {
+        "id": 1,
+        "path": [
+          "Source",
+          "C1",
+          "C20",
+          "C6",
+          "H2",
+          "C18",
+          "Sink"
+        ],
+        "truck_path": [
+          "Source",
+          "C1",
+          "C20",
+          "C6",
+          "H2",
+          "C18",
+          "Sink"
+        ],
+        "drone_blocks": {},
+        "served": [
+          "C1",
+          "C18",
+          "C20",
+          "C6"
+        ],
+        "truck_served": [
+          "C1",
+          "C18",
+          "C20",
+          "C6"
+        ],
+        "service_times": {
+          "C1": 19.364946558756394,
+          "C20": 51.910314390808175,
+          "C6": 62.80273089893452,
+          "C18": 70.17765329452907
+        },
+        "return_time": 108.3646367280573,
+        "drone_sorties": 0,
+        "delay_square_sum": 1497.9819077015602,
+        "operating_cost": 20.0,
+        "shifted_delay_contribution": 0.006568338661929966,
+        "shifted_return_contribution": 0.0032232149499834316,
+        "shifted_cost_contribution": 0.031578947368421054,
+        "shifted_cost": 0.04137050098033445
+      },
+      {
+        "id": 2,
+        "path": [
+          "Source",
+          "C19",
+          "H2",
+          "DUP:C10",
+          "DUP:C16",
+          "DUP:C22",
+          "DUP:C30",
+          "C4",
+          "Sink"
+        ],
+        "truck_path": [
+          "Source",
+          "C19",
+          "H2",
+          "C4",
+          "Sink"
+        ],
+        "drone_blocks": {
+          "H2": [
+            "C10",
+            "C16",
+            "C22",
+            "C30"
+          ]
+        },
+        "served": [
+          "C10",
+          "C16",
+          "C19",
+          "C22",
+          "C30",
+          "C4"
+        ],
+        "truck_served": [
+          "C19",
+          "C4"
+        ],
+        "service_times": {
+          "C19": 19.67895566066943,
+          "C10": 45.05161517566293,
+          "C16": 46.213626055148865,
+          "C22": 45.18235071151168,
+          "C30": 46.75846121637378,
+          "C4": 56.60299388412228
+        },
+        "return_time": 102.01739108877081,
+        "drone_sorties": 4,
+        "delay_square_sum": 194.52538514242792,
+        "operating_cost": 44.0,
+        "shifted_delay_contribution": 0.0008529532976257958,
+        "shifted_return_contribution": 0.0030344214685167205,
+        "shifted_cost_contribution": 0.06947368421052631,
+        "shifted_cost": 0.07336105897666884
+      },
+      {
+        "id": 3,
+        "path": [
+          "Source",
+          "C13",
+          "C7",
+          "H1",
+          "DUP:C29",
+          "C5",
+          "Sink"
+        ],
+        "truck_path": [
+          "Source",
+          "C13",
+          "C7",
+          "H1",
+          "C5",
+          "Sink"
+        ],
+        "drone_blocks": {
+          "H1": [
+            "C29"
+          ]
+        },
+        "served": [
+          "C13",
+          "C29",
+          "C5",
+          "C7"
+        ],
+        "truck_served": [
+          "C13",
+          "C5",
+          "C7"
+        ],
+        "service_times": {
+          "C13": 18.9577058257506,
+          "C7": 22.568635769843258,
+          "C29": 32.8016607135611,
+          "C5": 41.28768780434019
+        },
+        "return_time": 53.384270489012366,
+        "drone_sorties": 1,
+        "delay_square_sum": 1200.8285260892699,
+        "operating_cost": 26.0,
+        "shifted_delay_contribution": 0.005265382975394338,
+        "shifted_return_contribution": 0.0015878702123641468,
+        "shifted_cost_contribution": 0.04105263157894737,
+        "shifted_cost": 0.047905884766705854
+      },
+      {
+        "id": 4,
+        "path": [
+          "Source",
+          "C11",
+          "C24",
+          "C12",
+          "C28",
+          "Sink"
+        ],
+        "truck_path": [
+          "Source",
+          "C11",
+          "C24",
+          "C12",
+          "C28",
+          "Sink"
+        ],
+        "drone_blocks": {},
+        "served": [
+          "C11",
+          "C12",
+          "C24",
+          "C28"
+        ],
+        "truck_served": [
+          "C11",
+          "C12",
+          "C24",
+          "C28"
+        ],
+        "service_times": {
+          "C11": 9.055390916829296,
+          "C24": 38.356862603909335,
+          "C12": 39.319017570203414,
+          "C28": 46.45969724566466
+        },
+        "return_time": 90.42794972917704,
+        "drone_sorties": 0,
+        "delay_square_sum": 9.91026571951346,
+        "operating_cost": 20.0,
+        "shifted_delay_contribution": 4.345445104564506e-05,
+        "shifted_return_contribution": 0.002689703285721142,
+        "shifted_cost_contribution": 0.031578947368421054,
+        "shifted_cost": 0.03431210510518784
+      },
+      {
+        "id": 5,
+        "path": [
+          "Source",
+          "C23",
+          "H1",
+          "C25",
+          "C3",
+          "H3",
+          "DUP:C2",
+          "DUP:C8",
+          "DUP:C21",
+          "C27",
+          "Sink"
+        ],
+        "truck_path": [
+          "Source",
+          "C23",
+          "H1",
+          "C25",
+          "C3",
+          "H3",
+          "C27",
+          "Sink"
+        ],
+        "drone_blocks": {
+          "H3": [
+            "C2",
+            "C8",
+            "C21"
+          ]
+        },
+        "served": [
+          "C2",
+          "C21",
+          "C23",
+          "C25",
+          "C27",
+          "C3",
+          "C8"
+        ],
+        "truck_served": [
+          "C23",
+          "C25",
+          "C27",
+          "C3"
+        ],
+        "service_times": {
+          "C23": 10.345909928160658,
+          "C25": 22.733344549458966,
+          "C3": 58.63657975462661,
+          "C2": 65.64617610960683,
+          "C8": 66.39068381974084,
+          "C21": 64.5007520381342,
+          "C27": 74.11531407355004
+        },
+        "return_time": 127.61748144690755,
+        "drone_sorties": 3,
+        "delay_square_sum": 858.2115764696972,
+        "operating_cost": 38.0,
+        "shifted_delay_contribution": 0.003763079012410095,
+        "shifted_return_contribution": 0.0037958746183145153,
+        "shifted_cost_contribution": 0.06,
+        "shifted_cost": 0.0675589536307246
+      }
+    ]
+  },
+  "runs": [
+    {
+      "repetition": 1,
+      "accepted": true,
+      "status": "success",
+      "status_code": 9,
+      "objective": 0.14469110917391595,
+      "bound": -0.07993038105430637,
+      "gap": 1.5524208191550426,
+      "node_count": 1578.0,
+      "iteration_count": 455401.0,
+      "first_incumbent_time": 21.378000020980835,
+      "timing": {
+        "model_build_time": 0.29619669914245605,
+        "solve_time": 60.047887563705444,
+        "route_decode_time": 0.0041141510009765625
+      },
+      "route_paths": [
+        [
+          "Source",
+          "C17",
+          "H3",
+          "C9",
+          "H2",
+          "C26",
+          "C15",
+          "C14",
+          "Sink"
+        ],
+        [
+          "Source",
+          "C1",
+          "C20",
+          "C6",
+          "H2",
+          "C18",
+          "Sink"
+        ],
+        [
+          "Source",
+          "C19",
+          "H2",
+          "DUP:C10",
+          "DUP:C16",
+          "DUP:C22",
+          "DUP:C30",
+          "C4",
+          "Sink"
+        ],
+        [
+          "Source",
+          "C13",
+          "C7",
+          "H1",
+          "DUP:C29",
+          "C5",
+          "Sink"
+        ],
+        [
+          "Source",
+          "C11",
+          "C24",
+          "C12",
+          "C28",
+          "Sink"
+        ],
+        [
+          "Source",
+          "C23",
+          "H1",
+          "C25",
+          "C3",
+          "H3",
+          "DUP:C2",
+          "DUP:C8",
+          "DUP:C21",
+          "C27",
+          "Sink"
+        ]
+      ],
+      "validation": {
+        "incumbent_present": true,
+        "valid": true,
+        "route_count": 6,
+        "routes": [
+          {
+            "id": 0,
+            "path": [
+              "Source",
+              "C17",
+              "H3",
+              "C9",
+              "H2",
+              "C26",
+              "C15",
+              "C14",
+              "Sink"
+            ],
+            "truck_path": [
+              "Source",
+              "C17",
+              "H3",
+              "C9",
+              "H2",
+              "C26",
+              "C15",
+              "C14",
+              "Sink"
+            ],
+            "drone_blocks": {},
+            "served": [
+              "C14",
+              "C15",
+              "C17",
+              "C26",
+              "C9"
+            ],
+            "truck_served": [
+              "C14",
+              "C15",
+              "C17",
+              "C26",
+              "C9"
+            ],
+            "service_times": {
+              "C17": 10.419677540392694,
+              "C9": 55.72360189846982,
+              "C26": 83.01183421123865,
+              "C15": 90.49143003551454,
+              "C14": 99.071297168865
+            },
+            "return_time": 152.65974706209457,
+            "drone_sorties": 0,
+            "delay_square_sum": 4538.84569401425,
+            "operating_cost": 20.0,
+            "shifted_delay_contribution": 0.019901893006352422,
+            "shifted_return_contribution": 0.004540735740443189,
+            "shifted_cost_contribution": 0.031578947368421054,
+            "shifted_cost": 0.056021576115216666
+          },
+          {
+            "id": 1,
+            "path": [
+              "Source",
+              "C1",
+              "C20",
+              "C6",
+              "H2",
+              "C18",
+              "Sink"
+            ],
+            "truck_path": [
+              "Source",
+              "C1",
+              "C20",
+              "C6",
+              "H2",
+              "C18",
+              "Sink"
+            ],
+            "drone_blocks": {},
+            "served": [
+              "C1",
+              "C18",
+              "C20",
+              "C6"
+            ],
+            "truck_served": [
+              "C1",
+              "C18",
+              "C20",
+              "C6"
+            ],
+            "service_times": {
+              "C1": 19.364946558756394,
+              "C20": 51.910314390808175,
+              "C6": 62.80273089893452,
+              "C18": 70.17765329452907
+            },
+            "return_time": 108.3646367280573,
+            "drone_sorties": 0,
+            "delay_square_sum": 1497.9819077015602,
+            "operating_cost": 20.0,
+            "shifted_delay_contribution": 0.006568338661929966,
+            "shifted_return_contribution": 0.0032232149499834316,
+            "shifted_cost_contribution": 0.031578947368421054,
+            "shifted_cost": 0.04137050098033445
+          },
+          {
+            "id": 2,
+            "path": [
+              "Source",
+              "C19",
+              "H2",
+              "DUP:C10",
+              "DUP:C16",
+              "DUP:C22",
+              "DUP:C30",
+              "C4",
+              "Sink"
+            ],
+            "truck_path": [
+              "Source",
+              "C19",
+              "H2",
+              "C4",
+              "Sink"
+            ],
+            "drone_blocks": {
+              "H2": [
+                "C10",
+                "C16",
+                "C22",
+                "C30"
+              ]
+            },
+            "served": [
+              "C10",
+              "C16",
+              "C19",
+              "C22",
+              "C30",
+              "C4"
+            ],
+            "truck_served": [
+              "C19",
+              "C4"
+            ],
+            "service_times": {
+              "C19": 19.67895566066943,
+              "C10": 45.05161517566293,
+              "C16": 46.213626055148865,
+              "C22": 45.18235071151168,
+              "C30": 46.75846121637378,
+              "C4": 56.60299388412228
+            },
+            "return_time": 102.01739108877081,
+            "drone_sorties": 4,
+            "delay_square_sum": 194.52538514242792,
+            "operating_cost": 44.0,
+            "shifted_delay_contribution": 0.0008529532976257958,
+            "shifted_return_contribution": 0.0030344214685167205,
+            "shifted_cost_contribution": 0.06947368421052631,
+            "shifted_cost": 0.07336105897666884
+          },
+          {
+            "id": 3,
+            "path": [
+              "Source",
+              "C13",
+              "C7",
+              "H1",
+              "DUP:C29",
+              "C5",
+              "Sink"
+            ],
+            "truck_path": [
+              "Source",
+              "C13",
+              "C7",
+              "H1",
+              "C5",
+              "Sink"
+            ],
+            "drone_blocks": {
+              "H1": [
+                "C29"
+              ]
+            },
+            "served": [
+              "C13",
+              "C29",
+              "C5",
+              "C7"
+            ],
+            "truck_served": [
+              "C13",
+              "C5",
+              "C7"
+            ],
+            "service_times": {
+              "C13": 18.9577058257506,
+              "C7": 22.568635769843258,
+              "C29": 32.8016607135611,
+              "C5": 41.28768780434019
+            },
+            "return_time": 53.384270489012366,
+            "drone_sorties": 1,
+            "delay_square_sum": 1200.8285260892699,
+            "operating_cost": 26.0,
+            "shifted_delay_contribution": 0.005265382975394338,
+            "shifted_return_contribution": 0.0015878702123641468,
+            "shifted_cost_contribution": 0.04105263157894737,
+            "shifted_cost": 0.047905884766705854
+          },
+          {
+            "id": 4,
+            "path": [
+              "Source",
+              "C11",
+              "C24",
+              "C12",
+              "C28",
+              "Sink"
+            ],
+            "truck_path": [
+              "Source",
+              "C11",
+              "C24",
+              "C12",
+              "C28",
+              "Sink"
+            ],
+            "drone_blocks": {},
+            "served": [
+              "C11",
+              "C12",
+              "C24",
+              "C28"
+            ],
+            "truck_served": [
+              "C11",
+              "C12",
+              "C24",
+              "C28"
+            ],
+            "service_times": {
+              "C11": 9.055390916829296,
+              "C24": 38.356862603909335,
+              "C12": 39.319017570203414,
+              "C28": 46.45969724566466
+            },
+            "return_time": 90.42794972917704,
+            "drone_sorties": 0,
+            "delay_square_sum": 9.91026571951346,
+            "operating_cost": 20.0,
+            "shifted_delay_contribution": 4.345445104564506e-05,
+            "shifted_return_contribution": 0.002689703285721142,
+            "shifted_cost_contribution": 0.031578947368421054,
+            "shifted_cost": 0.03431210510518784
+          },
+          {
+            "id": 5,
+            "path": [
+              "Source",
+              "C23",
+              "H1",
+              "C25",
+              "C3",
+              "H3",
+              "DUP:C2",
+              "DUP:C8",
+              "DUP:C21",
+              "C27",
+              "Sink"
+            ],
+            "truck_path": [
+              "Source",
+              "C23",
+              "H1",
+              "C25",
+              "C3",
+              "H3",
+              "C27",
+              "Sink"
+            ],
+            "drone_blocks": {
+              "H3": [
+                "C2",
+                "C8",
+                "C21"
+              ]
+            },
+            "served": [
+              "C2",
+              "C21",
+              "C23",
+              "C25",
+              "C27",
+              "C3",
+              "C8"
+            ],
+            "truck_served": [
+              "C23",
+              "C25",
+              "C27",
+              "C3"
+            ],
+            "service_times": {
+              "C23": 10.345909928160658,
+              "C25": 22.733344549458966,
+              "C3": 58.63657975462661,
+              "C2": 65.64617610960683,
+              "C8": 66.39068381974084,
+              "C21": 64.5007520381342,
+              "C27": 74.11531407355004
+            },
+            "return_time": 127.61748144690755,
+            "drone_sorties": 3,
+            "delay_square_sum": 858.2115764696972,
+            "operating_cost": 38.0,
+            "shifted_delay_contribution": 0.003763079012410095,
+            "shifted_return_contribution": 0.0037958746183145153,
+            "shifted_cost_contribution": 0.06,
+            "shifted_cost": 0.0675589536307246
+          }
+        ]
+      }
+    },
+    {
+      "repetition": 2,
+      "accepted": true,
+      "status": "success",
+      "status_code": 9,
+      "objective": 0.14469110917391595,
+      "bound": -0.07991882538551989,
+      "gap": 1.552340954753889,
+      "node_count": 1582.0,
+      "iteration_count": 466389.0,
+      "first_incumbent_time": 21.5310001373291,
+      "timing": {
+        "model_build_time": 0.22529149055480957,
+        "solve_time": 60.05256390571594,
+        "route_decode_time": 0.003514528274536133
+      },
+      "route_paths": [
+        [
+          "Source",
+          "C17",
+          "H3",
+          "C9",
+          "H2",
+          "C26",
+          "C15",
+          "C14",
+          "Sink"
+        ],
+        [
+          "Source",
+          "C1",
+          "C20",
+          "C6",
+          "H2",
+          "C18",
+          "Sink"
+        ],
+        [
+          "Source",
+          "C19",
+          "H2",
+          "DUP:C10",
+          "DUP:C16",
+          "DUP:C22",
+          "DUP:C30",
+          "C4",
+          "Sink"
+        ],
+        [
+          "Source",
+          "C13",
+          "C7",
+          "H1",
+          "DUP:C29",
+          "C5",
+          "Sink"
+        ],
+        [
+          "Source",
+          "C11",
+          "C24",
+          "C12",
+          "C28",
+          "Sink"
+        ],
+        [
+          "Source",
+          "C23",
+          "H1",
+          "C25",
+          "C3",
+          "H3",
+          "DUP:C2",
+          "DUP:C8",
+          "DUP:C21",
+          "C27",
+          "Sink"
+        ]
+      ],
+      "validation": {
+        "incumbent_present": true,
+        "valid": true,
+        "route_count": 6,
+        "routes": [
+          {
+            "id": 0,
+            "path": [
+              "Source",
+              "C17",
+              "H3",
+              "C9",
+              "H2",
+              "C26",
+              "C15",
+              "C14",
+              "Sink"
+            ],
+            "truck_path": [
+              "Source",
+              "C17",
+              "H3",
+              "C9",
+              "H2",
+              "C26",
+              "C15",
+              "C14",
+              "Sink"
+            ],
+            "drone_blocks": {},
+            "served": [
+              "C14",
+              "C15",
+              "C17",
+              "C26",
+              "C9"
+            ],
+            "truck_served": [
+              "C14",
+              "C15",
+              "C17",
+              "C26",
+              "C9"
+            ],
+            "service_times": {
+              "C17": 10.419677540392694,
+              "C9": 55.72360189846982,
+              "C26": 83.01183421123865,
+              "C15": 90.49143003551454,
+              "C14": 99.071297168865
+            },
+            "return_time": 152.65974706209457,
+            "drone_sorties": 0,
+            "delay_square_sum": 4538.84569401425,
+            "operating_cost": 20.0,
+            "shifted_delay_contribution": 0.019901893006352422,
+            "shifted_return_contribution": 0.004540735740443189,
+            "shifted_cost_contribution": 0.031578947368421054,
+            "shifted_cost": 0.056021576115216666
+          },
+          {
+            "id": 1,
+            "path": [
+              "Source",
+              "C1",
+              "C20",
+              "C6",
+              "H2",
+              "C18",
+              "Sink"
+            ],
+            "truck_path": [
+              "Source",
+              "C1",
+              "C20",
+              "C6",
+              "H2",
+              "C18",
+              "Sink"
+            ],
+            "drone_blocks": {},
+            "served": [
+              "C1",
+              "C18",
+              "C20",
+              "C6"
+            ],
+            "truck_served": [
+              "C1",
+              "C18",
+              "C20",
+              "C6"
+            ],
+            "service_times": {
+              "C1": 19.364946558756394,
+              "C20": 51.910314390808175,
+              "C6": 62.80273089893452,
+              "C18": 70.17765329452907
+            },
+            "return_time": 108.3646367280573,
+            "drone_sorties": 0,
+            "delay_square_sum": 1497.9819077015602,
+            "operating_cost": 20.0,
+            "shifted_delay_contribution": 0.006568338661929966,
+            "shifted_return_contribution": 0.0032232149499834316,
+            "shifted_cost_contribution": 0.031578947368421054,
+            "shifted_cost": 0.04137050098033445
+          },
+          {
+            "id": 2,
+            "path": [
+              "Source",
+              "C19",
+              "H2",
+              "DUP:C10",
+              "DUP:C16",
+              "DUP:C22",
+              "DUP:C30",
+              "C4",
+              "Sink"
+            ],
+            "truck_path": [
+              "Source",
+              "C19",
+              "H2",
+              "C4",
+              "Sink"
+            ],
+            "drone_blocks": {
+              "H2": [
+                "C10",
+                "C16",
+                "C22",
+                "C30"
+              ]
+            },
+            "served": [
+              "C10",
+              "C16",
+              "C19",
+              "C22",
+              "C30",
+              "C4"
+            ],
+            "truck_served": [
+              "C19",
+              "C4"
+            ],
+            "service_times": {
+              "C19": 19.67895566066943,
+              "C10": 45.05161517566293,
+              "C16": 46.213626055148865,
+              "C22": 45.18235071151168,
+              "C30": 46.75846121637378,
+              "C4": 56.60299388412228
+            },
+            "return_time": 102.01739108877081,
+            "drone_sorties": 4,
+            "delay_square_sum": 194.52538514242792,
+            "operating_cost": 44.0,
+            "shifted_delay_contribution": 0.0008529532976257958,
+            "shifted_return_contribution": 0.0030344214685167205,
+            "shifted_cost_contribution": 0.06947368421052631,
+            "shifted_cost": 0.07336105897666884
+          },
+          {
+            "id": 3,
+            "path": [
+              "Source",
+              "C13",
+              "C7",
+              "H1",
+              "DUP:C29",
+              "C5",
+              "Sink"
+            ],
+            "truck_path": [
+              "Source",
+              "C13",
+              "C7",
+              "H1",
+              "C5",
+              "Sink"
+            ],
+            "drone_blocks": {
+              "H1": [
+                "C29"
+              ]
+            },
+            "served": [
+              "C13",
+              "C29",
+              "C5",
+              "C7"
+            ],
+            "truck_served": [
+              "C13",
+              "C5",
+              "C7"
+            ],
+            "service_times": {
+              "C13": 18.9577058257506,
+              "C7": 22.568635769843258,
+              "C29": 32.8016607135611,
+              "C5": 41.28768780434019
+            },
+            "return_time": 53.384270489012366,
+            "drone_sorties": 1,
+            "delay_square_sum": 1200.8285260892699,
+            "operating_cost": 26.0,
+            "shifted_delay_contribution": 0.005265382975394338,
+            "shifted_return_contribution": 0.0015878702123641468,
+            "shifted_cost_contribution": 0.04105263157894737,
+            "shifted_cost": 0.047905884766705854
+          },
+          {
+            "id": 4,
+            "path": [
+              "Source",
+              "C11",
+              "C24",
+              "C12",
+              "C28",
+              "Sink"
+            ],
+            "truck_path": [
+              "Source",
+              "C11",
+              "C24",
+              "C12",
+              "C28",
+              "Sink"
+            ],
+            "drone_blocks": {},
+            "served": [
+              "C11",
+              "C12",
+              "C24",
+              "C28"
+            ],
+            "truck_served": [
+              "C11",
+              "C12",
+              "C24",
+              "C28"
+            ],
+            "service_times": {
+              "C11": 9.055390916829296,
+              "C24": 38.356862603909335,
+              "C12": 39.319017570203414,
+              "C28": 46.45969724566466
+            },
+            "return_time": 90.42794972917704,
+            "drone_sorties": 0,
+            "delay_square_sum": 9.91026571951346,
+            "operating_cost": 20.0,
+            "shifted_delay_contribution": 4.345445104564506e-05,
+            "shifted_return_contribution": 0.002689703285721142,
+            "shifted_cost_contribution": 0.031578947368421054,
+            "shifted_cost": 0.03431210510518784
+          },
+          {
+            "id": 5,
+            "path": [
+              "Source",
+              "C23",
+              "H1",
+              "C25",
+              "C3",
+              "H3",
+              "DUP:C2",
+              "DUP:C8",
+              "DUP:C21",
+              "C27",
+              "Sink"
+            ],
+            "truck_path": [
+              "Source",
+              "C23",
+              "H1",
+              "C25",
+              "C3",
+              "H3",
+              "C27",
+              "Sink"
+            ],
+            "drone_blocks": {
+              "H3": [
+                "C2",
+                "C8",
+                "C21"
+              ]
+            },
+            "served": [
+              "C2",
+              "C21",
+              "C23",
+              "C25",
+              "C27",
+              "C3",
+              "C8"
+            ],
+            "truck_served": [
+              "C23",
+              "C25",
+              "C27",
+              "C3"
+            ],
+            "service_times": {
+              "C23": 10.345909928160658,
+              "C25": 22.733344549458966,
+              "C3": 58.63657975462661,
+              "C2": 65.64617610960683,
+              "C8": 66.39068381974084,
+              "C21": 64.5007520381342,
+              "C27": 74.11531407355004
+            },
+            "return_time": 127.61748144690755,
+            "drone_sorties": 3,
+            "delay_square_sum": 858.2115764696972,
+            "operating_cost": 38.0,
+            "shifted_delay_contribution": 0.003763079012410095,
+            "shifted_return_contribution": 0.0037958746183145153,
+            "shifted_cost_contribution": 0.06,
+            "shifted_cost": 0.0675589536307246
+          }
+        ]
+      }
+    }
+  ]
+}

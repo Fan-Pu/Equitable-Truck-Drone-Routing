@@ -1,0 +1,26 @@
+{
+  "reported_cases": [
+    "medium_PC_seed5",
+    "medium_PC_seed6",
+    "medium_PC_seed7",
+    "medium_PC_seed8",
+    "medium_PS_seed1",
+    "medium_PS_seed2",
+    "medium_PS_seed3",
+    "medium_PS_seed4",
+    "pilot15_PC_seed105",
+    "pilot15_PC_seed106",
+    "pilot15_PS_seed101",
+    "pilot15_PS_seed102",
+    "pilot20_PC_seed105",
+    "pilot20_PC_seed106",
+    "pilot20_PS_seed101",
+    "pilot20_PS_seed102",
+    "pilot25_PC_seed105",
+    "pilot25_PC_seed106",
+    "pilot25_PS_seed101",
+    "pilot25_PS_seed102"
+  ],
+  "updated_at": "2026-09-01 01:13:16 -05:00",
+  "campaign_complete": true
+}

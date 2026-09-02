@@ -1,0 +1,15 @@
+{
+  "case_id": "large_PC_seed6",
+  "solver": "compact",
+  "attempt": "attempt_001",
+  "started_at": "2026-08-30 23:37:24",
+  "ended_at": "2026-08-31 00:07:26",
+  "exit_code": 0,
+  "completed": true,
+  "instance_snapshot_sha256": "e2a1da8bdbd667b02a19098ba3bc8e83efdafec7ef8f184ffb38b64bf3b06b2e",
+  "instance_snapshot_verified": true,
+  "result_file": "D:\\GitHub\\Equitable-Truck-Drone-Routing\\numerical_experiments\\large_dense400_indices2_8_bpc_compact_1800s_campaign\\cases\\large_PC_seed6\\compact\\attempt_001\\compact-arc-seed=6.json",
+  "stdout_file": "D:\\GitHub\\Equitable-Truck-Drone-Routing\\numerical_experiments\\large_dense400_indices2_8_bpc_compact_1800s_campaign\\cases\\large_PC_seed6\\compact\\attempt_001\\runner_stdout.log",
+  "stderr_file": "D:\\GitHub\\Equitable-Truck-Drone-Routing\\numerical_experiments\\large_dense400_indices2_8_bpc_compact_1800s_campaign\\cases\\large_PC_seed6\\compact\\attempt_001\\runner_stderr.log",
+  "resource_usage_file": "D:\\GitHub\\Equitable-Truck-Drone-Routing\\numerical_experiments\\large_dense400_indices2_8_bpc_compact_1800s_campaign\\cases\\large_PC_seed6\\compact\\attempt_001\\resource_usage.json"
+}

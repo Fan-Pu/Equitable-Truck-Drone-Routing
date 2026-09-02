@@ -1,0 +1,12 @@
+{
+  "sample_period_seconds": 1.0,
+  "wall_runtime_seconds": 75.55954647064209,
+  "aggregate_process_tree_cpu_seconds": 638.9375,
+  "mean_core_equivalent": 8.456079077291085,
+  "mean_cpu_percent_of_logical_machine": 70.46732564409237,
+  "peak_interval_core_equivalent": 11.548880008006801,
+  "peak_process_count": 13,
+  "peak_rss_bytes": 792023040,
+  "logical_cpu_count": 12,
+  "samples_file": "D:\\GitHub\\Equitable-Truck-Drone-Routing\\numerical_experiments\\medium_crossover_pilot_final_campaign\\pilot_n20\\cases\\pilot20_PC_seed106\\bpc\\attempt_001\\resource_samples.jsonl"
+}

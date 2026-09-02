@@ -1,0 +1,24 @@
+{
+  "executable": "D:\\ProgramData\\anaconda3\\python.exe",
+  "arguments": [
+    "-m",
+    "thvrpd.dense_multiscale_campaign",
+    "--output-dir",
+    "numerical_experiments\\small_medium_dense16_bpc_compact_1800s_campaign",
+    "--gurobi-python-path",
+    "D:\\gurobi1201\\win64\\python311\\lib",
+    "--time-limit",
+    "1800",
+    "--threads",
+    "0",
+    "--truck-arc-probability",
+    "0.10",
+    "--hub-arc-probability",
+    "0.30"
+  ],
+  "working_directory": "D:\\GitHub\\Equitable-Truck-Drone-Routing",
+  "pid": 35332,
+  "started_at": "2026-08-31 16:22:56 -05:00",
+  "stdout": "D:\\GitHub\\Equitable-Truck-Drone-Routing\\numerical_experiments\\small_medium_dense16_bpc_compact_1800s_campaign\\campaign_background_stdout.log",
+  "stderr": "D:\\GitHub\\Equitable-Truck-Drone-Routing\\numerical_experiments\\small_medium_dense16_bpc_compact_1800s_campaign\\campaign_background_stderr.log"
+}

@@ -1,8 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from math import ceil, hypot, isclose, isfinite
+from dataclasses import asdict, dataclass, field, replace
+from hashlib import sha256
+import json
+from math import ceil, hypot, inf, isclose, isfinite
+from pathlib import Path
 import random
+import time
+from typing import Callable
 
 import networkx as nx
 import numpy as np
@@ -13,6 +18,238 @@ from .config import InstanceConfig
 Node = str
 Arc = tuple[Node, Node]
 CAPACITY_TOLERANCE = 1e-9
+LOCATION_OVERLAP_TOLERANCE = 1e-9
+INSTANCE_SNAPSHOT_SCHEMA_VERSION = 1
+
+
+class GeographicOverlapError(ValueError):
+    pass
+
+
+@dataclass(frozen=True)
+class InstanceAcceptanceResult:
+    accepted: bool
+    status: str
+    diagnostics: dict[str, object]
+
+
+def write_instance_snapshot(instance: "InstanceData", path: Path) -> str:
+    if path.exists():
+        raise FileExistsError(f"instance snapshot already exists: {path}")
+    payload = _instance_snapshot_payload(instance)
+    digest = _instance_snapshot_digest(payload)
+    document = {**payload, "sha256": digest}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(document, sort_keys=True, indent=2, allow_nan=False), encoding="utf-8")
+    return digest
+
+
+def read_instance_snapshot(path: Path, expected_sha256: str | None = None) -> tuple["InstanceData", str]:
+    document = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(document, dict):
+        raise ValueError("instance snapshot must contain a JSON object")
+    schema_version = document.get("schema_version")
+    if schema_version != INSTANCE_SNAPSHOT_SCHEMA_VERSION:
+        raise ValueError(f"unsupported instance snapshot schema version: {schema_version}")
+    if not isinstance(document.get("instance"), dict):
+        raise ValueError("instance snapshot is missing the instance payload")
+    recorded_digest = document.get("sha256")
+    if not isinstance(recorded_digest, str):
+        raise ValueError("instance snapshot is missing its SHA-256 digest")
+    payload = {
+        "schema_version": schema_version,
+        "instance": document["instance"],
+    }
+    actual_digest = _instance_snapshot_digest(payload)
+    if recorded_digest != actual_digest:
+        raise ValueError(f"instance snapshot SHA-256 mismatch: {recorded_digest} != {actual_digest}")
+    if expected_sha256 is not None and actual_digest != expected_sha256:
+        raise ValueError(f"instance snapshot does not match expected SHA-256: {actual_digest} != {expected_sha256}")
+    return _instance_from_snapshot_record(document["instance"]), actual_digest
+
+
+def validate_instance_case(
+    instance: "InstanceData",
+    *,
+    requested_seed: int,
+    num_trucks: int,
+    num_customers: int,
+    num_hubs: int,
+    distribution: str,
+    drones_per_truck: int,
+    expected_config: InstanceConfig | None = None,
+) -> None:
+    actual_requested_seed = instance.requested_seed if instance.requested_seed is not None else instance.config.seed
+    expected = (
+        requested_seed,
+        num_trucks,
+        num_customers,
+        num_hubs,
+        distribution,
+        drones_per_truck,
+    )
+    actual = (
+        actual_requested_seed,
+        instance.num_trucks,
+        len(instance.customers),
+        len(instance.hubs),
+        instance.config.distribution,
+        instance.drones_per_truck,
+    )
+    if actual != expected:
+        raise ValueError(f"instance snapshot case mismatch: expected {expected}, found {actual}")
+    if expected_config is not None:
+        expected_config_record = asdict(expected_config)
+        actual_config_record = asdict(instance.config)
+        expected_config_record.pop("seed")
+        actual_config_record.pop("seed")
+        if actual_config_record != expected_config_record:
+            raise ValueError(
+                f"instance snapshot configuration mismatch: expected {expected_config_record}, "
+                f"found {actual_config_record}"
+            )
+
+
+def _instance_snapshot_payload(instance: "InstanceData") -> dict[str, object]:
+    return {
+        "schema_version": INSTANCE_SNAPSHOT_SCHEMA_VERSION,
+        "instance": {
+            "config": asdict(instance.config),
+            "depot_source": instance.depot_source,
+            "depot_sink": instance.depot_sink,
+            "customers": list(instance.customers),
+            "hubs": list(instance.hubs),
+            "nodes": list(instance.nodes),
+            "truck_arcs": [list(arc) for arc in sorted(instance.truck_arcs)],
+            "drone_arcs": [list(arc) for arc in sorted(instance.drone_arcs)],
+            "truck_time": _arc_value_records(instance.truck_time),
+            "drone_time": _arc_value_records(instance.drone_time),
+            "drone_trip_time": _arc_value_records(instance.drone_trip_time),
+            "demand": {node: value for node, value in sorted(instance.demand.items())},
+            "locations": {node: list(value) for node, value in sorted(instance.locations.items())},
+            "mandatory_drone_customers": list(instance.mandatory_drone_customers),
+            "drone_arc_saving": [
+                {"arc": list(arc), "value": _encode_snapshot_float(value)}
+                for arc, value in sorted(instance.drone_arc_saving.items())
+            ],
+            "requested_seed": instance.requested_seed,
+            "generation_attempt": instance.generation_attempt,
+            "generation_feasibility_time": instance.generation_feasibility_time,
+            "generation_feasibility_diagnostics": list(instance.generation_feasibility_diagnostics),
+        },
+    }
+
+
+def _instance_snapshot_digest(payload: dict[str, object]) -> str:
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def instance_physical_fingerprint(instance: "InstanceData") -> str:
+    record = dict(_instance_snapshot_payload(instance)["instance"])
+    for field_name in (
+        "requested_seed",
+        "generation_attempt",
+        "generation_feasibility_time",
+        "generation_feasibility_diagnostics",
+    ):
+        record.pop(field_name, None)
+    canonical = json.dumps(record, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _arc_value_records(values: dict[Arc, float]) -> list[dict[str, object]]:
+    return [
+        {"arc": list(arc), "value": _encode_snapshot_float(value)}
+        for arc, value in sorted(values.items())
+    ]
+
+
+def _encode_snapshot_float(value: float) -> float | str:
+    if value == inf:
+        return "Infinity"
+    if value == -inf:
+        return "-Infinity"
+    if not isfinite(value):
+        raise ValueError("instance snapshot cannot encode NaN")
+    return float(value)
+
+
+def _decode_snapshot_float(value: object) -> float:
+    if value == "Infinity":
+        return inf
+    if value == "-Infinity":
+        return -inf
+    if not isinstance(value, (int, float)):
+        raise ValueError(f"invalid numeric value in instance snapshot: {value}")
+    result = float(value)
+    if not isfinite(result):
+        raise ValueError(f"nonfinite numeric value in instance snapshot: {value}")
+    return result
+
+
+def _arc_values_from_records(records: object) -> dict[Arc, float]:
+    if not isinstance(records, list):
+        raise ValueError("instance snapshot arc values must be a list")
+    values: dict[Arc, float] = {}
+    for record in records:
+        if not isinstance(record, dict) or not isinstance(record.get("arc"), list) or len(record["arc"]) != 2:
+            raise ValueError("invalid arc-value record in instance snapshot")
+        arc = (str(record["arc"][0]), str(record["arc"][1]))
+        if arc in values:
+            raise ValueError(f"duplicate arc-value record in instance snapshot: {arc}")
+        values[arc] = _decode_snapshot_float(record.get("value"))
+    return values
+
+
+def _instance_from_snapshot_record(record: dict[str, object]) -> "InstanceData":
+    config_record = record.get("config")
+    if not isinstance(config_record, dict):
+        raise ValueError("instance snapshot is missing InstanceConfig")
+    config = InstanceConfig(**config_record)
+    drone_saving_records = record.get("drone_arc_saving")
+    if not isinstance(drone_saving_records, list):
+        raise ValueError("instance snapshot drone_arc_saving must be a list")
+    drone_arc_saving: dict[Arc, float] = {}
+    for saving_record in drone_saving_records:
+        if (
+            not isinstance(saving_record, dict)
+            or not isinstance(saving_record.get("arc"), list)
+            or len(saving_record["arc"]) != 2
+        ):
+            raise ValueError("invalid drone-arc-saving record in instance snapshot")
+        arc = (str(saving_record["arc"][0]), str(saving_record["arc"][1]))
+        if arc in drone_arc_saving:
+            raise ValueError(f"duplicate drone-arc-saving record in instance snapshot: {arc}")
+        drone_arc_saving[arc] = _decode_snapshot_float(saving_record.get("value"))
+    locations_record = record.get("locations")
+    demand_record = record.get("demand")
+    if not isinstance(locations_record, dict) or not isinstance(demand_record, dict):
+        raise ValueError("instance snapshot is missing locations or demand")
+    return InstanceData(
+        config=config,
+        depot_source=str(record["depot_source"]),
+        depot_sink=str(record["depot_sink"]),
+        customers=tuple(map(str, record["customers"])),
+        hubs=tuple(map(str, record["hubs"])),
+        nodes=tuple(map(str, record["nodes"])),
+        truck_arcs=frozenset((str(arc[0]), str(arc[1])) for arc in record["truck_arcs"]),
+        drone_arcs=frozenset((str(arc[0]), str(arc[1])) for arc in record["drone_arcs"]),
+        truck_time=_arc_values_from_records(record["truck_time"]),
+        drone_time=_arc_values_from_records(record["drone_time"]),
+        drone_trip_time=_arc_values_from_records(record["drone_trip_time"]),
+        demand={str(node): _decode_snapshot_float(value) for node, value in demand_record.items()},
+        locations={
+            str(node): (_decode_snapshot_float(value[0]), _decode_snapshot_float(value[1]))
+            for node, value in locations_record.items()
+        },
+        mandatory_drone_customers=tuple(map(str, record.get("mandatory_drone_customers", []))),
+        drone_arc_saving=drone_arc_saving,
+        requested_seed=None if record.get("requested_seed") is None else int(record["requested_seed"]),
+        generation_attempt=int(record.get("generation_attempt", 0)),
+        generation_feasibility_time=float(record.get("generation_feasibility_time", 0.0)),
+        generation_feasibility_diagnostics=tuple(record.get("generation_feasibility_diagnostics", [])),
+    )
 
 
 @dataclass(frozen=True)
@@ -32,8 +269,10 @@ class InstanceData:
     locations: dict[Node, tuple[float, float]]
     mandatory_drone_customers: tuple[Node, ...] = ()
     drone_arc_saving: dict[Arc, float] = field(default_factory=dict)
-    witness_routes: tuple[tuple[Node, ...], ...] = ()
-    witness_route_drone_blocks: tuple[tuple[tuple[Node, tuple[Node, ...]], ...], ...] = ()
+    requested_seed: int | None = None
+    generation_attempt: int = 0
+    generation_feasibility_time: float = 0.0
+    generation_feasibility_diagnostics: tuple[dict[str, object], ...] = ()
 
     def __post_init__(self) -> None:
         physical = set(self.customers) | set(self.hubs)
@@ -45,6 +284,7 @@ class InstanceData:
             raise ValueError("depot copies must be disjoint from customers and pads")
         if set(self.nodes) != {self.depot_source, self.depot_sink} | physical:
             raise ValueError("node set must equal depot copies, customers, and pads")
+        self._validate_geographic_locations()
         if self.truck_payload <= 0.0 or self.drone_payload <= 0.0 or self.drone_endurance <= 0.0:
             raise ValueError("truck payload, drone payload, and drone endurance must be positive")
         if self.truck_cost < 0.0 or self.drone_cost < 0.0:
@@ -107,6 +347,38 @@ class InstanceData:
                 if not any((hub, customer) in self.drone_arcs for hub in self.hubs):
                     raise ValueError(f"mandatory drone customer has no retained drone arc: {customer}")
 
+    def _validate_geographic_locations(self) -> None:
+        for node in self.nodes:
+            if node not in self.locations:
+                raise ValueError(f"missing geographic location for node {node}")
+            coordinate = self.locations[node]
+            if not isinstance(coordinate, (tuple, list)) or len(coordinate) != 2:
+                raise ValueError(f"node location must be a two-dimensional coordinate: {node}")
+            if not all(isfinite(float(value)) for value in coordinate):
+                raise ValueError(f"node location must be finite: {node}")
+
+        source_location = self.locations[self.depot_source]
+        sink_location = self.locations[self.depot_sink]
+        if hypot(
+            source_location[0] - sink_location[0],
+            source_location[1] - sink_location[1],
+        ) > LOCATION_OVERLAP_TOLERANCE:
+            raise ValueError("source and sink depot copies must be geographically colocated")
+
+        physical_sites = (self.depot_source, *self.customers, *self.hubs)
+        for index, left in enumerate(physical_sites):
+            left_location = self.locations[left]
+            for right in physical_sites[index + 1 :]:
+                right_location = self.locations[right]
+                if hypot(
+                    left_location[0] - right_location[0],
+                    left_location[1] - right_location[1],
+                ) <= LOCATION_OVERLAP_TOLERANCE:
+                    raise GeographicOverlapError(
+                        f"geographic node overlap between {left} at {left_location} "
+                        f"and {right} at {right_location}"
+                    )
+
     @property
     def truck_payload(self) -> float:
         return self.config.truck_payload
@@ -160,7 +432,99 @@ class InstanceData:
                 raise ValueError(f"customer has no feasible service representation: {customer}")
 
 
-def generate_instance(config: InstanceConfig) -> InstanceData:
+def generate_instance(
+    config: InstanceConfig,
+    *,
+    post_feasibility_acceptance: Callable[
+        [InstanceData, int, int], InstanceAcceptanceResult
+    ]
+    | None = None,
+    start_attempt: int = 0,
+    prior_feasibility_time: float = 0.0,
+    prior_feasibility_diagnostics: tuple[dict[str, object], ...] = (),
+) -> InstanceData:
+    requested_seed = config.seed
+    attempt = start_attempt
+    feasibility_time = prior_feasibility_time
+    feasibility_diagnostics = list(prior_feasibility_diagnostics)
+    while True:
+        realized_seed = requested_seed + attempt * 1_000_003
+        candidate_config = replace(config, seed=realized_seed)
+        try:
+            candidate = generate_candidate(candidate_config)
+        except GeographicOverlapError as exc:
+            feasibility_diagnostics.append(
+                {
+                    "attempt": attempt,
+                    "realized_seed": realized_seed,
+                    "status": "candidate_rejected",
+                    "witness": str(exc),
+                }
+            )
+            attempt += 1
+            continue
+        except ValueError as exc:
+            rejection = str(exc)
+            if not (
+                rejection.startswith("not enough drone-feasible customers")
+                or rejection.startswith("customer has no feasible service representation")
+                or rejection.startswith("aggregate customer demand exceeds total truck payload")
+            ):
+                raise
+            feasibility_diagnostics.append(
+                {
+                    "attempt": attempt,
+                    "realized_seed": realized_seed,
+                    "status": "candidate_rejected",
+                    "witness": rejection,
+                }
+            )
+            attempt += 1
+            continue
+        from .repair import discover_or_repair_instance
+
+        check_start = time.time()
+        result = discover_or_repair_instance(candidate)
+        record = {
+            "attempt": attempt,
+            "realized_seed": realized_seed,
+            "status": result.status,
+            "feasible": result.feasible,
+            "diagnostics": json.loads(
+                json.dumps(asdict(result.diagnostics), allow_nan=False)
+            ),
+        }
+        acceptance = None
+        if result.feasible and post_feasibility_acceptance is not None:
+            if result.instance is None:
+                raise RuntimeError("feasible generation result is missing its instance")
+            acceptance = post_feasibility_acceptance(result.instance, attempt, realized_seed)
+            record["post_feasibility_acceptance"] = json.loads(
+                json.dumps(asdict(acceptance), allow_nan=False)
+            )
+        attempt_time = time.time() - check_start
+        feasibility_time += attempt_time
+        record["elapsed_seconds"] = attempt_time
+        feasibility_diagnostics.append(record)
+        if result.feasible:
+            if result.instance is None:
+                raise RuntimeError("feasible generation result is missing its instance")
+            if acceptance is not None and not acceptance.accepted:
+                attempt += 1
+                continue
+            return replace(
+                result.instance,
+                requested_seed=requested_seed,
+                generation_attempt=attempt,
+                generation_feasibility_time=feasibility_time,
+                generation_feasibility_diagnostics=tuple(feasibility_diagnostics),
+            )
+        if result.status not in {"infeasible_precheck", "unrepairable"}:
+            raise RuntimeError(f"unexpected generation feasibility status {result.status}")
+        attempt += 1
+
+
+def generate_candidate(config: InstanceConfig) -> InstanceData:
     rng = random.Random(config.seed)
     np_rng = np.random.default_rng(config.seed)
     depot_source = "Source"
@@ -226,8 +590,6 @@ def generate_instance(config: InstanceConfig) -> InstanceData:
         drone_trip_time,
         mandatory_drone_customers,
         drone_arc_saving,
-        witness_routes,
-        witness_route_drone_blocks,
     ) = _apply_drone_required_graph_policy(
         config=config,
         depot_source=depot_source,
@@ -259,8 +621,6 @@ def generate_instance(config: InstanceConfig) -> InstanceData:
         locations=locations,
         mandatory_drone_customers=mandatory_drone_customers,
         drone_arc_saving=drone_arc_saving,
-        witness_routes=witness_routes,
-        witness_route_drone_blocks=witness_route_drone_blocks,
     )
 
 
@@ -334,8 +694,11 @@ def _sample_customers(config: InstanceConfig, np_rng: np.random.Generator) -> np
         centers = np_rng.uniform(0.0, config.area_side, size=(k, 2))
         points = []
         for i in range(config.num_customers):
-            point = np_rng.normal(loc=centers[i % k], scale=config.area_side * 0.05, size=2)
-            points.append(np.clip(point, 0.0, config.area_side))
+            while True:
+                point = np_rng.normal(loc=centers[i % k], scale=0.7, size=2)
+                if np.all((0.0 <= point) & (point <= config.area_side)):
+                    points.append(point)
+                    break
         return np.vstack(points)
     n_cluster = config.num_customers // 2
     sparse_config = InstanceConfig(**{**config.__dict__, "num_customers": config.num_customers - n_cluster, "distribution": "PS"})
@@ -365,8 +728,6 @@ def _apply_drone_required_graph_policy(
     dict[Arc, float],
     tuple[Node, ...],
     dict[Arc, float],
-    tuple[tuple[Node, ...], ...],
-    tuple[tuple[tuple[Node, tuple[Node, ...]], ...], ...],
 ]:
     if config.mandatory_drone_customer_fraction <= 0.0:
         saving = _drone_arc_savings(depot_source, customers, hubs, truck_arcs, truck_time, drone_arcs, drone_time)
@@ -378,71 +739,40 @@ def _apply_drone_required_graph_policy(
             drone_trip_time,
             (),
             {arc: saving[arc] for arc in sorted(drone_arcs)},
-            (),
-            (),
         )
 
     savings = _drone_arc_savings(depot_source, customers, hubs, truck_arcs, truck_time, drone_arcs, drone_time)
     mandatory_count = int(ceil(config.mandatory_drone_customer_fraction * len(customers)))
-    hub_slots = {hub: config.max_drone_access_customers_per_hub for hub in hubs}
-    pair_candidates = sorted(
-        (
-            (savings[(hub, customer)], -drone_trip_time[(hub, customer)], hub, customer)
-            for hub, customer in drone_arcs
+    eligible_customers = {
+        customer
+        for _, customer in drone_arcs
+    }
+    ranked_customers = sorted(
+        eligible_customers,
+        key=lambda customer: (
+            -max(savings[(hub, customer)] for hub in hubs if (hub, customer) in drone_arcs),
+            min(drone_trip_time[(hub, customer)] for hub in hubs if (hub, customer) in drone_arcs),
+            customer,
         ),
-        key=lambda item: (-item[0], item[1], item[2], item[3]),
     )
-    protected_hub_for_customer: dict[Node, Node] = {}
-    for _, _, hub, customer in pair_candidates:
-        if len(protected_hub_for_customer) >= mandatory_count:
-            break
-        if customer in protected_hub_for_customer or hub_slots[hub] <= 0:
-            continue
-        protected_hub_for_customer[customer] = hub
-        hub_slots[hub] -= 1
-    if len(protected_hub_for_customer) < mandatory_count:
+    if len(ranked_customers) < mandatory_count:
         raise ValueError(
-            f"not enough hub-capacitated drone-feasible customers for mandatory drone policy: "
-            f"{len(protected_hub_for_customer)} < {mandatory_count}"
+            f"not enough drone-feasible customers for mandatory drone policy: "
+            f"{len(ranked_customers)} < {mandatory_count}"
         )
-    mandatory_drone_customers = tuple(sorted(protected_hub_for_customer))
+    mandatory_drone_customers = tuple(sorted(ranked_customers[:mandatory_count]))
     mandatory_set = set(mandatory_drone_customers)
-    protected_arcs = {(protected_hub_for_customer[customer], customer) for customer in mandatory_drone_customers}
 
     truck_arcs = {arc for arc in truck_arcs if arc[0] not in mandatory_set and arc[1] not in mandatory_set}
     truck_time = {arc: value for arc, value in truck_time.items() if arc in truck_arcs}
-
-    retained_drone_arcs = _retained_drone_arcs(config, customers, hubs, drone_arcs, drone_trip_time, savings, protected_arcs)
-    drone_time = {
-        arc: value
-        for arc, value in drone_time.items()
-        if arc in retained_drone_arcs or (arc[1], arc[0]) in retained_drone_arcs
-    }
-    drone_trip_time = {arc: value for arc, value in drone_trip_time.items() if arc in retained_drone_arcs}
-
-    witness_routes, witness_route_drone_blocks = _build_drone_required_witness(
-        config=config,
-        depot_source=depot_source,
-        depot_sink=depot_sink,
-        customers=customers,
-        hubs=hubs,
-        locations=locations,
-        demand=demand,
-        truck_arcs=truck_arcs,
-        truck_time=truck_time,
-        mandatory_drone_customers=mandatory_drone_customers,
-        protected_hub_for_customer=protected_hub_for_customer,
-    )
     return (
         truck_arcs,
         truck_time,
-        retained_drone_arcs,
+        drone_arcs,
         drone_time,
         drone_trip_time,
         mandatory_drone_customers,
-        {arc: savings[arc] for arc in sorted(retained_drone_arcs)},
-        witness_routes,
-        witness_route_drone_blocks,
+        {arc: savings[arc] for arc in sorted(drone_arcs)},
     )
 
 
@@ -469,152 +799,26 @@ def _drone_arc_savings(
     return savings
 
 
-def _retained_drone_arcs(
-    config: InstanceConfig,
-    customers: tuple[Node, ...],
-    hubs: tuple[Node, ...],
-    drone_arcs: set[Arc],
-    drone_trip_time: dict[Arc, float],
-    savings: dict[Arc, float],
-    protected_arcs: set[Arc],
-) -> set[Arc]:
-    if not config.retain_optional_drone_arcs:
-        return set(protected_arcs)
-    retained = set(protected_arcs)
-    eligible = {
-        arc
-        for arc in drone_arcs
-        if arc in protected_arcs or savings[arc] >= config.min_drone_service_time_saving
-    }
-    for hub in hubs:
-        protected_for_hub = sorted(arc for arc in protected_arcs if arc[0] == hub)
-        retained.update(protected_for_hub)
-        room = config.max_drone_access_customers_per_hub - len(protected_for_hub)
-        if room <= 0:
-            continue
-        optional = sorted(
-            (arc for arc in eligible if arc[0] == hub and arc not in protected_arcs),
-            key=lambda arc: (-savings[arc], drone_trip_time[arc], arc[0], arc[1]),
-        )
-        retained.update(optional[:room])
-    for customer in customers:
-        protected_for_customer = sorted(arc for arc in protected_arcs if arc[1] == customer)
-        retained.update(protected_for_customer)
-        room = config.max_drone_launch_hubs_per_customer - len(protected_for_customer)
-        if room < 0:
-            continue
-        retained_for_customer = sorted(
-            (arc for arc in retained if arc[1] == customer and arc not in protected_arcs),
-            key=lambda arc: (-savings[arc], drone_trip_time[arc], arc[0], arc[1]),
-        )
-        allowed_optional = set(retained_for_customer[:room])
-        retained.difference_update(
-            arc
-            for arc in list(retained)
-            if arc[1] == customer and arc not in protected_arcs and arc not in allowed_optional
-        )
-    if not protected_arcs.issubset(retained):
-        raise ValueError("protected mandatory drone arcs were removed by drone-arc caps")
-    return retained
-
-
-def _build_drone_required_witness(
-    *,
-    config: InstanceConfig,
-    depot_source: Node,
-    depot_sink: Node,
-    customers: tuple[Node, ...],
-    hubs: tuple[Node, ...],
-    locations: dict[Node, tuple[float, float]],
-    demand: dict[Node, float],
-    truck_arcs: set[Arc],
-    truck_time: dict[Arc, float],
-    mandatory_drone_customers: tuple[Node, ...],
-    protected_hub_for_customer: dict[Node, Node],
-) -> tuple[tuple[Node, ...], tuple[tuple[tuple[Node, tuple[Node, ...]], ...], ...]]:
-    groups: list[dict[str, object]] = []
-    mandatory_by_hub = {
-        hub: tuple(customer for customer in mandatory_drone_customers if protected_hub_for_customer[customer] == hub)
-        for hub in hubs
-    }
-    for hub in hubs:
-        customers_for_hub = mandatory_by_hub[hub]
-        for start in range(0, len(customers_for_hub), config.drones_per_truck):
-            block = tuple(customers_for_hub[start:start + config.drones_per_truck])
-            groups.append(
-                {
-                    "physical": [hub],
-                    "drone_blocks": [(hub, block)],
-                    "payload": sum(demand[customer] for customer in block),
-                }
-            )
-    nonmandatory = [customer for customer in customers if customer not in mandatory_drone_customers]
-    for customer in sorted(nonmandatory, key=lambda node: (-demand[node], node)):
-        feasible_groups = [
-            (float(group["payload"]), index)
-            for index, group in enumerate(groups)
-            if float(group["payload"]) + demand[customer] <= config.truck_payload + CAPACITY_TOLERANCE
-        ]
-        if feasible_groups:
-            _, index = min(feasible_groups)
-        else:
-            if len(groups) >= config.num_trucks:
-                raise ValueError("drone-required witness exceeds truck fleet or payload capacity")
-            index = len(groups)
-            groups.append({"physical": [], "drone_blocks": [], "payload": 0.0})
-        group = groups[index]
-        physical = group["physical"]
-        if not isinstance(physical, list):
-            raise TypeError("witness physical path must be a list")
-        physical.append(customer)
-        group["payload"] = float(group["payload"]) + demand[customer]
-    if len(groups) > config.num_trucks:
-        raise ValueError("drone-required witness route count exceeds truck fleet size")
-    witness_routes: list[tuple[Node, ...]] = []
-    witness_route_drone_blocks: list[tuple[tuple[Node, tuple[Node, ...]], ...]] = []
-    for group in groups:
-        physical = tuple(group["physical"])
-        if not physical:
-            continue
-        if float(group["payload"]) > config.truck_payload + CAPACITY_TOLERANCE:
-            raise ValueError("drone-required witness route exceeds truck payload")
-        route_nodes = (depot_source,) + physical + (depot_sink,)
-        for i, j in zip(route_nodes, route_nodes[1:]):
-            _add_truck_arc(config, locations, i, j, truck_arcs, truck_time)
-        witness_routes.append(physical)
-        blocks = group["drone_blocks"]
-        if not isinstance(blocks, list):
-            raise TypeError("witness drone blocks must be a list")
-        witness_route_drone_blocks.append(tuple((hub, tuple(block)) for hub, block in blocks))
-    covered = set()
-    for route in witness_routes:
-        covered.update(customer for customer in route if customer in customers)
-    for blocks in witness_route_drone_blocks:
-        for _, block in blocks:
-            covered.update(block)
-    if covered != set(customers):
-        raise ValueError("drone-required witness does not cover every customer")
-    return tuple(witness_routes), tuple(witness_route_drone_blocks)
-
-
 def instance_generation_metadata(instance: InstanceData) -> dict[str, object]:
     savings = list(instance.drone_arc_saving.values())
-    witness_drone_sorties = sum(len(block) for route_blocks in instance.witness_route_drone_blocks for _, block in route_blocks)
+    launch_pad_counts = {
+        customer: sum((hub, customer) in instance.drone_arcs for hub in instance.hubs)
+        for customer in instance.customers
+    }
     return {
+        "requested_seed": instance.requested_seed,
+        "realized_seed": instance.config.seed,
+        "generation_attempt": instance.generation_attempt,
+        "generation_feasibility_time": instance.generation_feasibility_time,
+        "generation_feasibility_diagnostics": list(instance.generation_feasibility_diagnostics),
         "truck_arcs": len(instance.truck_arcs),
         "drone_arcs": len(instance.drone_arcs),
+        "multi_pad_customer_count": sum(count > 1 for count in launch_pad_counts.values()),
         "mandatory_drone_customers": list(instance.mandatory_drone_customers),
         "mandatory_drone_customer_count": len(instance.mandatory_drone_customers),
         "retained_drone_arc_saving_min": min(savings) if savings else None,
         "retained_drone_arc_saving_mean": sum(savings) / len(savings) if savings else None,
         "retained_drone_arc_saving_max": max(savings) if savings else None,
-        "witness_route_count": len(instance.witness_routes),
-        "witness_drone_sorties": witness_drone_sorties,
-        "witness_routes": [list(route) for route in instance.witness_routes],
-        "witness_route_drone_blocks": [
-            [{"hub": hub, "customers": list(block)} for hub, block in route_blocks]
-            for route_blocks in instance.witness_route_drone_blocks
-        ],
         "retained_drone_arc_savings": [
             {"hub": hub, "customer": customer, "saving": saving}
             for (hub, customer), saving in sorted(instance.drone_arc_saving.items())
@@ -651,16 +855,22 @@ def _sample_demands(
 ) -> dict[Node, float]:
     low_count = int(config.low_demand_customer_ratio * len(customers))
     low_customers = set(rng.sample(list(customers), low_count))
-    low_values = np.clip(
-        np_rng.normal(config.low_demand_weight_mean, config.low_demand_weight_std, size=low_count),
+    low_values = _sample_truncated_normal(
+        np_rng,
+        config.low_demand_weight_mean,
+        config.low_demand_weight_std,
+        low_count,
         config.low_demand_weight_min,
-        None,
+        config.drone_payload,
     )
     high_count = len(customers) - low_count
-    high_values = np.clip(
-        np_rng.normal(config.high_demand_weight_mean, config.high_demand_weight_std, size=high_count),
+    high_values = _sample_truncated_normal(
+        np_rng,
+        config.high_demand_weight_mean,
+        config.high_demand_weight_std,
+        high_count,
         config.high_demand_weight_min,
-        None,
+        float("inf"),
     )
     demand: dict[Node, float] = {}
     low_index = 0
@@ -673,6 +883,22 @@ def _sample_demands(
             demand[customer] = round(float(high_values[high_index]), 2)
             high_index += 1
     return demand
+
+
+def _sample_truncated_normal(
+    rng: np.random.Generator,
+    mean: float,
+    standard_deviation: float,
+    count: int,
+    lower: float,
+    upper: float,
+) -> np.ndarray:
+    values: list[float] = []
+    while len(values) < count:
+        value = float(rng.normal(mean, standard_deviation))
+        if lower <= value <= upper:
+            values.append(value)
+    return np.asarray(values, dtype=float)
 
 
 def _add_truck_arc(

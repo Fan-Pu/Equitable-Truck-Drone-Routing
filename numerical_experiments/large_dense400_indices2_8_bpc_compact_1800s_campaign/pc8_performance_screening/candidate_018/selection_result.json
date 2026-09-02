@@ -1,0 +1,18 @@
+{
+  "attempt": 18,
+  "realized_seed": 18000062,
+  "candidate_snapshot_file": "D:\\GitHub\\Equitable-Truck-Drone-Routing\\numerical_experiments\\large_dense400_indices2_8_bpc_compact_1800s_campaign\\pc8_performance_screening\\candidate_018\\trial_snapshot.json",
+  "candidate_snapshot_sha256": "9a300fd057c4847792cf4b5cd41467d7e6ff019b0f9a5848e95591d592eddad9",
+  "instance_physical_fingerprint": "5774b59664fcf4ebdcd74bb82276e81c6746e78ad1ea8a6ccb0af479d366bc42",
+  "transformed_node_count": 46,
+  "transformed_arc_count": 271,
+  "arc_range": [
+    350,
+    450
+  ],
+  "max_bpc_gap": 0.05,
+  "compact_required_status_code": 9,
+  "accepted": false,
+  "acceptance_status": "rejected_transformed_arc_count",
+  "witness": "271 not in [350, 450]"
+}

@@ -1,0 +1,667 @@
+{
+  "instance": {
+    "config": {
+      "area_side": 25.0,
+      "distribution": "PS",
+      "drone_cost": 6.0,
+      "drone_endurance": 30.0,
+      "drone_payload": 2.3,
+      "drone_speed": 40.0,
+      "drones_per_truck": 4,
+      "generation_feasibility_discovery_limit": 60.0,
+      "generation_repair_mode": "arc_swap",
+      "high_demand_weight_mean": 10.0,
+      "high_demand_weight_min": 6.0,
+      "high_demand_weight_std": 5.0,
+      "hub_arc_probability": 0.3,
+      "low_demand_customer_ratio": 0.5,
+      "low_demand_weight_mean": 1.0,
+      "low_demand_weight_min": 0.5,
+      "low_demand_weight_std": 5.0,
+      "mandatory_drone_customer_fraction": 0.16,
+      "num_customers": 5,
+      "num_hubs": 2,
+      "num_trucks": 2,
+      "seed": 4,
+      "service_deadline_manual_bounds": null,
+      "service_deadline_mode": "random_absolute",
+      "service_deadline_offset_max": 90.0,
+      "service_deadline_offset_min": 30.0,
+      "service_deadline_random_seed": null,
+      "truck_arc_probability": 0.1,
+      "truck_cost": 20.0,
+      "truck_payload": 50.0,
+      "truck_speed": 40.0
+    },
+    "customers": [
+      "C1",
+      "C2",
+      "C3",
+      "C4",
+      "C5"
+    ],
+    "demand": {
+      "C1": 13.88,
+      "C2": 2.18,
+      "C3": 8.28,
+      "C4": 11.05,
+      "C5": 0.98,
+      "H1": 0.0,
+      "H2": 0.0,
+      "Sink": 0.0,
+      "Source": 0.0
+    },
+    "depot_sink": "Sink",
+    "depot_source": "Source",
+    "drone_arc_saving": [
+      {
+        "arc": [
+          "H1",
+          "C2"
+        ],
+        "value": -6.430727834515501
+      },
+      {
+        "arc": [
+          "H1",
+          "C5"
+        ],
+        "value": "Infinity"
+      },
+      {
+        "arc": [
+          "H2",
+          "C5"
+        ],
+        "value": "Infinity"
+      }
+    ],
+    "drone_arcs": [
+      [
+        "H1",
+        "C2"
+      ],
+      [
+        "H1",
+        "C5"
+      ],
+      [
+        "H2",
+        "C5"
+      ]
+    ],
+    "drone_time": [
+      {
+        "arc": [
+          "C2",
+          "H1"
+        ],
+        "value": 8.354328080821439
+      },
+      {
+        "arc": [
+          "C5",
+          "H1"
+        ],
+        "value": 12.824380139682647
+      },
+      {
+        "arc": [
+          "C5",
+          "H2"
+        ],
+        "value": 1.472155415214939
+      },
+      {
+        "arc": [
+          "H1",
+          "C2"
+        ],
+        "value": 8.354328080821439
+      },
+      {
+        "arc": [
+          "H1",
+          "C5"
+        ],
+        "value": 12.824380139682647
+      },
+      {
+        "arc": [
+          "H2",
+          "C5"
+        ],
+        "value": 1.472155415214939
+      }
+    ],
+    "drone_trip_time": [
+      {
+        "arc": [
+          "H1",
+          "C2"
+        ],
+        "value": 16.708656161642878
+      },
+      {
+        "arc": [
+          "H1",
+          "C5"
+        ],
+        "value": 25.648760279365295
+      },
+      {
+        "arc": [
+          "H2",
+          "C5"
+        ],
+        "value": 2.944310830429878
+      }
+    ],
+    "generation_attempt": 0,
+    "generation_feasibility_diagnostics": [
+      {
+        "attempt": 0,
+        "diagnostics": {
+          "added_arcs": [
+            [
+              "C4",
+              "H1"
+            ],
+            [
+              "H1",
+              "C3"
+            ]
+          ],
+          "certificate_routes": [
+            {
+              "drone_blocks": {},
+              "drone_served": [],
+              "path": [
+                "Source",
+                "C1",
+                "Sink"
+              ],
+              "payload": 13.88,
+              "return_time": 109.0787743790047,
+              "route_id": 1,
+              "served": [
+                "C1"
+              ],
+              "service_times": {
+                "C1": 54.53938718950235
+              },
+              "truck_path": [
+                "Source",
+                "C1",
+                "Sink"
+              ],
+              "truck_served": [
+                "C1"
+              ]
+            },
+            {
+              "drone_blocks": {
+                "H1": [
+                  "C2",
+                  "C5"
+                ]
+              },
+              "drone_served": [
+                "C2",
+                "C5"
+              ],
+              "path": [
+                "Source",
+                "C4",
+                "H1",
+                "DUP:C2",
+                "DUP:C5",
+                "C3",
+                "Sink"
+              ],
+              "payload": 22.49,
+              "return_time": 114.02784463159628,
+              "route_id": 2,
+              "served": [
+                "C2",
+                "C3",
+                "C4",
+                "C5"
+              ],
+              "service_times": {
+                "C2": 46.576289601361516,
+                "C3": 77.13375401763494,
+                "C4": 36.61608836736884,
+                "C5": 51.04634166022272
+              },
+              "truck_path": [
+                "Source",
+                "C4",
+                "H1",
+                "C3",
+                "Sink"
+              ],
+              "truck_served": [
+                "C3",
+                "C4"
+              ]
+            }
+          ],
+          "certificate_validation": {
+            "issues": [],
+            "routes": [
+              {
+                "drone_blocks": {},
+                "drone_served": [],
+                "path": [
+                  "Source",
+                  "C1",
+                  "Sink"
+                ],
+                "payload": 13.88,
+                "return_time": 109.0787743790047,
+                "route_id": 1,
+                "served": [
+                  "C1"
+                ],
+                "service_times": {
+                  "C1": 54.53938718950235
+                },
+                "truck_path": [
+                  "Source",
+                  "C1",
+                  "Sink"
+                ],
+                "truck_served": [
+                  "C1"
+                ]
+              },
+              {
+                "drone_blocks": {
+                  "H1": [
+                    "C2",
+                    "C5"
+                  ]
+                },
+                "drone_served": [
+                  "C2",
+                  "C5"
+                ],
+                "path": [
+                  "Source",
+                  "C4",
+                  "H1",
+                  "DUP:C2",
+                  "DUP:C5",
+                  "C3",
+                  "Sink"
+                ],
+                "payload": 22.49,
+                "return_time": 114.02784463159628,
+                "route_id": 2,
+                "served": [
+                  "C2",
+                  "C3",
+                  "C4",
+                  "C5"
+                ],
+                "service_times": {
+                  "C2": 46.576289601361516,
+                  "C3": 77.13375401763494,
+                  "C4": 36.61608836736884,
+                  "C5": 51.04634166022272
+                },
+                "truck_path": [
+                  "Source",
+                  "C4",
+                  "H1",
+                  "C3",
+                  "Sink"
+                ],
+                "truck_served": [
+                  "C3",
+                  "C4"
+                ]
+              }
+            ],
+            "valid": true
+          },
+          "full_universe_precheck": {
+            "direct_option_count": 4,
+            "drone_option_count": 3,
+            "elapsed_seconds": 0.0,
+            "forced_drone_customers": [
+              "C5"
+            ],
+            "passed": true,
+            "witness": null
+          },
+          "hamming_edit_count": 4,
+          "original_arc_counts": {
+            "customer_customer": 0,
+            "customer_pad": 2,
+            "pad_customer": 1
+          },
+          "original_benchmark_fingerprint": "bdf6e2ba060db1ec62aa8f0c6b80447250b904f9fa7533255938df6d4f88971a",
+          "original_deadline_fingerprint": "85ef82706a8642750f2b8975e58c333f4223d87a53759b48c592c0f1b9780647",
+          "original_discovery_diagnostics": {
+            "constraint_count": 183,
+            "fallback_used": false,
+            "legacy_variable_count": 159,
+            "model_build_time_seconds": 0.003999233245849609,
+            "nonzero_count": 519,
+            "precheck": {
+              "direct_option_count": 4,
+              "drone_option_count": 3,
+              "elapsed_seconds": 0.0009996891021728516,
+              "forced_drone_customers": [
+                "C5"
+              ],
+              "passed": true,
+              "witness": null
+            },
+            "stages": [
+              {
+                "dual_reductions": 1,
+                "iteration_count": 0.0,
+                "node_count": 0.0,
+                "solution_count": 0,
+                "solve_time_seconds": 0.0010075569152832031,
+                "status": "infeasible",
+                "status_code": 3
+              }
+            ],
+            "variable_count": 101
+          },
+          "original_discovery_fallback_used": false,
+          "original_discovery_iterations": 0.0,
+          "original_discovery_nodes": 0.0,
+          "original_discovery_status": "infeasible",
+          "original_discovery_time_seconds": 0.006006479263305664,
+          "original_graph_fingerprint": "93a9c0a15bbef460a318fdc98c38c3351dde36ba78c11398488939d32c90f0f9",
+          "projection_type": "strengthened_arc",
+          "rejected_pattern_count": 0,
+          "removed_arcs": [
+            [
+              "C2",
+              "H2"
+            ],
+            [
+              "H1",
+              "C2"
+            ]
+          ],
+          "repair_build_time_seconds": 0.0,
+          "repair_constraint_count": 5,
+          "repair_invoked": true,
+          "repair_iteration_count": 0.0,
+          "repair_node_count": 0.0,
+          "repair_nonzero_count": 30,
+          "repair_solve_time_seconds": 0.0040700435638427734,
+          "repair_variable_count": 28,
+          "repaired_arc_counts": {
+            "customer_customer": 0,
+            "customer_pad": 2,
+            "pad_customer": 1
+          },
+          "repaired_benchmark_fingerprint": "bdf6e2ba060db1ec62aa8f0c6b80447250b904f9fa7533255938df6d4f88971a",
+          "repaired_deadline_fingerprint": "85ef82706a8642750f2b8975e58c333f4223d87a53759b48c592c0f1b9780647",
+          "repaired_graph_fingerprint": "52f1f90f762261ae172e33ac218001bdc0bcf743c52c56e3745e1be3ce34df90",
+          "route_search_build_time_seconds": 0.03936624526977539,
+          "route_search_constraint_count": 462,
+          "route_search_iteration_count": 0.0,
+          "route_search_node_count": 0.0,
+          "route_search_nonzero_count": 2155,
+          "route_search_solve_time_seconds": 0.0040700435638427734,
+          "route_search_variable_count": 176,
+          "strengthened_arc_projection": {
+            "build_time_seconds": 0.03936624526977539,
+            "constraint_count": 462,
+            "eligible_route_arc_count": 40,
+            "iteration_count": 0.0,
+            "node_count": 0.0,
+            "nonzero_count": 2155,
+            "pair_incompatibility_count": 0,
+            "payload_cover_count": 0,
+            "pruned_route_arc_count": 0,
+            "solve_time_seconds": 0.0040700435638427734,
+            "variable_count": 176
+          }
+        },
+        "elapsed_seconds": 0.05445098876953125,
+        "feasible": true,
+        "realized_seed": 4,
+        "status": "repaired"
+      }
+    ],
+    "generation_feasibility_time": 0.05445098876953125,
+    "hubs": [
+      "H1",
+      "H2"
+    ],
+    "locations": {
+      "C1": [
+        23.57640263930919,
+        12.78318882035904
+      ],
+      "C2": [
+        24.406092642692602,
+        2.0209005973900545
+      ],
+      "C3": [
+        15.18389579987574,
+        9.412164609431814
+      ],
+      "C4": [
+        20.047530174645182,
+        4.363195403600711
+      ],
+      "C5": [
+        21.79088185469141,
+        13.598535019087453
+      ],
+      "H1": [
+        19.879172872404506,
+        5.265420203474194
+      ],
+      "H2": [
+        22.6836422470003,
+        13.190861919723247
+      ],
+      "Sink": [
+        0.0,
+        0.0
+      ],
+      "Source": [
+        0.0,
+        0.0
+      ]
+    },
+    "mandatory_drone_customers": [
+      "C5"
+    ],
+    "nodes": [
+      "Source",
+      "C1",
+      "C2",
+      "C3",
+      "C4",
+      "C5",
+      "H1",
+      "H2",
+      "Sink"
+    ],
+    "requested_seed": 4,
+    "truck_arcs": [
+      [
+        "C1",
+        "H1"
+      ],
+      [
+        "C1",
+        "Sink"
+      ],
+      [
+        "C2",
+        "Sink"
+      ],
+      [
+        "C3",
+        "Sink"
+      ],
+      [
+        "C4",
+        "H1"
+      ],
+      [
+        "C4",
+        "Sink"
+      ],
+      [
+        "H1",
+        "C3"
+      ],
+      [
+        "H1",
+        "Sink"
+      ],
+      [
+        "H2",
+        "Sink"
+      ],
+      [
+        "Source",
+        "C1"
+      ],
+      [
+        "Source",
+        "C2"
+      ],
+      [
+        "Source",
+        "C3"
+      ],
+      [
+        "Source",
+        "C4"
+      ],
+      [
+        "Source",
+        "H1"
+      ],
+      [
+        "Source",
+        "H2"
+      ]
+    ],
+    "truck_time": [
+      {
+        "arc": [
+          "C1",
+          "H1"
+        ],
+        "value": 16.8224975756843
+      },
+      {
+        "arc": [
+          "C1",
+          "Sink"
+        ],
+        "value": 54.53938718950235
+      },
+      {
+        "arc": [
+          "C2",
+          "Sink"
+        ],
+        "value": 39.640489860123985
+      },
+      {
+        "arc": [
+          "C3",
+          "Sink"
+        ],
+        "value": 36.89409061396133
+      },
+      {
+        "arc": [
+          "C4",
+          "H1"
+        ],
+        "value": 1.605873153171237
+      },
+      {
+        "arc": [
+          "C4",
+          "Sink"
+        ],
+        "value": 36.61608836736884
+      },
+      {
+        "arc": [
+          "H1",
+          "C3"
+        ],
+        "value": 13.263032217729581
+      },
+      {
+        "arc": [
+          "H1",
+          "Sink"
+        ],
+        "value": 37.71688961381805
+      },
+      {
+        "arc": [
+          "H2",
+          "Sink"
+        ],
+        "value": 53.811756250085324
+      },
+      {
+        "arc": [
+          "Source",
+          "C1"
+        ],
+        "value": 54.53938718950235
+      },
+      {
+        "arc": [
+          "Source",
+          "C2"
+        ],
+        "value": 39.640489860123985
+      },
+      {
+        "arc": [
+          "Source",
+          "C3"
+        ],
+        "value": 36.89409061396133
+      },
+      {
+        "arc": [
+          "Source",
+          "C4"
+        ],
+        "value": 36.61608836736884
+      },
+      {
+        "arc": [
+          "Source",
+          "H1"
+        ],
+        "value": 37.71688961381805
+      },
+      {
+        "arc": [
+          "Source",
+          "H2"
+        ],
+        "value": 53.811756250085324
+      }
+    ]
+  },
+  "schema_version": 1,
+  "sha256": "9e428dcfceeb20131b4088596f84a77ebe9ad74f2d0cf1f1b10ce1ff720fcf45"
+}

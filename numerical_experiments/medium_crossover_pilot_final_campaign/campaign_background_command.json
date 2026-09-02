@@ -1,0 +1,27 @@
+{
+  "executable": "D:\\ProgramData\\anaconda3\\python.exe",
+  "arguments": [
+    "-m",
+    "thvrpd.medium_crossover_campaign",
+    "--output-dir",
+    "numerical_experiments\\medium_crossover_pilot_final_campaign",
+    "--gurobi-python-path",
+    "D:\\gurobi1201\\win64\\python311\\lib",
+    "--pilot-time-limit",
+    "600",
+    "--final-time-limit",
+    "1800",
+    "--threads",
+    "0",
+    "--truck-arc-probability",
+    "0.10",
+    "--hub-arc-probability",
+    "0.30"
+  ],
+  "working_directory": "D:\\GitHub\\Equitable-Truck-Drone-Routing",
+  "pid": 80932,
+  "resumed_at": "2026-08-31 22:23:26 -05:00",
+  "resume_reason": "User stopped 25-customer phase after it had completed; resume held-out selected 20-customer final only",
+  "stdout": "D:\\GitHub\\Equitable-Truck-Drone-Routing\\numerical_experiments\\medium_crossover_pilot_final_campaign\\campaign_background_stdout.log",
+  "stderr": "D:\\GitHub\\Equitable-Truck-Drone-Routing\\numerical_experiments\\medium_crossover_pilot_final_campaign\\campaign_background_stderr.log"
+}

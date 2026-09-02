@@ -1,3 +1,0 @@
-D:\ProgramData\anaconda3\python.exe -m thvrpd.experiments --worker --case-file numerical_experiments\run_20260703_bidirectional_pricing_validation_120s\small_full_PS_seed_1\case_config.json
-D:\ProgramData\anaconda3\python.exe -m thvrpd.experiments --worker --case-file numerical_experiments\run_20260703_bidirectional_pricing_validation_120s\medium_full_PS_seed_1\case_config.json
-D:\ProgramData\anaconda3\python.exe -m thvrpd.experiments --worker --case-file numerical_experiments\run_20260703_bidirectional_pricing_validation_120s\large_full_PS_seed_1\case_config.json

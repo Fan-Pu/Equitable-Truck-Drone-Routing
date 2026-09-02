@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import time
+from typing import TYPE_CHECKING
 
 import gurobipy as gp
 from gurobipy import GRB
@@ -10,7 +11,10 @@ from .config import ObjectiveWeights
 from .instance import InstanceData
 from .objective import ObjectiveData, build_objective_data
 from .solverlog import configure_gurobi_logging
-from .transform import build_transformed_graph, duplicate_node
+from .transform import build_transformed_graph, duplicate_node, is_duplicate
+
+if TYPE_CHECKING:
+    from .feasibility import FeasibilityGateResult
 
 
 @dataclass(frozen=True)
@@ -31,6 +35,16 @@ class CompactSolution:
     status_code: int | None = None
     node_count: float | None = None
     iteration_count: float | None = None
+    first_incumbent_time: float | None = None
+
+
+def _common_time_big_m(
+    route_time_ub: float,
+    max_truck_time: float,
+    max_drone_trip: float,
+    max_drone_oneway: float,
+) -> float:
+    return route_time_ub + max(max_drone_trip + max_truck_time, max_drone_oneway)
 
 
 def solve_compact_miqp(
@@ -48,20 +62,28 @@ def solve_compact_miqp(
 def solve_compact_solution(
     instance: InstanceData,
     weights: ObjectiveWeights,
-    time_limit: float = 1800.0,
-    threads: int = 1,
+    time_limit: float | None = 1800.0,
+    threads: int = 0,
     require_optimal: bool = True,
     log_file: str | None = None,
-    wall_deadline: float | None = None,
     objective: ObjectiveData | None = None,
+    feasibility_only: bool = False,
+    solution_limit: int | None = None,
+    dual_reductions: int | None = None,
+    decode_routes: bool = True,
 ) -> CompactSolution:
     build_start = time.time()
     if objective is None:
         objective = build_objective_data(instance, weights)
     model = gp.Model("THVRPD_compact")
     configure_gurobi_logging(model, log_file)
-    model.Params.TimeLimit = time_limit
+    if time_limit is not None:
+        model.Params.TimeLimit = time_limit
     model.Params.Threads = threads
+    if solution_limit is not None:
+        model.Params.SolutionLimit = solution_limit
+    if dual_reductions is not None:
+        model.Params.DualReductions = dual_reductions
     trucks = range(instance.num_trucks)
     drones = range(instance.drones_per_truck)
     physical = instance.customers + instance.hubs
@@ -91,7 +113,12 @@ def solve_compact_solution(
     big_m_load = instance.truck_payload + max(max_direct_demand, max_pad_block_demand)
     big_m_order = len(physical) + 1.0
     big_m_wait = max_drone_trip
-    big_m_time = route_time_ub + max_truck_time + max_drone_trip + max_drone_oneway
+    big_m_time = _common_time_big_m(
+        route_time_ub,
+        max_truck_time,
+        max_drone_trip,
+        max_drone_oneway,
+    )
 
     x = model.addVars(instance.truck_arcs, trucks, vtype=GRB.BINARY, name="x")
     y = model.addVars(instance.drone_arcs, trucks, drones, vtype=GRB.BINARY, name="y")
@@ -177,21 +204,26 @@ def solve_compact_solution(
     delay_term = gp.quicksum((service[c] - objective.bounds.arrival_lb[c]) * (service[c] - objective.bounds.arrival_lb[c]) for c in instance.customers)
     return_term = gp.quicksum(arrive[instance.depot_sink, k] for k in trucks)
     cost_term = instance.truck_cost * gp.quicksum(used[k] for k in trucks) + instance.drone_cost * gp.quicksum(y[h, c, k, d] for h, c in instance.drone_arcs for k in trucks for d in drones)
-    model.setObjective(
-        objective.coeffs.delay * delay_term
-        + objective.coeffs.return_time * return_term
-        + objective.coeffs.cost * cost_term
-        + objective.coeffs.shift,
-        GRB.MINIMIZE,
-    )
+    if feasibility_only:
+        model.setObjective(0.0, GRB.MINIMIZE)
+    else:
+        model.setObjective(
+            objective.coeffs.delay * delay_term
+            + objective.coeffs.return_time * return_term
+            + objective.coeffs.cost * cost_term
+            + objective.coeffs.shift,
+            GRB.MINIMIZE,
+        )
     build_time = time.time() - build_start
-    if wall_deadline is not None:
-        remaining = wall_deadline - time.time()
-        if remaining <= 0.0:
-            return CompactSolution(None, tuple(), CompactTiming(build_time, 0.0, 0.0), "budget_exhausted_build")
-        model.Params.TimeLimit = min(time_limit, remaining)
     solve_start = time.time()
-    model.optimize()
+    first_incumbent_time: float | None = None
+
+    def incumbent_callback(callback_model, where) -> None:
+        nonlocal first_incumbent_time
+        if where == GRB.Callback.MIPSOL and first_incumbent_time is None:
+            first_incumbent_time = float(callback_model.cbGet(GRB.Callback.RUNTIME))
+
+    model.optimize(incumbent_callback)
     solve_time = time.time() - solve_start
     objective_bound = model.ObjBound
     mip_gap = model.MIPGap if model.SolCount > 0 else None
@@ -211,23 +243,12 @@ def solve_compact_solution(
             status_code,
             node_count,
             iteration_count,
-        )
-    if wall_deadline is not None and time.time() >= wall_deadline:
-        return CompactSolution(
-            None,
-            tuple(),
-            CompactTiming(build_time, solve_time, 0.0),
-            "budget_exhausted_solve",
-            objective_bound,
-            mip_gap,
-            status_code,
-            node_count,
-            iteration_count,
+            first_incumbent_time,
         )
     decode_start = time.time()
-    route_paths = _extract_route_paths(instance, x, y, used, trucks, drones)
+    route_paths = _extract_route_paths(instance, x, y, used, trucks, drones) if decode_routes else tuple()
     decode_time = time.time() - decode_start
-    status = "success" if route_paths else _compact_status_name(model.Status)
+    status = "success" if model.SolCount > 0 else _compact_status_name(model.Status)
     return CompactSolution(
         model.ObjVal,
         route_paths,
@@ -238,7 +259,19 @@ def solve_compact_solution(
         status_code,
         node_count,
         iteration_count,
+        first_incumbent_time,
     )
+
+
+def compact_feasibility_status(instance: InstanceData) -> tuple[bool, str]:
+    result = compact_feasibility_check(instance)
+    return result.feasible, "success" if result.feasible else "infeasible"
+
+
+def compact_feasibility_check(instance: InstanceData) -> "FeasibilityGateResult":
+    from .feasibility import exact_feasibility_check
+
+    return exact_feasibility_check(instance)
 
 
 def _compact_status_name(status: int) -> str:
@@ -248,6 +281,8 @@ def _compact_status_name(status: int) -> str:
         return "timeout"
     if status == GRB.INFEASIBLE:
         return "infeasible"
+    if status == GRB.SOLUTION_LIMIT:
+        return "solution_limit"
     return f"status_{status}"
 
 
@@ -282,8 +317,8 @@ def _extract_route_paths(
         for physical_prev, next_node in zip(physical_path, physical_path[1:]):
             if physical_prev in instance.hubs:
                 for customer in sorted(drone_blocks[physical_prev], key=lambda c: graph.order[(physical_prev, c)]):
-                    transformed_path.append(duplicate_node(physical_prev, customer))
+                    transformed_path.append(duplicate_node(customer))
             transformed_path.append(next_node)
-        if any(node in instance.customers or node.startswith("DUP:") for node in transformed_path):
+        if any(node in instance.customers or is_duplicate(node) for node in transformed_path):
             route_paths.append(tuple(transformed_path))
     return tuple(route_paths)

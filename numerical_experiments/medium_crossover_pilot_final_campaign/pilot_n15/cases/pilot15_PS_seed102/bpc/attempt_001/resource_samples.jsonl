@@ -1,0 +1,15 @@
+{"elapsed_seconds":0.014319181442260742,"process_count":1,"aggregate_cpu_seconds":0.03125,"interval_core_equivalent":2.1823873191361827,"rss_bytes":11116544}
+{"elapsed_seconds":1.0400006771087646,"process_count":1,"aggregate_cpu_seconds":1.046875,"interval_core_equivalent":0.9901953036015639,"rss_bytes":56348672}
+{"elapsed_seconds":2.065925121307373,"process_count":1,"aggregate_cpu_seconds":5.140625,"interval_core_equivalent":3.9903035970624483,"rss_bytes":87973888}
+{"elapsed_seconds":3.096390962600708,"process_count":2,"aggregate_cpu_seconds":8.90625,"interval_core_equivalent":3.654293863126772,"rss_bytes":100352000}
+{"elapsed_seconds":4.120832204818726,"process_count":3,"aggregate_cpu_seconds":9.953125,"interval_core_equivalent":1.021898530493961,"rss_bytes":159334400}
+{"elapsed_seconds":5.1443586349487305,"process_count":4,"aggregate_cpu_seconds":11.046875,"interval_core_equivalent":1.0686094347960078,"rss_bytes":220688384}
+{"elapsed_seconds":6.16766357421875,"process_count":6,"aggregate_cpu_seconds":12.15625,"interval_core_equivalent":1.084109884968775,"rss_bytes":306585600}
+{"elapsed_seconds":7.189837217330933,"process_count":7,"aggregate_cpu_seconds":13.21875,"interval_core_equivalent":1.0394515718141948,"rss_bytes":367230976}
+{"elapsed_seconds":8.21207857131958,"process_count":8,"aggregate_cpu_seconds":14.296875,"interval_core_equivalent":1.0546677609874635,"rss_bytes":426467328}
+{"elapsed_seconds":9.234413862228394,"process_count":10,"aggregate_cpu_seconds":15.421875,"interval_core_equivalent":1.100421759870895,"rss_bytes":511131648}
+{"elapsed_seconds":10.258467197418213,"process_count":11,"aggregate_cpu_seconds":16.5,"interval_core_equivalent":1.0528016099866107,"rss_bytes":577949696}
+{"elapsed_seconds":11.280984878540039,"process_count":12,"aggregate_cpu_seconds":17.5625,"interval_core_equivalent":1.0391018361993587,"rss_bytes":638971904}
+{"elapsed_seconds":12.305037021636963,"process_count":13,"aggregate_cpu_seconds":18.703125,"interval_core_equivalent":1.1138348839840697,"rss_bytes":704868352}
+{"elapsed_seconds":13.32901930809021,"process_count":13,"aggregate_cpu_seconds":22.734375,"interval_core_equivalent":3.9368356790262293,"rss_bytes":736854016}
+{"elapsed_seconds":14.354015827178955,"process_count":13,"aggregate_cpu_seconds":25.609375,"interval_core_equivalent":2.8048875742094888,"rss_bytes":748916736}

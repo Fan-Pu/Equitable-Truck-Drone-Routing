@@ -1,0 +1,31 @@
+{
+  "attempt": 1,
+  "realized_seed": 1000009,
+  "accepted": false,
+  "acceptance_status": "warm_start_rejected_no_incumbent",
+  "instance_snapshot_file": "D:\\GitHub\\Equitable-Truck-Drone-Routing\\numerical_experiments\\large_dense400_indices2_8_bpc_compact_1800s_campaign\\warm_start_screening\\large_PC_seed6\\candidate_001\\candidate_snapshot.json",
+  "instance_snapshot_sha256": "abe242a53c5501fe03e0393b88be16c82a14fde7197a4aa0623d26d098fb3f1d",
+  "instance_physical_fingerprint": "41e3f454818b08717d7a8b89614e715a016713f9bdea8d8722361717a66178f6",
+  "gurobi_version": "12.0.1",
+  "root_compact_limit_seconds": 60.0,
+  "threads": 0,
+  "status": "timeout",
+  "status_code": 9,
+  "objective": null,
+  "bound": -0.10623998836372092,
+  "gap": null,
+  "node_count": 1583.0,
+  "iteration_count": 479786.0,
+  "first_incumbent_time": null,
+  "timing": {
+    "model_build_time": 0.21398663520812988,
+    "solve_time": 60.08634948730469,
+    "route_decode_time": 0.0
+  },
+  "route_paths": [],
+  "validation": {
+    "incumbent_present": false,
+    "valid": null,
+    "route_count": 0
+  }
+}

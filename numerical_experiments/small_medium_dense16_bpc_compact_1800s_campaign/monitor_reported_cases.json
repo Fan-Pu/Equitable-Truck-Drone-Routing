@@ -1,0 +1,22 @@
+{
+  "reported_cases": [
+    "small_PS_seed1",
+    "small_PS_seed2",
+    "small_PS_seed3",
+    "small_PS_seed4",
+    "small_PC_seed5",
+    "small_PC_seed6",
+    "small_PC_seed7",
+    "small_PC_seed8",
+    "medium_PS_seed1",
+    "medium_PS_seed2",
+    "medium_PS_seed3",
+    "medium_PS_seed4",
+    "medium_PC_seed5",
+    "medium_PC_seed6",
+    "medium_PC_seed7",
+    "medium_PC_seed8"
+  ],
+  "updated_at": "2026-09-01 01:24:06",
+  "campaign_complete": true
+}

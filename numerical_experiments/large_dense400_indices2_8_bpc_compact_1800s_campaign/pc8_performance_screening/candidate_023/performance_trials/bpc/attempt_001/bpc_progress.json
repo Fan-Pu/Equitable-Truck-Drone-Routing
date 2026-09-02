@@ -1,0 +1,1042 @@
+{
+  "event_sequence": 82,
+  "event": "time_limit_pricing_unresolved",
+  "updated_at": "2026-08-31 12:50:42",
+  "node": {
+    "id": 1,
+    "depth": 0,
+    "residual_customers": [
+      "C1",
+      "C10",
+      "C11",
+      "C12",
+      "C13",
+      "C14",
+      "C15",
+      "C16",
+      "C17",
+      "C18",
+      "C19",
+      "C2",
+      "C20",
+      "C21",
+      "C22",
+      "C23",
+      "C24",
+      "C25",
+      "C26",
+      "C27",
+      "C28",
+      "C29",
+      "C3",
+      "C30",
+      "C4",
+      "C5",
+      "C6",
+      "C7",
+      "C8",
+      "C9"
+    ],
+    "fleet_limit": 6,
+    "fixed_routes": [],
+    "columns": 1434,
+    "active_sr": 64,
+    "active_sr_version": 2,
+    "fixed_cost": 0.0
+  },
+  "stats": {
+    "active_signature_cache_hits": 1417,
+    "active_signature_cache_misses": 8582,
+    "active_sr_coeffs_computed": 5271088,
+    "active_sr_full_rebuilds": 2,
+    "active_sr_key_cache_hits": 467,
+    "active_sr_key_cache_misses": 3824,
+    "active_sr_row_local_updates": 204,
+    "active_sr_rows_added": 96,
+    "active_sr_rows_removed": 0,
+    "active_sr_version_refresh_time": 0.21329164505004883,
+    "active_sr_version_refreshes": 2,
+    "best_open_bound": null,
+    "best_reduced_cost_at_stop": -48.500000000002046,
+    "branching_nodes": 0,
+    "child_branch_index_build_time": 0.0,
+    "child_branch_index_candidates_after": 0,
+    "child_branch_index_candidates_before": 0,
+    "child_branch_index_query_time": 0.0,
+    "child_branch_index_reject_launch_pad": 0,
+    "child_branch_index_reject_separate": 0,
+    "child_branch_index_reject_together": 0,
+    "child_branch_index_reject_conditioned_arc": 0,
+    "child_hydration_time": 0.0,
+    "child_inherited_route_accepted": 0,
+    "child_inherited_route_candidates": 0,
+    "child_inherited_route_rejected": 0,
+    "child_nodes_created": 0,
+    "child_refresh_count": 0,
+    "child_refresh_time": 0.0,
+    "child_reject_branch": 0,
+    "child_reject_deadline": 0,
+    "child_reject_fixed_route": 0,
+    "child_reject_fleet": 0,
+    "child_reject_residual": 0,
+    "child_reject_route_signature": 0,
+    "child_reject_sr_signature": 0,
+    "column_hydration_time": 0.12575078010559082,
+    "column_index_hits": 0,
+    "column_index_misses": 1434,
+    "column_index_refresh_time": 0.21329164505004883,
+    "column_index_refreshes": 3,
+    "column_index_replacements": 0,
+    "column_signature_lookup_time": 0.21329164505004883,
+    "columns_added_farkas": 496,
+    "columns_added_standard": 938,
+    "core_signature_cache_hits": 2857,
+    "core_signature_cache_misses": 1434,
+    "cost_dominated_columns_rejected": 0,
+    "cost_dominated_columns_removed": 0,
+    "customer_pair_branches": 0,
+    "drone_served_customers": 0,
+    "duplicate_arcs": 244,
+    "duplicate_columns_rejected": 0,
+    "duplicate_equivalent_columns_rejected": 0,
+    "duplicate_lookup_time": 0.0,
+    "duplicate_merge_events": 0,
+    "duplicate_nodes": 15,
+    "farkas_certificate_max_column_activity": 7.105427357601002e-15,
+    "farkas_certificate_rhs": 0.6909090909091162,
+    "farkas_pricing_calls": 31,
+    "farkas_pricing_time": 17.343038082122803,
+    "final_selected_drone_sorties": 0,
+    "fleet_dual_sign_violations": 0,
+    "global_branch_index_build_time": 0.04657936096191406,
+    "global_branch_index_builds": 1,
+    "global_branch_index_candidates": 35776,
+    "global_branch_index_incremental_paths": 1434,
+    "global_branch_index_incremental_updates": 53,
+    "global_branch_index_queries": 56,
+    "global_branch_index_query_time": 0.0010013580322265625,
+    "global_branch_index_rejections": 0,
+    "global_pool_routes": 1434,
+    "heuristic_calls": 0,
+    "heuristic_full_pool_calls": 0,
+    "heuristic_full_pool_feasible": 0,
+    "heuristic_full_pool_incumbent_updates": 0,
+    "heuristic_full_pool_time": 0.0,
+    "heuristic_hard_pool_feasible_solves": 0,
+    "heuristic_hard_pool_solves": 0,
+    "heuristic_hard_pool_time": 0.0,
+    "heuristic_incumbent_updates": 0,
+    "heuristic_max_node_pool_routes": 0,
+    "heuristic_time": 0.0,
+    "incumbent_source": "none",
+    "initialization_time": 0.003507375717163086,
+    "late_rmp_routes_rejected": 0,
+    "launch_pad_branches": 0,
+    "max_active_sr": 64,
+    "max_active_sr_version": 2,
+    "max_node_columns": 1434,
+    "max_positive_le_dual_violation": 0.0,
+    "open_nodes_at_termination": 0,
+    "postroot_farkas_pricing_time": 0.0,
+    "postroot_heuristic_calls": 0,
+    "postroot_heuristic_full_pool_calls": 0,
+    "postroot_heuristic_hard_pool_solves": 0,
+    "postroot_heuristic_incumbent_updates": 0,
+    "postroot_heuristic_time": 0.0,
+    "postroot_nodes_processed": 0,
+    "postroot_open_nodes": 0,
+    "postroot_rmp_time": 0.0,
+    "postroot_sr_separation_time": 0.0,
+    "postroot_standard_pricing_time": 0.0,
+    "pricing_candidate_paths_after_merge": 2298,
+    "pricing_candidate_paths_before_merge": 2298,
+    "pricing_certification_worker_calls": 1122,
+    "pricing_certified_calls": 2,
+    "pricing_closure_mode_calls": 56,
+    "pricing_complete_routes_generated": 475973,
+    "pricing_cpu_core_equivalent_max": 9.136869479921693,
+    "pricing_deadline_reachability_removed": 37169828,
+    "pricing_decoded_routes_in_main": 2298,
+    "pricing_diagnostics_elapsed_seconds": 1669.6282060146332,
+    "pricing_dom_candidate_pairs_materialized": 9059252,
+    "pricing_dom_frontier_keys_scanned": 9250279,
+    "pricing_dom_frontier_queries": 5617957,
+    "pricing_dom_labels_deleted_physical_location": 528253,
+    "pricing_dom_labels_deleted_same_node": 468338,
+    "pricing_dom_pairs_avoided_before_materialization": 236497414,
+    "pricing_engine": "source_neighbor_parallel_forward",
+    "queue_bound_fathoms": 0,
+    "pricing_extensions_attempted": 3745751,
+    "pricing_extensions_rejected_by_deadline": 1279199,
+    "pricing_farkas_bound_pruned": 9965,
+    "pricing_forward_branch_interface_failures": 0,
+    "pricing_forward_branch_language_failures": 0,
+    "pricing_forward_dominance_tests": 8131534,
+    "pricing_forward_labeling_time": 13946.971536874771,
+    "pricing_forward_labels_generated": 2467224,
+    "pricing_forward_physical_location_dominance_tests": 528253,
+    "pricing_forward_return_time_credit_checks": 8131534,
+    "pricing_forward_return_time_credit_checks_skipped": 0,
+    "pricing_forward_same_node_dominance_tests": 468338,
+    "pricing_labels_dominated": 1013326,
+    "pricing_labels_generated": 2467224,
+    "pricing_labels_pruned": 251753,
+    "pricing_labels_purged": 5882,
+    "pricing_together_branch_reachability_pruned": 0,
+    "pricing_max_queue_size": 2272,
+    "pricing_negative_routes_inserted": 1434,
+    "pricing_negative_routes_verified": 2298,
+    "pricing_parallel_calls": 56,
+    "pricing_parallel_workers_max": 12,
+    "pricing_pool_reused_calls": 56,
+    "pricing_pool_shutdown_time": 0.0,
+    "pricing_pool_startup_count": 1,
+    "pricing_pool_startup_time": 9.623823881149292,
+    "pricing_process_cpu_time": 12673.375,
+    "pricing_productive_mode_calls": 0,
+    "pricing_productive_worker_calls": 0,
+    "pricing_source_neighbor_count_max": 28,
+    "pricing_source_neighbor_task_count_max": 54,
+    "pricing_stale_labels_skipped": 122,
+    "pricing_standard_bound_pruned": 241788,
+    "pricing_task_submission_time": 0.01501607894897461,
+    "pricing_tolerance": 0.0001,
+    "pricing_verified_routes_in_main": 2298,
+    "pricing_balanced_process_dynamic_calls": 56,
+    "pricing_initial_load_imbalance_max_mean": 1.2685505183980483,
+    "pricing_worker_busy_seconds": 13946.971536874771,
+    "pricing_worker_idle_seconds": 5980.259192228317,
+    "pricing_idle_work_requests": 2058,
+    "pricing_dynamic_split_candidates": 742,
+    "pricing_dynamic_splits_performed": 176,
+    "pricing_dynamic_split_rejected_near_closure": 0,
+    "pricing_dynamic_split_rejected_small_frontier": 3606,
+    "pricing_dynamic_split_rejected_elapsed": 69,
+    "pricing_dynamic_split_rejected_low_work": 0,
+    "pricing_dynamic_child_tasks_created": 450,
+    "pricing_dynamic_labels_transferred": 92176,
+    "pricing_dynamic_bytes_transferred": 37900289,
+    "pricing_dynamic_split_control_time": 1.6183099746704102,
+    "pricing_leaf_tasks_created": 1122,
+    "pricing_leaf_tasks_closed": 605,
+    "pricing_pending_transfer_peak": 10,
+    "pricing_stale_worker_results_discarded": 0,
+    "pricing_epoch_invalidations": 53,
+    "pricing_candidate_verification_time": 25.033897161483765,
+    "pricing_master_control_time": 45.578125,
+    "pricing_candidate_checkpoints": 395,
+    "pricing_candidate_worker_resumptions": 350,
+    "pricing_global_verified_candidates": 1434,
+    "pricing_global_batch_limit_cancellations": 45,
+    "progress_events_seen": 82,
+    "progress_events_skipped": 0,
+    "progress_events_written": 81,
+    "progress_serialization_time": 2.903324604034424,
+    "rmp_active_coefficient_cache_hits": 501792,
+    "rmp_active_coefficient_cache_misses": 832,
+    "rmp_active_sr_coefficient_count": 365312,
+    "rmp_active_sr_nonzero_count": 36048,
+    "rmp_active_sr_nonzero_density_max": 0.1021508891213389,
+    "rmp_build_time": 2.1159396171569824,
+    "rmp_column_insertion_time": 1.3126049041748047,
+    "rmp_compatibility_failure_active_sr": 2,
+    "rmp_compatibility_failure_active_sr_version": 2,
+    "rmp_compatibility_failure_branch_state": 0,
+    "rmp_compatibility_failure_fixed_cost": 0,
+    "rmp_compatibility_failure_fixed_routes": 0,
+    "rmp_compatibility_failure_fleet_limit": 0,
+    "rmp_compatibility_failure_objective_scale_version": 0,
+    "rmp_compatibility_failure_residual_customers": 0,
+    "rmp_compatibility_failure_rmp_structure_version": 2,
+    "rmp_compatibility_failure_service_deadline_version": 0,
+    "rmp_full_rebuilds": 3,
+    "rmp_incremental_update_time": 0.8542609214782715,
+    "rmp_incremental_updates": 53,
+    "rmp_solve_time": 0.1761174201965332,
+    "rmp_solves": 56,
+    "rmp_time": 2.2920570373535156,
+    "root_closed": false,
+    "root_closure_time": 0,
+    "root_compact_accepted_columns": 0,
+    "root_compact_attempted": true,
+    "root_compact_objective_full": null,
+    "root_compact_bound_full": -0.07983226177900024,
+    "root_compact_mip_gap": null,
+    "root_compact_node_count": 1580.0,
+    "root_compact_iteration_count": 490191.0,
+    "root_compact_decode_verification_time": 0.0,
+    "root_compact_incumbent_validated": false,
+    "root_compact_route_paths": [],
+    "root_compact_skipped_reason": "",
+    "root_compact_solve_budget_seconds": 60.0,
+    "root_compact_status": "timeout",
+    "root_extracted_routes": 0,
+    "root_extraction_time": 60.2867226600647,
+    "root_farkas_pricing_time": 17.343038082122803,
+    "root_heuristic_time": 0.0,
+    "root_model_build_time": 0.20195746421813965,
+    "root_model_solve_time": 60.06184267997742,
+    "root_rmp_is_integer": null,
+    "root_fractional_variable_count": null,
+    "root_nonzero_variable_count": null,
+    "root_max_integrality_violation": null,
+    "root_incumbent_at_classification_shifted": null,
+    "root_incumbent_at_classification_full": null,
+    "root_incumbent_at_fathom_shifted": null,
+    "root_incumbent_at_fathom_full": null,
+    "root_fathom_reason": null,
+    "root_branch_required": false,
+    "root_rmp_time": 2.2920570373535156,
+    "root_route_decode_time": 0.0,
+    "root_sr_separation_time": 46.16720986366272,
+    "root_standard_pricing_time": 1660.145236492157,
+    "root_lower_bound_shifted": null,
+    "root_lower_bound_full": null,
+    "route_pool_hydration_time": 0.12575078010559082,
+    "route_signature_build_time": 0.11946702003479004,
+    "signature_cache_hits": 1417,
+    "signature_cache_misses": 8582,
+    "sr_active_count_postroot": 0,
+    "sr_active_count_root": 64,
+    "sr_coeff_build_time": 1.0788366794586182,
+    "sr_coeff_cache_hits": 6839235,
+    "sr_coeff_cache_misses": 5152544,
+    "sr_cuts_added": 64,
+    "sr_cuts_added_postroot": 0,
+    "sr_cuts_added_root": 64,
+    "sr_dual_sign_violations": 0,
+    "sr_separation_time": 46.16720986366272,
+    "standard_pricing_calls": 25,
+    "standard_pricing_time": 1660.145236492157,
+    "status": "time_limit",
+    "time_to_first_incumbent": null,
+    "total_routes": 1434,
+    "conditioned_arc_branches": 0,
+    "transformed_arcs": 406,
+    "transformed_nodes": 50,
+    "triplet_masks_built": 4060,
+    "truck_served_customers": 0,
+    "pricing_diagnostics_count": 56,
+    "last_pricing_diagnostic": {
+      "mode": "standard_interrupted",
+      "labels_generated": 70718,
+      "labels_dominated": 31689,
+      "labels_pruned": 7147,
+      "max_queue_size": 1207,
+      "complete_routes_generated": 13769,
+      "returned_routes": 0,
+      "best_reduced_cost": -0.003794706358087691,
+      "exact_completion": false,
+      "termination_reason": "time_limit_no_columns",
+      "certification_mode": "not_certified_time_limit",
+      "labels_purged": 146,
+      "stale_labels_skipped": 0,
+      "standard_bound_pruned": 7147,
+      "farkas_bound_pruned": 0,
+      "elapsed_seconds": 35.658568143844604,
+      "pricing_engine": "source_neighbor_parallel_forward",
+      "forward_labels_generated": 70718,
+      "forward_labeling_time_seconds": 317.6766128540039,
+      "parallel_labeling_used": true,
+      "parallel_workers": 12,
+      "parallel_calls": 0,
+      "pricing_mode": "closure",
+      "pricing_status": "TIME_LIMIT_NO_COLUMNS",
+      "productive_calls": 0,
+      "certification_calls": 1,
+      "negative_routes_verified": 0,
+      "negative_routes_inserted": 0,
+      "pricing_worker_backend": "process",
+      "process_cpu_time_seconds": 299.28125,
+      "cpu_core_equivalent": 8.39296880325415,
+      "worker_id": null,
+      "source_neighbor_count": 28,
+      "source_neighbor_block_sizes": [
+        2,
+        2,
+        3,
+        2,
+        2,
+        2,
+        3,
+        2,
+        3,
+        3,
+        2,
+        2
+      ],
+      "source_neighbor_task_count": 20,
+      "source_neighbor_task_sizes": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "core_subspace_count": 0,
+      "core_empty_blocks": 0,
+      "min_core_reduced_cost": null,
+      "root_closed_by_all_cores": false,
+      "certification_worker_calls": 20,
+      "productive_worker_calls": 0,
+      "certification_core_closed_count": 13,
+      "certification_core_unresolved_count": 98,
+      "per_worker_elapsed_seconds": [
+        [
+          0,
+          20.648813009262085
+        ],
+        [
+          1,
+          35.287821531295776
+        ],
+        [
+          2,
+          35.43173861503601
+        ],
+        [
+          3,
+          12.73143219947815
+        ],
+        [
+          4,
+          28.126203775405884
+        ],
+        [
+          5,
+          35.52143859863281
+        ],
+        [
+          6,
+          27.01889181137085
+        ],
+        [
+          7,
+          23.792574167251587
+        ],
+        [
+          8,
+          18.590803623199463
+        ],
+        [
+          9,
+          34.1487717628479
+        ],
+        [
+          10,
+          30.212052822113037
+        ],
+        [
+          11,
+          16.16607093811035
+        ]
+      ],
+      "per_worker_cpu_time_seconds": [
+        [
+          0,
+          19.65625
+        ],
+        [
+          1,
+          33.40625
+        ],
+        [
+          2,
+          33.578125
+        ],
+        [
+          3,
+          12.25
+        ],
+        [
+          4,
+          26.390625
+        ],
+        [
+          5,
+          33.5
+        ],
+        [
+          6,
+          25.203125
+        ],
+        [
+          7,
+          22.328125
+        ],
+        [
+          8,
+          16.765625
+        ],
+        [
+          9,
+          32.75
+        ],
+        [
+          10,
+          28.5625
+        ],
+        [
+          11,
+          14.890625
+        ]
+      ],
+      "per_worker_labels_generated": [
+        [
+          0,
+          6560
+        ],
+        [
+          1,
+          7152
+        ],
+        [
+          2,
+          7221
+        ],
+        [
+          3,
+          2371
+        ],
+        [
+          4,
+          7620
+        ],
+        [
+          5,
+          5122
+        ],
+        [
+          6,
+          7821
+        ],
+        [
+          7,
+          6270
+        ],
+        [
+          8,
+          7121
+        ],
+        [
+          9,
+          4404
+        ],
+        [
+          10,
+          4294
+        ],
+        [
+          11,
+          4762
+        ]
+      ],
+      "per_worker_labels_dominated": [
+        [
+          0,
+          2925
+        ],
+        [
+          1,
+          3264
+        ],
+        [
+          2,
+          3065
+        ],
+        [
+          3,
+          937
+        ],
+        [
+          4,
+          3395
+        ],
+        [
+          5,
+          2788
+        ],
+        [
+          6,
+          3382
+        ],
+        [
+          7,
+          3010
+        ],
+        [
+          8,
+          3413
+        ],
+        [
+          9,
+          1891
+        ],
+        [
+          10,
+          1691
+        ],
+        [
+          11,
+          1928
+        ]
+      ],
+      "per_worker_labels_pruned": [
+        [
+          0,
+          749
+        ],
+        [
+          1,
+          507
+        ],
+        [
+          2,
+          759
+        ],
+        [
+          3,
+          263
+        ],
+        [
+          4,
+          997
+        ],
+        [
+          5,
+          164
+        ],
+        [
+          6,
+          910
+        ],
+        [
+          7,
+          838
+        ],
+        [
+          8,
+          772
+        ],
+        [
+          9,
+          378
+        ],
+        [
+          10,
+          204
+        ],
+        [
+          11,
+          606
+        ]
+      ],
+      "per_worker_completed_labels": [
+        [
+          0,
+          1600
+        ],
+        [
+          1,
+          1093
+        ],
+        [
+          2,
+          1510
+        ],
+        [
+          3,
+          336
+        ],
+        [
+          4,
+          1723
+        ],
+        [
+          5,
+          682
+        ],
+        [
+          6,
+          1859
+        ],
+        [
+          7,
+          1061
+        ],
+        [
+          8,
+          1584
+        ],
+        [
+          9,
+          665
+        ],
+        [
+          10,
+          540
+        ],
+        [
+          11,
+          1116
+        ]
+      ],
+      "per_worker_verified_negative_routes": [
+        [
+          0,
+          0
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          2,
+          0
+        ],
+        [
+          3,
+          0
+        ],
+        [
+          4,
+          0
+        ],
+        [
+          5,
+          0
+        ],
+        [
+          6,
+          0
+        ],
+        [
+          7,
+          0
+        ],
+        [
+          8,
+          0
+        ],
+        [
+          9,
+          0
+        ],
+        [
+          10,
+          0
+        ],
+        [
+          11,
+          0
+        ]
+      ],
+      "pricing_pool_startup_time_seconds": 0.0,
+      "pricing_pool_startup_count": 0,
+      "pricing_pool_reused_calls": 1,
+      "pricing_task_submission_time_seconds": 0.0,
+      "pricing_worker_payload_count": 111,
+      "pricing_worker_response_count": 111,
+      "pricing_candidate_paths_before_merge": 0,
+      "pricing_candidate_paths_after_merge": 0,
+      "pricing_decoded_routes_in_main": 0,
+      "pricing_verified_routes_in_main": 0,
+      "pricing_batch_target": 64,
+      "pricing_returned_batch_size": 0,
+      "prefix_task_depth": 1,
+      "extensions_attempted": 104961,
+      "extensions_rejected_by_deadline": 34255,
+      "together_branch_reachability_pruned": 0,
+      "deadline_reachability_removed": 938705,
+      "reward_set_size_before_deadline": 1315918,
+      "reward_set_size_after_deadline": 377213,
+      "deadline_reward_bound_calls": 60693,
+      "deadline_dominance_prefilter_skips": 0,
+      "routes_rejected_by_deadline_in_master": 0,
+      "forward_dominance_tests": 208367,
+      "forward_same_node_dominance_tests": 14111,
+      "forward_physical_location_dominance_tests": 17578,
+      "forward_physical_location_dominance_rejections": 17578,
+      "forward_return_time_credit_checks": 208367,
+      "forward_return_time_credit_checks_skipped": 0,
+      "forward_branch_language_failures": 0,
+      "forward_branch_interface_failures": 0,
+      "forward_mask_scalar_prefilter_failures": 176678,
+      "dom_gate_pairs_seen": 208367,
+      "dom_gate_mask_failures": 0,
+      "dom_gate_scalar_failures": 176678,
+      "dom_gate_branch_failures": 0,
+      "dom_gate_deadline_failures": 0,
+      "dominance_bucket_pairs_considered": 205894,
+      "dominance_bucket_pairs_rejected": 1073,
+      "dominance_bucket_candidate_pairs": 204821,
+      "dominance_bucket_scans_avoided": 1073,
+      "dominance_bucket_queries": 92236,
+      "dominance_bucket_skipped_by_mask": 0,
+      "dominance_bucket_skipped_by_scalar": 1073,
+      "dominance_bucket_skipped_by_branch": 0,
+      "dominance_bucket_skipped_by_deadline": 0,
+      "dominance_bucket_skipped_by_return_credit": 0,
+      "dom_frontier_queries": 152929,
+      "dom_frontier_keys_scanned": 243184,
+      "dom_frontier_keys_skipped_by_mask": 5021820,
+      "dom_frontier_keys_skipped_by_branch": 0,
+      "dom_frontier_keys_skipped_by_deadline": 0,
+      "dom_frontier_keys_skipped_by_return_credit": 1453,
+      "frontier_cells_created": 60547,
+      "frontier_cells_split": 0,
+      "mask_trie_subset_queries": 239066,
+      "mask_trie_superset_queries": 207523,
+      "mask_trie_returned_items": 4160046,
+      "mask_subset_queries": 92236,
+      "mask_superset_queries": 60693,
+      "mask_query_cache_hits": 0,
+      "mask_query_cache_misses": 0,
+      "cell_splits": 0,
+      "cell_pair_products_before_split": 243184,
+      "cell_pairs_considered": 243184,
+      "cell_pairs_rejected_by_mask": 262,
+      "cell_pairs_rejected_by_envelope": 3798,
+      "label_pairs_materialized": 237671,
+      "full_same_node_tests": 14111,
+      "full_physical_location_tests": 17578,
+      "labels_deleted_same_node": 14111,
+      "labels_deleted_physical_location": 17578,
+      "certification_tasks_exhausted_by_label_search": 13,
+      "physdom_cell_pairs_considered": 69628,
+      "physdom_cell_pairs_rejected_by_mask": 1709,
+      "physdom_cell_pairs_rejected_by_envelope": 1702,
+      "physdom_label_pairs_materialized": 66217,
+      "physdom_full_tests": 17578,
+      "physdom_deletions": 17578,
+      "physdom_time": 1.0814852028270252,
+      "physdom_time_per_deletion": 6.152492904921067e-05,
+      "return_credit_incompatible_pairs": 1453,
+      "dom_pairs_avoided_before_materialization": 5027071,
+      "dom_candidate_pairs_materialized": 237671,
+      "dom_full_tests_same_node": 14111,
+      "dom_full_tests_physical_location": 17578,
+      "dom_labels_deleted_same_node": 14111,
+      "dom_labels_deleted_physical_location": 17578,
+      "labels_dominated_same_node": 14111,
+      "labels_dominated_physical": 17578,
+      "dom_prefilter_pairs": 208367,
+      "dom_prefilter_mask_fail": 0,
+      "dom_prefilter_branch_fail": 0,
+      "dom_prefilter_payload_fail": 0,
+      "dom_prefilter_block_fail": 0,
+      "dom_prefilter_return_credit_fail": 176678,
+      "dom_full_tests": 31689,
+      "dom_full_rejections": 31689,
+      "physical_location_full_tests": 17578,
+      "physical_location_rejections": 17578,
+      "balanced_process_dynamic": true,
+      "initial_block_scores": [
+        91.5,
+        91.0,
+        128.25,
+        89.0,
+        89.0,
+        89.0,
+        125.25,
+        88.75,
+        130.0,
+        129.0,
+        90.0,
+        89.0
+      ],
+      "initial_load_imbalance_max_mean": 1.2685505183980483,
+      "per_worker_busy_seconds": [
+        [
+          0,
+          20.648813009262085
+        ],
+        [
+          1,
+          35.287821531295776
+        ],
+        [
+          2,
+          35.43173861503601
+        ],
+        [
+          3,
+          12.73143219947815
+        ],
+        [
+          4,
+          28.126203775405884
+        ],
+        [
+          5,
+          35.52143859863281
+        ],
+        [
+          6,
+          27.01889181137085
+        ],
+        [
+          7,
+          23.792574167251587
+        ],
+        [
+          8,
+          18.590803623199463
+        ],
+        [
+          9,
+          34.1487717628479
+        ],
+        [
+          10,
+          30.212052822113037
+        ],
+        [
+          11,
+          16.16607093811035
+        ]
+      ],
+      "per_worker_idle_seconds": [
+        [
+          0,
+          7.851839542388916
+        ],
+        [
+          1,
+          0.0
+        ],
+        [
+          2,
+          0.0
+        ],
+        [
+          3,
+          17.268096923828125
+        ],
+        [
+          4,
+          7.356899976730347
+        ],
+        [
+          5,
+          0.0
+        ],
+        [
+          6,
+          8.485680341720581
+        ],
+        [
+          7,
+          9.249402523040771
+        ],
+        [
+          8,
+          16.903024911880493
+        ],
+        [
+          9,
+          0.0
+        ],
+        [
+          10,
+          5.286107301712036
+        ],
+        [
+          11,
+          19.33194088935852
+        ]
+      ],
+      "per_worker_task_counts": [
+        [
+          0,
+          3
+        ],
+        [
+          1,
+          1
+        ],
+        [
+          2,
+          1
+        ],
+        [
+          3,
+          2
+        ],
+        [
+          4,
+          2
+        ],
+        [
+          5,
+          1
+        ],
+        [
+          6,
+          2
+        ],
+        [
+          7,
+          2
+        ],
+        [
+          8,
+          3
+        ],
+        [
+          9,
+          1
+        ],
+        [
+          10,
+          1
+        ],
+        [
+          11,
+          1
+        ]
+      ],
+      "idle_work_requests": 30,
+      "dynamic_split_candidates": 23,
+      "dynamic_splits_performed": 5,
+      "dynamic_split_rejected_near_closure": 0,
+      "dynamic_split_rejected_small_frontier": 181,
+      "dynamic_split_rejected_elapsed": 1,
+      "dynamic_split_rejected_low_work": 0,
+      "dynamic_child_tasks_created": 8,
+      "dynamic_labels_transferred": 2656,
+      "dynamic_bytes_transferred": 1916924,
+      "dynamic_split_control_seconds": 0.12153220176696777,
+      "leaf_tasks_created": 20,
+      "leaf_tasks_closed": 13,
+      "pending_transfer_peak": 2,
+      "stale_worker_results_discarded": 0,
+      "pricing_epoch_invalidations": 0,
+      "productive_first_hit_worker": null,
+      "candidate_verification_seconds": 0.0,
+      "master_control_seconds": 0.90625,
+      "candidate_checkpoints": 0,
+      "candidate_worker_resumptions": 0,
+      "global_verified_candidates": 0,
+      "global_batch_limit_cancellations": 0
+    }
+  },
+  "extra": {
+    "mode": "standard_interrupted"
+  }
+}

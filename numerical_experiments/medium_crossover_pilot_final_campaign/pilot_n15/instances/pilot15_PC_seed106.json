@@ -1,0 +1,1199 @@
+{
+  "instance": {
+    "config": {
+      "area_side": 25.0,
+      "distribution": "PC",
+      "drone_cost": 6.0,
+      "drone_endurance": 30.0,
+      "drone_payload": 2.3,
+      "drone_speed": 40.0,
+      "drones_per_truck": 4,
+      "generation_feasibility_discovery_limit": 60.0,
+      "generation_repair_mode": "arc_swap",
+      "high_demand_weight_mean": 10.0,
+      "high_demand_weight_min": 6.0,
+      "high_demand_weight_std": 5.0,
+      "hub_arc_probability": 0.3,
+      "low_demand_customer_ratio": 0.5,
+      "low_demand_weight_mean": 1.0,
+      "low_demand_weight_min": 0.5,
+      "low_demand_weight_std": 5.0,
+      "mandatory_drone_customer_fraction": 0.16,
+      "num_customers": 15,
+      "num_hubs": 2,
+      "num_trucks": 3,
+      "seed": 106,
+      "service_deadline_manual_bounds": null,
+      "service_deadline_mode": "random_absolute",
+      "service_deadline_offset_max": 90.0,
+      "service_deadline_offset_min": 30.0,
+      "service_deadline_random_seed": null,
+      "truck_arc_probability": 0.1,
+      "truck_cost": 20.0,
+      "truck_payload": 50.0,
+      "truck_speed": 40.0
+    },
+    "customers": [
+      "C1",
+      "C2",
+      "C3",
+      "C4",
+      "C5",
+      "C6",
+      "C7",
+      "C8",
+      "C9",
+      "C10",
+      "C11",
+      "C12",
+      "C13",
+      "C14",
+      "C15"
+    ],
+    "demand": {
+      "C1": 6.1,
+      "C10": 18.71,
+      "C11": 2.0,
+      "C12": 10.24,
+      "C13": 14.15,
+      "C14": 11.65,
+      "C15": 1.91,
+      "C2": 1.73,
+      "C3": 12.38,
+      "C4": 0.84,
+      "C5": 13.6,
+      "C6": 1.35,
+      "C7": 7.52,
+      "C8": 1.59,
+      "C9": 1.6,
+      "H1": 0.0,
+      "H2": 0.0,
+      "Sink": 0.0,
+      "Source": 0.0
+    },
+    "depot_sink": "Sink",
+    "depot_source": "Source",
+    "drone_arc_saving": [
+      {
+        "arc": [
+          "H1",
+          "C15"
+        ],
+        "value": -0.5482902754744075
+      },
+      {
+        "arc": [
+          "H1",
+          "C4"
+        ],
+        "value": -3.229249180977426
+      },
+      {
+        "arc": [
+          "H1",
+          "C6"
+        ],
+        "value": -0.8724275956748215
+      },
+      {
+        "arc": [
+          "H1",
+          "C9"
+        ],
+        "value": -0.4688222785828202
+      },
+      {
+        "arc": [
+          "H2",
+          "C11"
+        ],
+        "value": -2.0362330726929194
+      },
+      {
+        "arc": [
+          "H2",
+          "C2"
+        ],
+        "value": -2.1141298524063856
+      },
+      {
+        "arc": [
+          "H2",
+          "C8"
+        ],
+        "value": 0.7407648027983065
+      }
+    ],
+    "drone_arcs": [
+      [
+        "H1",
+        "C15"
+      ],
+      [
+        "H1",
+        "C4"
+      ],
+      [
+        "H1",
+        "C6"
+      ],
+      [
+        "H1",
+        "C9"
+      ],
+      [
+        "H2",
+        "C11"
+      ],
+      [
+        "H2",
+        "C2"
+      ],
+      [
+        "H2",
+        "C8"
+      ]
+    ],
+    "drone_time": [
+      {
+        "arc": [
+          "C11",
+          "H2"
+        ],
+        "value": 0.9283418430765177
+      },
+      {
+        "arc": [
+          "C15",
+          "H1"
+        ],
+        "value": 2.340054784922459
+      },
+      {
+        "arc": [
+          "C2",
+          "H2"
+        ],
+        "value": 0.9556494180071311
+      },
+      {
+        "arc": [
+          "C4",
+          "H1"
+        ],
+        "value": 1.9621473163951313
+      },
+      {
+        "arc": [
+          "C6",
+          "H1"
+        ],
+        "value": 2.898440309459798
+      },
+      {
+        "arc": [
+          "C8",
+          "H2"
+        ],
+        "value": 1.7960855466531238
+      },
+      {
+        "arc": [
+          "C9",
+          "H1"
+        ],
+        "value": 1.873267385232625
+      },
+      {
+        "arc": [
+          "H1",
+          "C15"
+        ],
+        "value": 2.340054784922459
+      },
+      {
+        "arc": [
+          "H1",
+          "C4"
+        ],
+        "value": 1.9621473163951313
+      },
+      {
+        "arc": [
+          "H1",
+          "C6"
+        ],
+        "value": 2.898440309459798
+      },
+      {
+        "arc": [
+          "H1",
+          "C9"
+        ],
+        "value": 1.873267385232625
+      },
+      {
+        "arc": [
+          "H2",
+          "C11"
+        ],
+        "value": 0.9283418430765177
+      },
+      {
+        "arc": [
+          "H2",
+          "C2"
+        ],
+        "value": 0.9556494180071311
+      },
+      {
+        "arc": [
+          "H2",
+          "C8"
+        ],
+        "value": 1.7960855466531238
+      }
+    ],
+    "drone_trip_time": [
+      {
+        "arc": [
+          "H1",
+          "C15"
+        ],
+        "value": 4.680109569844918
+      },
+      {
+        "arc": [
+          "H1",
+          "C4"
+        ],
+        "value": 3.9242946327902626
+      },
+      {
+        "arc": [
+          "H1",
+          "C6"
+        ],
+        "value": 5.796880618919596
+      },
+      {
+        "arc": [
+          "H1",
+          "C9"
+        ],
+        "value": 3.74653477046525
+      },
+      {
+        "arc": [
+          "H2",
+          "C11"
+        ],
+        "value": 1.8566836861530354
+      },
+      {
+        "arc": [
+          "H2",
+          "C2"
+        ],
+        "value": 1.9112988360142622
+      },
+      {
+        "arc": [
+          "H2",
+          "C8"
+        ],
+        "value": 3.5921710933062476
+      }
+    ],
+    "generation_attempt": 0,
+    "generation_feasibility_diagnostics": [
+      {
+        "attempt": 0,
+        "diagnostics": {
+          "added_arcs": [],
+          "certificate_routes": [],
+          "certificate_validation": {
+            "issues": [],
+            "routes": [],
+            "valid": true
+          },
+          "full_universe_precheck": {
+            "direct_option_count": 12,
+            "drone_option_count": 7,
+            "elapsed_seconds": 0.0010001659393310547,
+            "forced_drone_customers": [
+              "C8",
+              "C9",
+              "C15"
+            ],
+            "passed": true,
+            "witness": null
+          },
+          "hamming_edit_count": 0,
+          "original_arc_counts": {
+            "customer_customer": 14,
+            "customer_pad": 10,
+            "pad_customer": 9
+          },
+          "original_benchmark_fingerprint": "0ae27d521bc5dd98f817718fd0a4f7e4295245e2a3190497ce72a49895c0854c",
+          "original_deadline_fingerprint": "e2374f6b70c7182885ff1823137c9941523418fe132bc47a0677dd965975f1f2",
+          "original_discovery_diagnostics": {
+            "constraint_count": 916,
+            "fallback_used": false,
+            "legacy_variable_count": 642,
+            "model_build_time_seconds": 0.03000664710998535,
+            "nonzero_count": 3224,
+            "precheck": {
+              "direct_option_count": 12,
+              "drone_option_count": 7,
+              "elapsed_seconds": 0.0009996891021728516,
+              "forced_drone_customers": [
+                "C8",
+                "C9",
+                "C15"
+              ],
+              "passed": true,
+              "witness": null
+            },
+            "stages": [
+              {
+                "dual_reductions": 1,
+                "iteration_count": 2578.0,
+                "node_count": 1.0,
+                "solution_count": 1,
+                "solve_time_seconds": 0.1252117156982422,
+                "status": "optimal",
+                "status_code": 2
+              }
+            ],
+            "variable_count": 399
+          },
+          "original_discovery_fallback_used": false,
+          "original_discovery_iterations": 2578.0,
+          "original_discovery_nodes": 1.0,
+          "original_discovery_status": "feasible",
+          "original_discovery_time_seconds": 0.1582202911376953,
+          "original_graph_fingerprint": "4002311526bf542bfcf9d0b10290e3351772ebaef4527fe1f17f45591933b46f",
+          "projection_type": "unchanged",
+          "rejected_pattern_count": 0,
+          "removed_arcs": [],
+          "repair_build_time_seconds": 0.0,
+          "repair_constraint_count": 0,
+          "repair_invoked": false,
+          "repair_iteration_count": 0.0,
+          "repair_node_count": 0.0,
+          "repair_nonzero_count": 0,
+          "repair_solve_time_seconds": 0.0,
+          "repair_variable_count": 0,
+          "repaired_arc_counts": {
+            "customer_customer": 14,
+            "customer_pad": 10,
+            "pad_customer": 9
+          },
+          "repaired_benchmark_fingerprint": "0ae27d521bc5dd98f817718fd0a4f7e4295245e2a3190497ce72a49895c0854c",
+          "repaired_deadline_fingerprint": "e2374f6b70c7182885ff1823137c9941523418fe132bc47a0677dd965975f1f2",
+          "repaired_graph_fingerprint": "4002311526bf542bfcf9d0b10290e3351772ebaef4527fe1f17f45591933b46f",
+          "route_search_build_time_seconds": 0.0,
+          "route_search_constraint_count": 0,
+          "route_search_iteration_count": 0.0,
+          "route_search_node_count": 0.0,
+          "route_search_nonzero_count": 0,
+          "route_search_solve_time_seconds": 0.0,
+          "route_search_variable_count": 0,
+          "strengthened_arc_projection": null
+        },
+        "elapsed_seconds": 0.16521716117858887,
+        "feasible": true,
+        "realized_seed": 106,
+        "status": "feasible_unchanged"
+      }
+    ],
+    "generation_feasibility_time": 0.16521716117858887,
+    "hubs": [
+      "H1",
+      "H2"
+    ],
+    "locations": {
+      "C1": [
+        24.431625432265037,
+        0.2662750940264822
+      ],
+      "C10": [
+        24.667924144418496,
+        1.7070071024987803
+      ],
+      "C11": [
+        2.412556456106628,
+        10.83153747704583
+      ],
+      "C12": [
+        24.174237555313454,
+        2.01844369870265
+      ],
+      "C13": [
+        24.23962594409366,
+        0.9012500167028403
+      ],
+      "C14": [
+        2.6443537658920877,
+        11.292577293046595
+      ],
+      "C15": [
+        23.970059912015557,
+        3.6743474563549583
+      ],
+      "C2": [
+        1.9288758817747866,
+        11.281491914855772
+      ],
+      "C3": [
+        24.6054982391091,
+        3.6731996230373376
+      ],
+      "C4": [
+        24.700778249508534,
+        0.904384869508415
+      ],
+      "C5": [
+        2.314303610438845,
+        11.533822379458744
+      ],
+      "C6": [
+        23.7878116199072,
+        4.012761218021264
+      ],
+      "C7": [
+        24.405251422446558,
+        0.9723009229494605
+      ],
+      "C8": [
+        3.4351367579992056,
+        12.238784894531808
+      ],
+      "C9": [
+        24.01963113974823,
+        3.3665632934234515
+      ],
+      "H1": [
+        24.300244365882584,
+        2.1496533295225637
+      ],
+      "H2": [
+        2.5470452944423103,
+        11.435642791787748
+      ],
+      "Sink": [
+        0.0,
+        0.0
+      ],
+      "Source": [
+        0.0,
+        0.0
+      ]
+    },
+    "mandatory_drone_customers": [
+      "C15",
+      "C8",
+      "C9"
+    ],
+    "nodes": [
+      "Source",
+      "C1",
+      "C2",
+      "C3",
+      "C4",
+      "C5",
+      "C6",
+      "C7",
+      "C8",
+      "C9",
+      "C10",
+      "C11",
+      "C12",
+      "C13",
+      "C14",
+      "C15",
+      "H1",
+      "H2",
+      "Sink"
+    ],
+    "requested_seed": 106,
+    "truck_arcs": [
+      [
+        "C1",
+        "C4"
+      ],
+      [
+        "C1",
+        "C7"
+      ],
+      [
+        "C1",
+        "H2"
+      ],
+      [
+        "C1",
+        "Sink"
+      ],
+      [
+        "C10",
+        "C1"
+      ],
+      [
+        "C10",
+        "C7"
+      ],
+      [
+        "C10",
+        "H2"
+      ],
+      [
+        "C10",
+        "Sink"
+      ],
+      [
+        "C11",
+        "C13"
+      ],
+      [
+        "C11",
+        "H1"
+      ],
+      [
+        "C11",
+        "Sink"
+      ],
+      [
+        "C12",
+        "Sink"
+      ],
+      [
+        "C13",
+        "C10"
+      ],
+      [
+        "C13",
+        "C12"
+      ],
+      [
+        "C13",
+        "C3"
+      ],
+      [
+        "C13",
+        "H1"
+      ],
+      [
+        "C13",
+        "H2"
+      ],
+      [
+        "C13",
+        "Sink"
+      ],
+      [
+        "C14",
+        "C13"
+      ],
+      [
+        "C14",
+        "Sink"
+      ],
+      [
+        "C2",
+        "C11"
+      ],
+      [
+        "C2",
+        "C6"
+      ],
+      [
+        "C2",
+        "Sink"
+      ],
+      [
+        "C3",
+        "Sink"
+      ],
+      [
+        "C4",
+        "H2"
+      ],
+      [
+        "C4",
+        "Sink"
+      ],
+      [
+        "C5",
+        "C1"
+      ],
+      [
+        "C5",
+        "H2"
+      ],
+      [
+        "C5",
+        "Sink"
+      ],
+      [
+        "C6",
+        "C13"
+      ],
+      [
+        "C6",
+        "H1"
+      ],
+      [
+        "C6",
+        "H2"
+      ],
+      [
+        "C6",
+        "Sink"
+      ],
+      [
+        "C7",
+        "C2"
+      ],
+      [
+        "C7",
+        "H1"
+      ],
+      [
+        "C7",
+        "Sink"
+      ],
+      [
+        "H1",
+        "C13"
+      ],
+      [
+        "H1",
+        "C14"
+      ],
+      [
+        "H1",
+        "C2"
+      ],
+      [
+        "H1",
+        "C6"
+      ],
+      [
+        "H1",
+        "C7"
+      ],
+      [
+        "H1",
+        "Sink"
+      ],
+      [
+        "H2",
+        "C12"
+      ],
+      [
+        "H2",
+        "C14"
+      ],
+      [
+        "H2",
+        "C2"
+      ],
+      [
+        "H2",
+        "C7"
+      ],
+      [
+        "H2",
+        "Sink"
+      ],
+      [
+        "Source",
+        "C1"
+      ],
+      [
+        "Source",
+        "C10"
+      ],
+      [
+        "Source",
+        "C11"
+      ],
+      [
+        "Source",
+        "C12"
+      ],
+      [
+        "Source",
+        "C13"
+      ],
+      [
+        "Source",
+        "C14"
+      ],
+      [
+        "Source",
+        "C2"
+      ],
+      [
+        "Source",
+        "C3"
+      ],
+      [
+        "Source",
+        "C4"
+      ],
+      [
+        "Source",
+        "C5"
+      ],
+      [
+        "Source",
+        "C6"
+      ],
+      [
+        "Source",
+        "C7"
+      ],
+      [
+        "Source",
+        "H1"
+      ],
+      [
+        "Source",
+        "H2"
+      ]
+    ],
+    "truck_time": [
+      {
+        "arc": [
+          "C1",
+          "C4"
+        ],
+        "value": 1.360893889088146
+      },
+      {
+        "arc": [
+          "C1",
+          "C7"
+        ],
+        "value": 1.098599758112186
+      },
+      {
+        "arc": [
+          "C1",
+          "H2"
+        ],
+        "value": 49.58092175337599
+      },
+      {
+        "arc": [
+          "C1",
+          "Sink"
+        ],
+        "value": 37.04685078943728
+      },
+      {
+        "arc": [
+          "C10",
+          "C1"
+        ],
+        "value": 2.5155460809386363
+      },
+      {
+        "arc": [
+          "C10",
+          "C7"
+        ],
+        "value": 1.4960683522818876
+      },
+      {
+        "arc": [
+          "C10",
+          "H2"
+        ],
+        "value": 47.77427180889773
+      },
+      {
+        "arc": [
+          "C10",
+          "Sink"
+        ],
+        "value": 39.56239687037591
+      },
+      {
+        "arc": [
+          "C11",
+          "C13"
+        ],
+        "value": 47.636035422495034
+      },
+      {
+        "arc": [
+          "C11",
+          "H1"
+        ],
+        "value": 45.85435808594883
+      },
+      {
+        "arc": [
+          "C11",
+          "Sink"
+        ],
+        "value": 19.866140899728688
+      },
+      {
+        "arc": [
+          "C12",
+          "Sink"
+        ],
+        "value": 39.289021881024155
+      },
+      {
+        "arc": [
+          "C13",
+          "C10"
+        ],
+        "value": 1.8510829291811635
+      },
+      {
+        "arc": [
+          "C13",
+          "C12"
+        ],
+        "value": 1.7738731061700246
+      },
+      {
+        "arc": [
+          "C13",
+          "C3"
+        ],
+        "value": 4.7067328520249045
+      },
+      {
+        "arc": [
+          "C13",
+          "H1"
+        ],
+        "value": 1.9635326019129704
+      },
+      {
+        "arc": [
+          "C13",
+          "H2"
+        ],
+        "value": 48.34046013710439
+      },
+      {
+        "arc": [
+          "C13",
+          "Sink"
+        ],
+        "value": 37.71131394119475
+      },
+      {
+        "arc": [
+          "C14",
+          "C13"
+        ],
+        "value": 47.97989918181799
+      },
+      {
+        "arc": [
+          "C14",
+          "Sink"
+        ],
+        "value": 20.905396588408024
+      },
+      {
+        "arc": [
+          "C2",
+          "C11"
+        ],
+        "value": 1.4004525182126764
+      },
+      {
+        "arc": [
+          "C2",
+          "C6"
+        ],
+        "value": 43.691499652450375
+      },
+      {
+        "arc": [
+          "C2",
+          "Sink"
+        ],
+        "value": 19.815551694945835
+      },
+      {
+        "arc": [
+          "C3",
+          "Sink"
+        ],
+        "value": 42.41804679321966
+      },
+      {
+        "arc": [
+          "C4",
+          "H2"
+        ],
+        "value": 49.02748631601833
+      },
+      {
+        "arc": [
+          "C4",
+          "Sink"
+        ],
+        "value": 38.407744678525425
+      },
+      {
+        "arc": [
+          "C5",
+          "C1"
+        ],
+        "value": 50.07730366088768
+      },
+      {
+        "arc": [
+          "C5",
+          "H2"
+        ],
+        "value": 0.4963819075116924
+      },
+      {
+        "arc": [
+          "C5",
+          "Sink"
+        ],
+        "value": 20.772188984846384
+      },
+      {
+        "arc": [
+          "C6",
+          "C13"
+        ],
+        "value": 5.344988288257328
+      },
+      {
+        "arc": [
+          "C6",
+          "H1"
+        ],
+        "value": 3.5633109517111285
+      },
+      {
+        "arc": [
+          "C6",
+          "H2"
+        ],
+        "value": 42.99547184884705
+      },
+      {
+        "arc": [
+          "C6",
+          "Sink"
+        ],
+        "value": 41.7008592568927
+      },
+      {
+        "arc": [
+          "C7",
+          "C2"
+        ],
+        "value": 49.17834979886713
+      },
+      {
+        "arc": [
+          "C7",
+          "H1"
+        ],
+        "value": 1.9235391947056149
+      },
+      {
+        "arc": [
+          "C7",
+          "Sink"
+        ],
+        "value": 38.066328518094025
+      },
+      {
+        "arc": [
+          "H1",
+          "C13"
+        ],
+        "value": 1.9635326019129704
+      },
+      {
+        "arc": [
+          "H1",
+          "C14"
+        ],
+        "value": 46.19822184527179
+      },
+      {
+        "arc": [
+          "H1",
+          "C2"
+        ],
+        "value": 47.25481060416151
+      },
+      {
+        "arc": [
+          "H1",
+          "C6"
+        ],
+        "value": 3.5633109517111285
+      },
+      {
+        "arc": [
+          "H1",
+          "C7"
+        ],
+        "value": 1.9235391947056149
+      },
+      {
+        "arc": [
+          "H1",
+          "Sink"
+        ],
+        "value": 39.67484654310772
+      },
+      {
+        "arc": [
+          "H2",
+          "C12"
+        ],
+        "value": 46.566587030934365
+      },
+      {
+        "arc": [
+          "H2",
+          "C14"
+        ],
+        "value": 0.360560955286396
+      },
+      {
+        "arc": [
+          "H2",
+          "C2"
+        ],
+        "value": 1.1584804343992487
+      },
+      {
+        "arc": [
+          "H2",
+          "C7"
+        ],
+        "value": 48.48232199526381
+      },
+      {
+        "arc": [
+          "H2",
+          "Sink"
+        ],
+        "value": 20.97403212934509
+      },
+      {
+        "arc": [
+          "Source",
+          "C1"
+        ],
+        "value": 37.04685078943728
+      },
+      {
+        "arc": [
+          "Source",
+          "C10"
+        ],
+        "value": 39.56239687037591
+      },
+      {
+        "arc": [
+          "Source",
+          "C11"
+        ],
+        "value": 19.866140899728688
+      },
+      {
+        "arc": [
+          "Source",
+          "C12"
+        ],
+        "value": 39.289021881024155
+      },
+      {
+        "arc": [
+          "Source",
+          "C13"
+        ],
+        "value": 37.71131394119475
+      },
+      {
+        "arc": [
+          "Source",
+          "C14"
+        ],
+        "value": 20.905396588408024
+      },
+      {
+        "arc": [
+          "Source",
+          "C2"
+        ],
+        "value": 19.815551694945835
+      },
+      {
+        "arc": [
+          "Source",
+          "C3"
+        ],
+        "value": 42.41804679321966
+      },
+      {
+        "arc": [
+          "Source",
+          "C4"
+        ],
+        "value": 38.407744678525425
+      },
+      {
+        "arc": [
+          "Source",
+          "C5"
+        ],
+        "value": 20.772188984846384
+      },
+      {
+        "arc": [
+          "Source",
+          "C6"
+        ],
+        "value": 41.7008592568927
+      },
+      {
+        "arc": [
+          "Source",
+          "C7"
+        ],
+        "value": 38.066328518094025
+      },
+      {
+        "arc": [
+          "Source",
+          "H1"
+        ],
+        "value": 39.67484654310772
+      },
+      {
+        "arc": [
+          "Source",
+          "H2"
+        ],
+        "value": 20.97403212934509
+      }
+    ]
+  },
+  "schema_version": 1,
+  "sha256": "074ef50bff4d7601b81ea05206300740dc286b87526978329ffd5e64c716d38e"
+}

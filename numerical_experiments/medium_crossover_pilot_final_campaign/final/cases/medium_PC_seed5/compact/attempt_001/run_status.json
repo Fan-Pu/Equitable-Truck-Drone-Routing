@@ -1,0 +1,15 @@
+{
+  "case_id": "medium_PC_seed5",
+  "solver": "compact",
+  "attempt": "attempt_001",
+  "started_at": "2026-08-31 23:31:56",
+  "ended_at": "2026-09-01 00:01:58",
+  "exit_code": 0,
+  "completed": true,
+  "instance_snapshot_sha256": "2669b56ab8619427d14711307aa7669d92a591d5149b1cc0b803ec659a8f7d49",
+  "instance_snapshot_verified": true,
+  "result_file": "D:\\GitHub\\Equitable-Truck-Drone-Routing\\numerical_experiments\\medium_crossover_pilot_final_campaign\\final\\cases\\medium_PC_seed5\\compact\\attempt_001\\compact-arc-seed=5.json",
+  "stdout_file": "D:\\GitHub\\Equitable-Truck-Drone-Routing\\numerical_experiments\\medium_crossover_pilot_final_campaign\\final\\cases\\medium_PC_seed5\\compact\\attempt_001\\runner_stdout.log",
+  "stderr_file": "D:\\GitHub\\Equitable-Truck-Drone-Routing\\numerical_experiments\\medium_crossover_pilot_final_campaign\\final\\cases\\medium_PC_seed5\\compact\\attempt_001\\runner_stderr.log",
+  "resource_usage_file": "D:\\GitHub\\Equitable-Truck-Drone-Routing\\numerical_experiments\\medium_crossover_pilot_final_campaign\\final\\cases\\medium_PC_seed5\\compact\\attempt_001\\resource_usage.json"
+}

@@ -1,0 +1,12 @@
+{
+  "sample_period_seconds": 1.0,
+  "wall_runtime_seconds": 29.020835876464844,
+  "aggregate_process_tree_cpu_seconds": 266.03125,
+  "mean_core_equivalent": 9.16690515505601,
+  "mean_cpu_percent_of_logical_machine": 76.39087629213343,
+  "peak_interval_core_equivalent": 11.417916922809951,
+  "peak_process_count": 1,
+  "peak_rss_bytes": 241410048,
+  "logical_cpu_count": 12,
+  "samples_file": "D:\\GitHub\\Equitable-Truck-Drone-Routing\\numerical_experiments\\small_medium_dense16_bpc_compact_1800s_campaign\\cases\\medium_PS_seed3\\compact\\attempt_001\\resource_samples.jsonl"
+}

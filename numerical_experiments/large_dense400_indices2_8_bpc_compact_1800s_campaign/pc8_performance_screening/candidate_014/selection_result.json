@@ -1,0 +1,77 @@
+{
+  "attempt": 14,
+  "realized_seed": 14000050,
+  "candidate_snapshot_file": "D:\\GitHub\\Equitable-Truck-Drone-Routing\\numerical_experiments\\large_dense400_indices2_8_bpc_compact_1800s_campaign\\pc8_performance_screening\\candidate_014\\trial_snapshot.json",
+  "candidate_snapshot_sha256": "f66b2e58ce66d1d503be615e50c3f8b7acbe8995a4d404cd389bf96a4ab434fc",
+  "instance_physical_fingerprint": "3e50e7ad2046dbe2be5a6b61e41f05a4eb1b41a49aaaebede7e9140fc9c6da81",
+  "transformed_node_count": 50,
+  "transformed_arc_count": 397,
+  "arc_range": [
+    350,
+    450
+  ],
+  "max_bpc_gap": 0.05,
+  "compact_required_status_code": 9,
+  "warm_start": {
+    "attempt": 14,
+    "realized_seed": 14000050,
+    "accepted": false,
+    "acceptance_status": "warm_start_rejected_no_incumbent",
+    "instance_snapshot_file": "D:\\GitHub\\Equitable-Truck-Drone-Routing\\numerical_experiments\\large_dense400_indices2_8_bpc_compact_1800s_campaign\\pc8_performance_screening\\candidate_014\\warm_start\\candidate_snapshot.json",
+    "instance_snapshot_sha256": "f66b2e58ce66d1d503be615e50c3f8b7acbe8995a4d404cd389bf96a4ab434fc",
+    "instance_physical_fingerprint": "3e50e7ad2046dbe2be5a6b61e41f05a4eb1b41a49aaaebede7e9140fc9c6da81",
+    "gurobi_version": "12.0.1",
+    "root_compact_limit_seconds": 60.0,
+    "first_incumbent_deadline_seconds": 45.0,
+    "screening_repetitions_required": 2,
+    "screening_repetitions_completed": 1,
+    "threads": 0,
+    "status": "timeout",
+    "status_code": 9,
+    "objective": null,
+    "bound": -0.13894130727589576,
+    "gap": null,
+    "node_count": 2010.0,
+    "iteration_count": 1033731.0,
+    "first_incumbent_time": null,
+    "timing": {
+      "model_build_time": 0.1885364055633545,
+      "solve_time": 60.02439737319946,
+      "route_decode_time": 0.0
+    },
+    "route_paths": [],
+    "validation": {
+      "incumbent_present": false,
+      "valid": null,
+      "route_count": 0
+    },
+    "runs": [
+      {
+        "repetition": 1,
+        "accepted": false,
+        "status": "timeout",
+        "status_code": 9,
+        "objective": null,
+        "bound": -0.13894130727589576,
+        "gap": null,
+        "node_count": 2010.0,
+        "iteration_count": 1033731.0,
+        "first_incumbent_time": null,
+        "timing": {
+          "model_build_time": 0.1885364055633545,
+          "solve_time": 60.02439737319946,
+          "route_decode_time": 0.0
+        },
+        "route_paths": [],
+        "validation": {
+          "incumbent_present": false,
+          "valid": null,
+          "route_count": 0
+        }
+      }
+    ]
+  },
+  "accepted": false,
+  "acceptance_status": "rejected_warm_start",
+  "witness": "warm_start_rejected_no_incumbent"
+}

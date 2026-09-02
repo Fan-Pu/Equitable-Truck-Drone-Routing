@@ -1,0 +1,12 @@
+{
+  "sample_period_seconds": 1.0,
+  "wall_runtime_seconds": 1804.3880825042725,
+  "aggregate_process_tree_cpu_seconds": 9801.328125,
+  "mean_core_equivalent": 5.431940179629729,
+  "mean_cpu_percent_of_logical_machine": 45.26616816358108,
+  "peak_interval_core_equivalent": 11.160165547770017,
+  "peak_process_count": 13,
+  "peak_rss_bytes": 1840033792,
+  "logical_cpu_count": 12,
+  "samples_file": "D:\\GitHub\\Equitable-Truck-Drone-Routing\\numerical_experiments\\large_dense400_indices2_8_bpc_compact_1800s_campaign\\cases\\large_PC_seed8\\bpc\\attempt_001\\resource_samples.jsonl"
+}

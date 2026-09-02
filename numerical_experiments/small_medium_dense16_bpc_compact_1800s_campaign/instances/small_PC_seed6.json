@@ -1,0 +1,577 @@
+{
+  "instance": {
+    "config": {
+      "area_side": 25.0,
+      "distribution": "PC",
+      "drone_cost": 6.0,
+      "drone_endurance": 30.0,
+      "drone_payload": 2.3,
+      "drone_speed": 40.0,
+      "drones_per_truck": 4,
+      "generation_feasibility_discovery_limit": 60.0,
+      "generation_repair_mode": "arc_swap",
+      "high_demand_weight_mean": 10.0,
+      "high_demand_weight_min": 6.0,
+      "high_demand_weight_std": 5.0,
+      "hub_arc_probability": 0.3,
+      "low_demand_customer_ratio": 0.5,
+      "low_demand_weight_mean": 1.0,
+      "low_demand_weight_min": 0.5,
+      "low_demand_weight_std": 5.0,
+      "mandatory_drone_customer_fraction": 0.16,
+      "num_customers": 5,
+      "num_hubs": 2,
+      "num_trucks": 2,
+      "seed": 2000012,
+      "service_deadline_manual_bounds": null,
+      "service_deadline_mode": "random_absolute",
+      "service_deadline_offset_max": 90.0,
+      "service_deadline_offset_min": 30.0,
+      "service_deadline_random_seed": null,
+      "truck_arc_probability": 0.1,
+      "truck_cost": 20.0,
+      "truck_payload": 50.0,
+      "truck_speed": 40.0
+    },
+    "customers": [
+      "C1",
+      "C2",
+      "C3",
+      "C4",
+      "C5"
+    ],
+    "demand": {
+      "C1": 0.98,
+      "C2": 11.67,
+      "C3": 2.28,
+      "C4": 15.54,
+      "C5": 13.53,
+      "H1": 0.0,
+      "H2": 0.0,
+      "Sink": 0.0,
+      "Source": 0.0
+    },
+    "depot_sink": "Sink",
+    "depot_source": "Source",
+    "drone_arc_saving": [
+      {
+        "arc": [
+          "H1",
+          "C1"
+        ],
+        "value": -0.9760294963949647
+      },
+      {
+        "arc": [
+          "H1",
+          "C3"
+        ],
+        "value": -1.1316379059821102
+      },
+      {
+        "arc": [
+          "H2",
+          "C1"
+        ],
+        "value": -1.1998568348147245
+      },
+      {
+        "arc": [
+          "H2",
+          "C3"
+        ],
+        "value": -5.498749351193865
+      }
+    ],
+    "drone_arcs": [
+      [
+        "H1",
+        "C1"
+      ],
+      [
+        "H1",
+        "C3"
+      ],
+      [
+        "H2",
+        "C1"
+      ],
+      [
+        "H2",
+        "C3"
+      ]
+    ],
+    "drone_time": [
+      {
+        "arc": [
+          "C1",
+          "H1"
+        ],
+        "value": 3.0388163898624065
+      },
+      {
+        "arc": [
+          "C1",
+          "H2"
+        ],
+        "value": 0.8640292344224696
+      },
+      {
+        "arc": [
+          "C3",
+          "H1"
+        ],
+        "value": 0.5679815506567989
+      },
+      {
+        "arc": [
+          "C3",
+          "H2"
+        ],
+        "value": 2.5364785020088583
+      },
+      {
+        "arc": [
+          "H1",
+          "C1"
+        ],
+        "value": 3.0388163898624065
+      },
+      {
+        "arc": [
+          "H1",
+          "C3"
+        ],
+        "value": 0.5679815506567989
+      },
+      {
+        "arc": [
+          "H2",
+          "C1"
+        ],
+        "value": 0.8640292344224696
+      },
+      {
+        "arc": [
+          "H2",
+          "C3"
+        ],
+        "value": 2.5364785020088583
+      }
+    ],
+    "drone_trip_time": [
+      {
+        "arc": [
+          "H1",
+          "C1"
+        ],
+        "value": 6.077632779724813
+      },
+      {
+        "arc": [
+          "H1",
+          "C3"
+        ],
+        "value": 1.1359631013135978
+      },
+      {
+        "arc": [
+          "H2",
+          "C1"
+        ],
+        "value": 1.7280584688449392
+      },
+      {
+        "arc": [
+          "H2",
+          "C3"
+        ],
+        "value": 5.0729570040177165
+      }
+    ],
+    "generation_attempt": 2,
+    "generation_feasibility_diagnostics": [
+      {
+        "attempt": 0,
+        "realized_seed": 6,
+        "status": "candidate_rejected",
+        "witness": "geographic node overlap between C1 at (11.66680449987867, 8.485196202368575) and H2 at (11.66680449987867, 8.485196202368575)"
+      },
+      {
+        "attempt": 1,
+        "realized_seed": 1000009,
+        "status": "candidate_rejected",
+        "witness": "geographic node overlap between C3 at (12.96839618502566, 15.079094866340595) and H1 at (12.96839618502566, 15.079094866340595)"
+      },
+      {
+        "attempt": 2,
+        "diagnostics": {
+          "added_arcs": [],
+          "certificate_routes": [],
+          "certificate_validation": {
+            "issues": [],
+            "routes": [],
+            "valid": true
+          },
+          "full_universe_precheck": {
+            "direct_option_count": 4,
+            "drone_option_count": 4,
+            "elapsed_seconds": 0.0,
+            "forced_drone_customers": [
+              "C1"
+            ],
+            "passed": true,
+            "witness": null
+          },
+          "hamming_edit_count": 0,
+          "original_arc_counts": {
+            "customer_customer": 0,
+            "customer_pad": 2,
+            "pad_customer": 5
+          },
+          "original_benchmark_fingerprint": "8845bc02528d2f49972030c30790dc735157dad8e87b2b54d5d12d215fa87e3e",
+          "original_deadline_fingerprint": "fef99219640e10db712c67a7fd7324a15ec61004fc6869be25dae05855311314",
+          "original_discovery_diagnostics": {
+            "constraint_count": 219,
+            "fallback_used": false,
+            "legacy_variable_count": 175,
+            "model_build_time_seconds": 0.0060160160064697266,
+            "nonzero_count": 691,
+            "precheck": {
+              "direct_option_count": 4,
+              "drone_option_count": 4,
+              "elapsed_seconds": 0.0,
+              "forced_drone_customers": [
+                "C1"
+              ],
+              "passed": true,
+              "witness": null
+            },
+            "stages": [
+              {
+                "dual_reductions": 1,
+                "iteration_count": 0.0,
+                "node_count": 0.0,
+                "solution_count": 1,
+                "solve_time_seconds": 0.0,
+                "status": "solution_limit",
+                "status_code": 10
+              }
+            ],
+            "variable_count": 111
+          },
+          "original_discovery_fallback_used": false,
+          "original_discovery_iterations": 0.0,
+          "original_discovery_nodes": 0.0,
+          "original_discovery_status": "feasible",
+          "original_discovery_time_seconds": 0.0060160160064697266,
+          "original_graph_fingerprint": "086e1b969072aeea7e95ab61bc775dc3eeaae3c025413f2824c4a163b168eb36",
+          "projection_type": "unchanged",
+          "rejected_pattern_count": 0,
+          "removed_arcs": [],
+          "repair_build_time_seconds": 0.0,
+          "repair_constraint_count": 0,
+          "repair_invoked": false,
+          "repair_iteration_count": 0.0,
+          "repair_node_count": 0.0,
+          "repair_nonzero_count": 0,
+          "repair_solve_time_seconds": 0.0,
+          "repair_variable_count": 0,
+          "repaired_arc_counts": {
+            "customer_customer": 0,
+            "customer_pad": 2,
+            "pad_customer": 5
+          },
+          "repaired_benchmark_fingerprint": "8845bc02528d2f49972030c30790dc735157dad8e87b2b54d5d12d215fa87e3e",
+          "repaired_deadline_fingerprint": "fef99219640e10db712c67a7fd7324a15ec61004fc6869be25dae05855311314",
+          "repaired_graph_fingerprint": "086e1b969072aeea7e95ab61bc775dc3eeaae3c025413f2824c4a163b168eb36",
+          "route_search_build_time_seconds": 0.0,
+          "route_search_constraint_count": 0,
+          "route_search_iteration_count": 0.0,
+          "route_search_node_count": 0.0,
+          "route_search_nonzero_count": 0,
+          "route_search_solve_time_seconds": 0.0,
+          "route_search_variable_count": 0,
+          "strengthened_arc_projection": null
+        },
+        "elapsed_seconds": 0.007488250732421875,
+        "feasible": true,
+        "realized_seed": 2000012,
+        "status": "feasible_unchanged"
+      }
+    ],
+    "generation_feasibility_time": 0.007488250732421875,
+    "hubs": [
+      "H1",
+      "H2"
+    ],
+    "locations": {
+      "C1": [
+        4.736984267560605,
+        22.271897722759448
+      ],
+      "C2": [
+        2.789813136970404,
+        23.21964849458822
+      ],
+      "C3": [
+        2.795558271745885,
+        22.462361552712327
+      ],
+      "C4": [
+        4.044109416536015,
+        23.46072834788205
+      ],
+      "C5": [
+        4.590819552576009,
+        22.593761864430533
+      ],
+      "H1": [
+        2.792685704358145,
+        22.841005023650276
+      ],
+      "H2": [
+        4.45730441222421,
+        22.77546264502401
+      ],
+      "Sink": [
+        0.0,
+        0.0
+      ],
+      "Source": [
+        0.0,
+        0.0
+      ]
+    },
+    "mandatory_drone_customers": [
+      "C1"
+    ],
+    "nodes": [
+      "Source",
+      "C1",
+      "C2",
+      "C3",
+      "C4",
+      "C5",
+      "H1",
+      "H2",
+      "Sink"
+    ],
+    "requested_seed": 6,
+    "truck_arcs": [
+      [
+        "C2",
+        "H1"
+      ],
+      [
+        "C2",
+        "Sink"
+      ],
+      [
+        "C3",
+        "Sink"
+      ],
+      [
+        "C4",
+        "H1"
+      ],
+      [
+        "C4",
+        "Sink"
+      ],
+      [
+        "C5",
+        "Sink"
+      ],
+      [
+        "H1",
+        "C2"
+      ],
+      [
+        "H1",
+        "C3"
+      ],
+      [
+        "H1",
+        "C4"
+      ],
+      [
+        "H1",
+        "C5"
+      ],
+      [
+        "H1",
+        "Sink"
+      ],
+      [
+        "H2",
+        "C3"
+      ],
+      [
+        "H2",
+        "Sink"
+      ],
+      [
+        "Source",
+        "C2"
+      ],
+      [
+        "Source",
+        "C3"
+      ],
+      [
+        "Source",
+        "C4"
+      ],
+      [
+        "Source",
+        "C5"
+      ],
+      [
+        "Source",
+        "H1"
+      ],
+      [
+        "Source",
+        "H2"
+      ]
+    ],
+    "truck_time": [
+      {
+        "arc": [
+          "C2",
+          "H1"
+        ],
+        "value": 0.5722740574885286
+      },
+      {
+        "arc": [
+          "C2",
+          "Sink"
+        ],
+        "value": 39.01419244733794
+      },
+      {
+        "arc": [
+          "C3",
+          "Sink"
+        ],
+        "value": 37.88687973668732
+      },
+      {
+        "arc": [
+          "C4",
+          "H1"
+        ],
+        "value": 2.806720554614467
+      },
+      {
+        "arc": [
+          "C4",
+          "Sink"
+        ],
+        "value": 41.2572566466271
+      },
+      {
+        "arc": [
+          "C5",
+          "Sink"
+        ],
+        "value": 40.77687212550981
+      },
+      {
+        "arc": [
+          "H1",
+          "C2"
+        ],
+        "value": 0.5722740574885286
+      },
+      {
+        "arc": [
+          "H1",
+          "C3"
+        ],
+        "value": 0.5722740574885332
+      },
+      {
+        "arc": [
+          "H1",
+          "C4"
+        ],
+        "value": 2.806720554614467
+      },
+      {
+        "arc": [
+          "H1",
+          "C5"
+        ],
+        "value": 3.0680655111564095
+      },
+      {
+        "arc": [
+          "H1",
+          "Sink"
+        ],
+        "value": 38.450536092012634
+      },
+      {
+        "arc": [
+          "H2",
+          "C3"
+        ],
+        "value": 2.9622708491850123
+      },
+      {
+        "arc": [
+          "H2",
+          "Sink"
+        ],
+        "value": 40.84915058587233
+      },
+      {
+        "arc": [
+          "Source",
+          "C2"
+        ],
+        "value": 39.01419244733794
+      },
+      {
+        "arc": [
+          "Source",
+          "C3"
+        ],
+        "value": 37.88687973668732
+      },
+      {
+        "arc": [
+          "Source",
+          "C4"
+        ],
+        "value": 41.2572566466271
+      },
+      {
+        "arc": [
+          "Source",
+          "C5"
+        ],
+        "value": 40.77687212550981
+      },
+      {
+        "arc": [
+          "Source",
+          "H1"
+        ],
+        "value": 38.450536092012634
+      },
+      {
+        "arc": [
+          "Source",
+          "H2"
+        ],
+        "value": 40.84915058587233
+      }
+    ]
+  },
+  "schema_version": 1,
+  "sha256": "bdbe21489473ed4ad5769ca1f23b32333487fd11ecceb9ae1e718464e3704e03"
+}

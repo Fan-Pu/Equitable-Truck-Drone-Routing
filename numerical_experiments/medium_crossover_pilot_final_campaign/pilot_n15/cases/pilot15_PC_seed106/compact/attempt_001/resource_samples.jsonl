@@ -1,0 +1,4 @@
+{"elapsed_seconds":0.011005640029907227,"process_count":1,"aggregate_cpu_seconds":0.015625,"interval_core_equivalent":1.419726609042265,"rss_bytes":11407360}
+{"elapsed_seconds":1.0344429016113281,"process_count":1,"aggregate_cpu_seconds":1.03125,"interval_core_equivalent":0.992366643394096,"rss_bytes":56700928}
+{"elapsed_seconds":2.0597729682922363,"process_count":1,"aggregate_cpu_seconds":5.734375,"interval_core_equivalent":4.586937565602136,"rss_bytes":87572480}
+{"elapsed_seconds":3.0905630588531494,"process_count":1,"aggregate_cpu_seconds":11.671875,"interval_core_equivalent":5.76014462534177,"rss_bytes":91885568}

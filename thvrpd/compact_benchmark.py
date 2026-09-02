@@ -4,12 +4,17 @@ import argparse
 from dataclasses import asdict
 import json
 from pathlib import Path
+import sys
 import time
 from typing import Any
 
-from .compact import solve_compact_solution
 from .config import InstanceConfig, ObjectiveWeights, case_defaults
-from .instance import generate_instance, instance_generation_metadata
+from .instance import (
+    generate_instance,
+    instance_generation_metadata,
+    read_instance_snapshot,
+    validate_instance_case,
+)
 from .metrics import solution_service_metrics
 from .objective import build_objective_data
 from .routes import Route, route_from_path
@@ -50,35 +55,29 @@ def main() -> None:
     parser.add_argument("--drones-per-truck", type=int, required=True)
     parser.add_argument("--weights", nargs=3, type=float, default=[0.4, 0.3, 0.3])
     parser.add_argument("--time-limit", type=float, default=1200.0)
-    parser.add_argument("--threads", type=int, default=1)
+    parser.add_argument("--threads", type=int, default=0)
+    parser.add_argument("--gurobi-python-path", type=Path)
+    parser.add_argument("--instance-file", type=Path)
+    parser.add_argument("--instance-sha256")
     parser.add_argument("--truck-arc-probability", type=float)
     parser.add_argument("--hub-arc-probability", type=float)
     parser.add_argument("--truck-speed", type=float, default=40.0)
-    parser.add_argument("--drone-speed", type=float, default=100.0)
+    parser.add_argument("--drone-speed", type=float, default=40.0)
     parser.add_argument("--truck-payload", type=float, default=50.0)
-    parser.add_argument("--drone-payload", type=float, default=6.0)
-    parser.add_argument("--drone-endurance", type=float, default=75.0)
+    parser.add_argument("--drone-payload", type=float, default=2.3)
+    parser.add_argument("--drone-endurance", type=float, default=30.0)
     parser.add_argument("--truck-cost", type=float, default=20.0)
-    parser.add_argument("--drone-cost", type=float, default=1.0)
+    parser.add_argument("--drone-cost", type=float, default=6.0)
     parser.add_argument("--mandatory-drone-customer-fraction", type=float)
-    parser.add_argument("--max-drone-access-customers-per-hub", type=int)
-    parser.add_argument("--max-drone-launch-hubs-per-customer", type=int)
-    parser.add_argument("--min-drone-service-time-saving", type=float)
-    parser.add_argument("--retain-optional-drone-arcs", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--service-deadline-mode", choices=["none", "manual", "random_absolute"])
     parser.add_argument("--service-deadline-file", type=Path)
-    parser.add_argument("--service-deadline-fraction", type=float, default=0.60)
     parser.add_argument("--service-deadline-offset-min", type=float)
     parser.add_argument("--service-deadline-offset-max", type=float)
-    parser.add_argument("--service-deadline-witness-slack", type=float)
     parser.add_argument("--service-deadline-random-seed", type=int)
-    parser.add_argument(
-        "--service-deadline-witness-method",
-        choices=["constructive", "compact", "constructive_then_compact"],
-        default="constructive_then_compact",
-    )
-    parser.add_argument("--service-deadline-witness-time-limit", type=float, default=30.0)
     args = parser.parse_args()
+    if args.gurobi_python_path is not None:
+        sys.path.insert(0, str(args.gurobi_python_path))
+    from .compact import solve_compact_solution
 
     defaults = case_defaults(
         num_customers=args.num_customers,
@@ -115,21 +114,32 @@ def main() -> None:
         truck_cost=args.truck_cost,
         drone_cost=args.drone_cost,
         mandatory_drone_customer_fraction=args.mandatory_drone_customer_fraction,
-        max_drone_access_customers_per_hub=args.max_drone_access_customers_per_hub,
-        max_drone_launch_hubs_per_customer=args.max_drone_launch_hubs_per_customer,
-        min_drone_service_time_saving=args.min_drone_service_time_saving,
-        retain_optional_drone_arcs=args.retain_optional_drone_arcs,
         service_deadline_mode=args.service_deadline_mode,
-        service_deadline_fraction=args.service_deadline_fraction,
         service_deadline_manual_bounds=manual_deadlines,
         service_deadline_offset_min=args.service_deadline_offset_min,
         service_deadline_offset_max=args.service_deadline_offset_max,
-        service_deadline_witness_slack=args.service_deadline_witness_slack,
         service_deadline_random_seed=args.service_deadline_random_seed,
-        service_deadline_witness_method=args.service_deadline_witness_method,
-        service_deadline_witness_time_limit=args.service_deadline_witness_time_limit,
     )
-    instance = generate_instance(instance_config)
+    if args.instance_sha256 is not None and args.instance_file is None:
+        raise ValueError("--instance-sha256 requires --instance-file")
+    instance_snapshot_sha256 = None
+    if args.instance_file is None:
+        instance = generate_instance(instance_config)
+    else:
+        instance, instance_snapshot_sha256 = read_instance_snapshot(
+            args.instance_file,
+            expected_sha256=args.instance_sha256,
+        )
+        validate_instance_case(
+            instance,
+            requested_seed=args.seed,
+            num_trucks=args.num_trucks,
+            num_customers=args.num_customers,
+            num_hubs=args.num_hubs,
+            distribution=args.distribution,
+            drones_per_truck=args.drones_per_truck,
+            expected_config=instance_config,
+        )
     objective = build_objective_data(instance, weights)
     graph = build_transformed_graph(instance)
 
@@ -160,7 +170,11 @@ def main() -> None:
         "time_limit": args.time_limit,
         "threads": args.threads,
         "timing": asdict(solution.timing),
-        "instance_config": asdict(instance_config),
+        "first_incumbent_time": solution.first_incumbent_time,
+        "requested_instance_config": asdict(instance_config),
+        "instance_config": asdict(instance.config),
+        "instance_snapshot_file": None if args.instance_file is None else str(args.instance_file.resolve()),
+        "instance_snapshot_sha256": instance_snapshot_sha256,
         "objective_weights": asdict(weights),
         "normalization_bounds": asdict(objective.bounds),
         "objective_coefficients": asdict(objective.coeffs),

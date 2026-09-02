@@ -28,18 +28,8 @@ class RMPResult:
 
 @dataclass
 class SRCutMetadata:
-    age: int = 0
-    inactive_count: int = 0
     last_activity: float = 0.0
     last_violation: float = 0.0
-    last_positive_dual_iteration: int = -1
-    activity_count: int = 0
-    nonzero_count: int = 0
-    coefficient_density: float = 0.0
-    update_time_contribution: float = 0.0
-    removal_candidate_count: int = 0
-    removal_count: int = 0
-    reactivation_count: int = 0
 
 
 @dataclass
@@ -82,29 +72,7 @@ class NodeState:
     active_sr_version: int = 0
     column_index: NodeColumnIndex = field(default_factory=NodeColumnIndex)
     sr_cut_meta: dict[tuple[str, str, str], SRCutMetadata] = field(default_factory=dict)
-    removed_sr: set[tuple[str, str, str]] = field(default_factory=set)
-    pending_sr_removal_bound: float | None = None
-    sr_removals_performed: int = 0
-    inactive_column_paths: set[tuple[str, ...]] = field(default_factory=set)
-    column_age: dict[tuple[str, ...], int] = field(default_factory=dict)
-    pending_column_deactivation_bound: float | None = None
-    previous_rmp_solve_time: float = 0.0
-    rmp_solve_time_growth: float = 0.0
-    basis_variables: dict[tuple[str, ...], int] = field(default_factory=dict)
-    basis_cover: dict[str, int] = field(default_factory=dict)
-    basis_fleet: int | None = None
-    basis_sr: dict[tuple[str, str, str], int] = field(default_factory=dict)
     rmp_model_state: RMPModelState | None = None
-    previous_rmp_build_time: float = 0.0
-    rmp_build_time_growth: float = 0.0
-    child_certification_signature: tuple | None = None
-    child_certification_exhausted_task_count: int = 0
-    child_certification_unresolved_task_count: int = 0
-    child_closure_batch_limit: int = 0
-    child_certification_yield_history: list[float] = field(default_factory=list)
-    child_useful_yield_history: list[float] = field(default_factory=list)
-    child_no_route_yield_history: list[float] = field(default_factory=list)
-    child_dual_signature_history: list[tuple] = field(default_factory=list)
 
     def copy_for_child(self, node_id: int, restrictions: BranchRestrictions) -> "NodeState":
         return NodeState(
@@ -121,44 +89,12 @@ class NodeState:
             column_index=NodeColumnIndex(),
             sr_cut_meta={
                 triplet: SRCutMetadata(
-                    age=meta.age,
-                    inactive_count=meta.inactive_count,
                     last_activity=meta.last_activity,
                     last_violation=meta.last_violation,
-                    last_positive_dual_iteration=meta.last_positive_dual_iteration,
-                    activity_count=meta.activity_count,
-                    nonzero_count=meta.nonzero_count,
-                    coefficient_density=meta.coefficient_density,
-                    update_time_contribution=meta.update_time_contribution,
-                    removal_candidate_count=meta.removal_candidate_count,
-                    removal_count=meta.removal_count,
-                    reactivation_count=meta.reactivation_count,
                 )
                 for triplet, meta in self.sr_cut_meta.items()
             },
-            removed_sr=set(self.removed_sr),
-            pending_sr_removal_bound=self.pending_sr_removal_bound,
-            sr_removals_performed=self.sr_removals_performed,
-            inactive_column_paths=set(),
-            column_age={},
-            pending_column_deactivation_bound=None,
-            previous_rmp_solve_time=self.previous_rmp_solve_time,
-            rmp_solve_time_growth=0.0,
-            basis_variables=dict(self.basis_variables),
-            basis_cover=dict(self.basis_cover),
-            basis_fleet=self.basis_fleet,
-            basis_sr=dict(self.basis_sr),
             rmp_model_state=None,
-            previous_rmp_build_time=self.previous_rmp_build_time,
-            rmp_build_time_growth=0.0,
-            child_certification_signature=None,
-            child_certification_exhausted_task_count=0,
-            child_certification_unresolved_task_count=0,
-            child_closure_batch_limit=0,
-            child_certification_yield_history=[],
-            child_useful_yield_history=[],
-            child_no_route_yield_history=[],
-            child_dual_signature_history=[],
         )
 
 
@@ -207,7 +143,6 @@ class RestrictedMaster:
             configure_gurobi_logging(self.model, log_file)
             self.model.Params.InfUnbdInfo = 1
             self.model.Params.Threads = solver_config.threads
-            self.model.Params.OptimalityTol = max(min(solver_config.pricing_tolerance, 1e-2), 1e-9)
             self.model.Params.FeasibilityTol = max(min(solver_config.cut_tolerance, 1e-2), 1e-9)
             self.model.ModelSense = GRB.MINIMIZE
             self.z: dict[tuple[str, ...], gp.Var] = {}
@@ -236,14 +171,13 @@ class RestrictedMaster:
         self.model.update()
 
     def _eligible_column_paths(self) -> set[tuple[str, ...]]:
-        arc_customer_sets = {arc: self.graph.arc_customer_set(arc) for arc in self.graph.arcs}
         return {
             path
             for path in self.node.column_paths
             if (
                 self.routes[path].served
                 and self.routes[path].served.issubset(self.node.residual_customers)
-                and self.node.restrictions.route_allowed(self.routes[path], arc_customer_sets)
+                and self.node.restrictions.route_allowed(self.routes[path])
             )
         }
 
@@ -349,39 +283,6 @@ class RestrictedMaster:
             return RMPResult(self.model.Status, None, {}, duals, rhs, max_activity)
         raise RuntimeError(f"unexpected RMP status {self.model.Status}")
 
-    def load_basis_from_node(self) -> bool:
-        if not self.solver_config.enable_rmp_basis_reuse:
-            return False
-        if (
-            not self.node.basis_variables
-            or not self.node.basis_cover
-            or self.node.basis_fleet is None
-        ):
-            return False
-        if not set(self.z).issubset(self.node.basis_variables):
-            return False
-        if not set(self.cover_constraints).issubset(self.node.basis_cover):
-            return False
-        if not set(self.sr_constraints).issubset(self.node.basis_sr):
-            return False
-        for path, var in self.z.items():
-            var.VBasis = self.node.basis_variables[path]
-        for customer, constr in self.cover_constraints.items():
-            constr.CBasis = self.node.basis_cover[customer]
-        self.fleet_constraint.CBasis = self.node.basis_fleet
-        for triplet, constr in self.sr_constraints.items():
-            constr.CBasis = self.node.basis_sr[triplet]
-        self.model.update()
-        return True
-
-    def store_basis_to_node(self) -> None:
-        if not self.solver_config.enable_rmp_basis_reuse or self.model.Status != GRB.OPTIMAL:
-            return
-        self.node.basis_variables = {path: var.VBasis for path, var in self.z.items()}
-        self.node.basis_cover = {customer: constr.CBasis for customer, constr in self.cover_constraints.items()}
-        self.node.basis_fleet = self.fleet_constraint.CBasis
-        self.node.basis_sr = {triplet: constr.CBasis for triplet, constr in self.sr_constraints.items()}
-
     def violated_sr_cuts(self, z_values: dict[tuple[str, ...], float], cut_tolerance: float) -> set[tuple[str, str, str]]:
         return set(self.violated_sr_cut_activities(z_values, cut_tolerance))
 
@@ -426,13 +327,10 @@ def _restriction_key(restrictions: BranchRestrictions) -> tuple:
     return (
         tuple(sorted(restrictions.together_pairs)),
         tuple(sorted(restrictions.separate_pairs)),
-        tuple(sorted(restrictions.truck_service)),
-        tuple(sorted(restrictions.drone_service)),
         tuple(sorted(restrictions.pad_forbidden)),
         tuple(sorted(restrictions.pad_required)),
-        tuple(sorted(restrictions.trans_arc_forbidden)),
-        tuple(sorted(restrictions.trans_arc_required)),
-        tuple(sorted(restrictions.route_forbidden)),
+        tuple(sorted(restrictions.conditioned_arc_forbidden)),
+        tuple(sorted(restrictions.conditioned_arc_required)),
     )
 
 
@@ -446,7 +344,6 @@ _RMP_COMPATIBILITY_FIELDS = (
     "active_sr_version",
     "service_deadline_version",
     "objective_scale_version",
-    "active_column_version",
     "rmp_structure_version",
 )
 
@@ -457,10 +354,6 @@ def _service_deadline_version(node: NodeState) -> int:
 
 def _objective_scale_version(node: NodeState) -> int:
     return 0
-
-
-def _active_column_version(node: NodeState) -> tuple:
-    return (tuple(sorted(node.inactive_column_paths)),)
 
 
 def _rmp_structure_version(node: NodeState) -> tuple:
@@ -474,7 +367,6 @@ def _rmp_structure_version(node: NodeState) -> tuple:
         node.active_sr_version,
         _service_deadline_version(node),
         _objective_scale_version(node),
-        _active_column_version(node),
     )
 
 
@@ -489,7 +381,6 @@ def _rmp_compatibility_key(node: NodeState) -> tuple:
         node.active_sr_version,
         _service_deadline_version(node),
         _objective_scale_version(node),
-        _active_column_version(node),
         _rmp_structure_version(node),
     )
 

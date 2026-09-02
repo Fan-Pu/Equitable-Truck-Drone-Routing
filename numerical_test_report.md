@@ -1,4 +1,159 @@
+# Current-Paper Numerical Test Report
+
+## Authoritative Large-Scale Crossover Validation
+
+This section is the current authoritative evidence for the large-scale comparison. It uses two immutable 35-customer snapshots, one purely sparse (PS) and one purely clustered (PC), with identical physical data supplied to BPC and direct Gurobi in each pair. All older sections below are retained only as historical development evidence.
+
+The user-fixed settings were unchanged:
+
+```text
+region=[0,25]^2 km
+2 synchronization pads
+4 drones/truck
+12 BPC pricing processes
+Gurobi Threads=0 (automatic; 12 logical processors used)
+3600-second limit per solver
+```
+
+The selected scalable dimensions and BPC proof setting were:
+
+```text
+35 customers, 7 trucks
+pricing_tolerance=0.002
+service-window offsets=30-90 minutes
+truck_arc_probability=0.05
+hub_arc_probability=0.18
+mandatory_drone_customer_fraction=0.16
+```
+
+### Frozen Instance Identity
+
+| Case | Requested/realized seed | Snapshot SHA-256 | Truck arcs | Drone arcs | Mandatory drone customers | Generation feasibility time (s) |
+|---|---|---|---:|---:|---:|---:|
+| PS35-101 | 101 / 5,000,116 | `0ae46a5d37aacf2db67cda3ec52284be64b0b4ca3b4a2d757991cb7e5a4d8276` | 136 | 15 | 6 | 990.95 |
+| PC35-105 | 105 / 1,000,108 | `fdff3612da8c3cfcf4b6f919ad3f812a29eafa7851c0e5be9633dbc4ca942414` | 140 | 20 | 6 | 977.16 |
+
+Instance-generation time is reported separately and is excluded from both 3,600-second optimization limits. Each BPC/Gurobi pair records the same snapshot hash.
+
+### BPC Versus Direct Gurobi
+
+| Case | Solver | Status | Incumbent | Lower bound | Gap | Runtime (s) | Nodes | Drone sorties |
+|---|---|---|---:|---:|---:|---:|---:|---:|
+| PS35-101 | BPC | optimal | 0.2138373376 | 0.2138373376 | 0.00% | 1,255.16 | 1 | 14 |
+| PS35-101 | Gurobi | time limit | 0.2138373376 | -0.0070612016 | 103.30% | 3,600.34 | 115,442 | 14 |
+| PC35-105 | BPC | optimal | 0.1763743003 | 0.1763743003 | 0.00% | 1,578.05 | 1 | 11 |
+| PC35-105 | Gurobi | time limit, no incumbent | none | -0.0496071263 | not defined | 3,600.40 | 199,282 | none |
+
+BPC closed both instances entirely at the root. On PS35-101, direct Gurobi found the same incumbent but could not establish a useful lower bound within one hour. On PC35-105, direct Gurobi did not find any feasible incumbent, while BPC produced and certified an optimal solution in 26.3 minutes. Thus the separation is visible in both proof performance and, for PC35-105, primal feasibility.
+
+### BPC Proof Work
+
+| Metric | PS35-101 | PC35-105 |
+|---|---:|---:|
+| Forward labels generated | 959,794 | 1,563,760 |
+| Verified route columns retained | 1,066 | 1,303 |
+| SR cuts added | 64 | 32 |
+| Dynamic subspace splits | 108 | 81 |
+| BPC branch nodes | 0 | 0 |
+
+The BPC advantage comes from root-node route-space proof rather than a smaller branch-and-bound tree after branching. Direct compact Gurobi instead explored large truck/drone-indexed MIP trees and retained weak bounds at termination.
+
+### Tolerance Audit
+
+The initial PS35 pilot at `pricing_tolerance=0.01` terminated with objective `0.2161292123`, which was worse than Gurobi's later incumbent. Tightening the computational tolerance to `0.001` recovered objective `0.2138373376`; the common reported setting `0.002` reproduced that objective and certified root closure in less time. The reported crossover therefore uses `0.002` consistently for both PS and PC, rather than relying on the weaker `0.01` threshold-relative solution.
+
+### Implementation Validation
+
+The XL pilot exposed a race in which a candidate-paused pricing worker could receive an already queued split request. The worker state machine now rejects that split transaction and waits for the master resume/cancel command without losing or duplicating labels. A multi-process regression test covers the race. Static and Gurobi-backed validation after the correction reports:
+
+```text
+python -m compileall thvrpd tests
+94 passed
+```
+
+## Historical Development Results
+
 # Forced Compact Warm-Start Large20 Audit
+
+## Large25 PC Seed-5 Bound-Control Correction and Replacement Run
+
+The prior `large_PC_seed5` BPC artifact was invalid because its stored full lower bound (`0.1647963306`) exceeded its incumbent (`0.1608729579`), while the reported gap was clamped to zero. The error was in branch-and-bound control and reporting, not in the BPC mathematical framework. After a route-pool incumbent improvement, the implementation could continue solving queued nodes whose valid queue bounds already met the incumbent. Final gap computation then hid the invalid bound order by applying a nonnegative clamp.
+
+The production control flow was corrected in three places:
+
+1. The minimum queued bound is tested against the incumbent before the wall-clock termination check. If it meets the incumbent within the integrality tolerance, every remaining queued node is bound-fathomed and the queue closes.
+2. Each popped node is tested before `_solve_node`, and a node is tested again immediately after a route-pool incumbent improvement before integer processing or branching.
+3. Relative-gap computation now raises an error if `lower_bound > upper_bound`; it no longer converts an invalid bound order into a zero gap.
+
+The audit snapshot writer was also made genuinely atomic by writing a process-specific temporary file and replacing the current snapshot. This prevents a progress-write failure from leaving persistent pricing workers attached to an exited solver. This logging correction does not change pricing, bounds, incumbents, or branching.
+
+Validation after the correction:
+
+```text
+python -m compileall thvrpd tests
+python -c "import sys, pytest; sys.path.append(r'D:\gurobi1201\win64\python311\lib'); raise SystemExit(pytest.main(['tests','-q']))"
+
+compileall succeeded
+43 passed in 8.97s
+```
+
+The invalid seed-5 BPC attempt and the failed partial replacement attempt were removed. The authoritative replacement directory contains exactly one attempt:
+
+```text
+numerical_experiments\ps_pc_large25_bpc_compact_8case_1h_campaign\cases\large_PC_seed5\bpc\attempt_001
+```
+
+### Replacement Result
+
+| Metric | Corrected seed-5 result |
+|---|---:|
+| Status | time_limit |
+| Runtime (s) | 3600.7699 |
+| Nodes processed | 29 |
+| Root closed | true |
+| Root closure time (s) | 382.3752 |
+| Full incumbent | 0.1658971648 |
+| Full lower bound | 0.1619182503 |
+| Full relative gap | 2.3984% |
+| Open nodes at termination | 17 |
+| Branching nodes | 22 |
+| Child nodes created | 44 |
+| Bound fathoms immediately after incumbent improvement | 1 |
+| Selected routes/trucks | 4 |
+| Drone sorties | 4 |
+| Service feasible | true |
+| Payload feasible | true |
+
+The replacement has the required ordering `lower_bound <= incumbent`. It is not globally closed: the one-hour limit was reached with 17 open nodes and a valid positive gap. The campaign-wide verification now reports `all_bpc_bounds_not_above_incumbents=true`.
+
+The append-only history records three route-pool incumbent improvements. At event 1111, the shifted incumbent improved to `0.4841657699`; event 1112 then fathomed the current node because its bound equaled the new incumbent within tolerance. A complete scan found zero later `node_started` events whose queue bound met or exceeded the incumbent then available. Thus, the redundant-node-start pattern from the deleted run is absent.
+
+### Replacement Incumbent Structure
+
+| Route | Truck path | Drone block | Sorties |
+|---:|---|---|---:|
+| 1 | Source-C13-H2-C14-H1-C1-Sink | H2: C16, C6; H1: C20, C25 | 4 |
+| 2 | Source-C22-C7-H1-C11-C21-C12-C19-Sink | none | 0 |
+| 3 | Source-C3-C18-C23-C17-C10-C15-H2-Sink | none | 0 |
+| 4 | Source-C9-C2-C24-C4-C8-H2-C5-Sink | none | 0 |
+
+The routes cover all 25 customers exactly once, use four of five available trucks, and have maximum route payload `43.70` under truck capacity `50`. The incumbent contains 21 truck-served customers and four drone-served customers.
+
+### Measured Proof Work
+
+| Metric | Value |
+|---|---:|
+| Standard pricing time (s) | 1892.8028 |
+| Post-root standard pricing time (s) | 1704.1862 |
+| RMP time (s) | 629.7332 |
+| SR separation time (s) | 619.3819 |
+| Forward labels generated | 3,937,857 |
+| Labels dominated | 155,204 |
+| Labels pruned | 532,227 |
+| Complete routes generated | 1,071,841 |
+| Route-pool incumbent updates | 3 |
+
+The corrected rerun did not reproduce the deleted run's stronger incumbent. Process-parallel productive pricing can change column discovery and primal route-pool search order, so equal inputs and time limits do not guarantee identical time-limited incumbents. The replacement result is nevertheless internally valid and is now the sole seed-5 BPC artifact used by all regenerated campaign tables.
 
 ## Scope
 

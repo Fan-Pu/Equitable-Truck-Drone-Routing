@@ -1,0 +1,7 @@
+{"elapsed_seconds":0.016254186630249023,"process_count":1,"aggregate_cpu_seconds":0.046875,"interval_core_equivalent":2.883872387238724,"rss_bytes":12132352}
+{"elapsed_seconds":1.0791122913360596,"process_count":1,"aggregate_cpu_seconds":0.96875,"interval_core_equivalent":0.8673547258268935,"rss_bytes":37203968}
+{"elapsed_seconds":2.1276071071624756,"process_count":4,"aggregate_cpu_seconds":2.21875,"interval_core_equivalent":1.1921851983738794,"rss_bytes":129277952}
+{"elapsed_seconds":3.183988094329834,"process_count":8,"aggregate_cpu_seconds":6.328125,"interval_core_equivalent":3.890050133351148,"rss_bytes":279613440}
+{"elapsed_seconds":4.272564888000488,"process_count":12,"aggregate_cpu_seconds":11.71875,"interval_core_equivalent":4.951993310295496,"rss_bytes":480710656}
+{"elapsed_seconds":5.333850145339966,"process_count":13,"aggregate_cpu_seconds":16.5,"interval_core_equivalent":4.5051506811524495,"rss_bytes":633049088}
+{"elapsed_seconds":6.379873991012573,"process_count":7,"aggregate_cpu_seconds":18.125,"interval_core_equivalent":1.55350186969696,"rss_bytes":352911360}

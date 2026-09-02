@@ -1,2 +1,0 @@
-D:\ProgramData\anaconda3\python.exe -m thvrpd.experiments --worker --case-file numerical_experiments\run_after_yield_aware_productive_pricing\small_full_PS_seed_1\case_config.json
-D:\ProgramData\anaconda3\python.exe -m thvrpd.experiments --worker --case-file numerical_experiments\run_after_yield_aware_productive_pricing\medium_full_PS_seed_1\case_config.json

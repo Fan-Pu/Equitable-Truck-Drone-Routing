@@ -1,141 +1,86 @@
 from __future__ import annotations
 
+import time
+from dataclasses import replace
 import json
 from pathlib import Path
-import subprocess
-import sys
-from dataclasses import replace
-import time
 
+import networkx as nx
 import pytest
-from gurobipy import GRB
 
 import thvrpd.bpc as bpc_module
+import thvrpd.heuristics as heuristic_module
+import thvrpd.pricing as pricing_module
 from thvrpd.bpc import (
-    BPCTimeLimitNoIncumbent,
+    BPCBoundInconsistency,
     BPCStats,
-    _AdaptiveProductiveSliceController,
-    _ClosureAwarePricingState,
+    _IncumbentState,
     _activate_sr_cuts,
-    _add_side_pool_routes,
-    _add_initial_routes,
+    _bound_fathoms,
     _branch,
-    _blend_pricing_duals,
-    _insert_node_column,
-    _inherit_child_routes,
-    _merge_duplicate_column_paths_for_node,
-    _remove_inactive_sr_cuts_after_closure,
-    _prune_side_pool,
-    _record_branch_decision,
-    _record_productive_slice_timeout,
-    _select_sr_cut_batch,
-    _construct_root_incumbent_routes,
-    _deactivate_inactive_node_columns,
-    _diversify_constructive_drone_routes,
     _extract_root_routes,
-    _child_certification_signature,
-    _record_child_certification_epoch_discard,
-    _ensure_child_closure_batch_state,
-    _observe_child_certification_yield,
-    _rehydrate_negative_inactive_columns,
-    _sync_closure_aware_pricing_stats,
-    _write_progress,
+    _relative_gap,
+    _rmp_integrality_diagnostics,
+    _solve_node,
+    _validate_root_bound_order,
     solve_branch_price_cut,
 )
+from thvrpd.branching import BranchRestrictions
 from thvrpd.columns import (
-    NodeColumnIndex,
     RouteSignatureCache,
     build_branch_route_index,
     customer_mask,
     extend_branch_route_index,
-    insert_node_column,
-    merge_duplicate_column_paths,
     query_branch_route_index,
-    refresh_node_column_index,
-    route_coefficient_signature,
-    route_signature,
     sr_coeff_from_mask,
     triplet_mask,
 )
-from thvrpd.compact import CompactSolution, CompactTiming, solve_compact_miqp, solve_compact_solution
-from thvrpd.config import InstanceConfig, ObjectiveWeights, SolverConfig
+from thvrpd.compact import CompactSolution, CompactTiming, solve_compact_solution
+from thvrpd.config import ObjectiveWeights, SolverConfig
 from thvrpd.heuristics import run_route_pool_heuristic
-from thvrpd.instance import InstanceData, generate_instance, tiny_instance
+from thvrpd.instance import InstanceData, tiny_instance
 from thvrpd.objective import build_objective_data
-from thvrpd.phasei import PhaseISeeder
 from thvrpd.pricing import (
-    PricingDiagnostics,
     PricingDuals,
-    PricingTimeLimitReached,
-    MaskContainmentTrie,
-    _BackwardInterface,
+    PricingEpochContext,
+    PricingSchedulerConfig,
+    SourceNeighborPricingPool,
     _DeadlinePricingCounters,
-    _DynamicRefinementConfig,
-    _JoinEvalCache,
-    _KCoreBalanceConfig,
+    _DominanceExtensionContext,
     _Label,
-    _balanced_source_neighbor_partition,
-    _backward_dominates,
-    _branch_state,
-    _build_backward_label,
-    _build_balanced_dynamic_task_plan,
+    _balanced_source_neighbor_plan,
+    _branch_interface_compatible,
     _build_pricing_bounds,
-    _bucketed_join_generators,
-    _bucketed_join_pairs,
-    _compatible_dominance_keys,
-    _compatible_join_lookup_keys,
-    _chunk_source_neighbors,
-    _DominanceCounter,
-    _dominance_candidate_labels,
-    _dominance_bucket_key,
-    _dominance_buckets_compatible,
+    _closure_gap_exceeds_split_threshold,
     _dual_reward_bound,
-    _dual_solution_key,
-    _evaluate_time_expr,
-    _expand_backward_label,
+    _extension_allowed,
+    _extension_rejected_by_service_deadline,
+    _feasible_first_successors,
+    _farkas_completion_lower_bound,
     _farkas_dominates,
-    _insert_nondominated_backward_label,
-    _insert_nondominated_farkas_label,
-    _insert_nondominated_standard_label,
-    _iter_join_generator_pairs,
-    _join_forward_backward,
-    _join_group_lower_bound,
-    _join_lower_bound,
-    _joined_reduced_cost,
-    _joined_reduced_cost_cached,
-    _join_prefilter,
     _paper_dominates,
-    _partition_source_neighbors,
+    _price_route_forward_only,
     _pricing_epoch,
-    _select_diverse_pricing_candidates,
-    _merge_compact_worker_results,
+    _queue_key,
     _shortest_truck_times,
     _source_neighbor_prefix_tasks,
-    _sr_join_correction,
-    _try_build_backward_label,
-    _WorkerPricingResult,
-    _admissible_source_neighbors,
-    _extension_rejected_by_service_deadline,
-    _extend,
+    _split_open_label_frontier,
+    _sr_extra_penalty_bound,
+    _task_closure_gap,
+    _together_branch_partner_unreachable,
     price_route,
-    run_source_neighbor_parallel_forward_pricing,
     route_farkas_reduced_cost,
     route_reduced_cost,
-    SourceNeighborPricingPool,
 )
-from thvrpd.rmp import (
-    NodeState,
-    RMPResult,
-    RestrictedMaster,
-    SRCutMetadata,
-    _farkas_column_activity,
-    _farkas_rhs,
-    _validate_farkas_certificate,
-)
-from thvrpd.routes import route_from_path
-from thvrpd.solve import _build_solve_record, _build_solve_timeout_record
+from thvrpd.rmp import NodeState, RestrictedMaster
+from thvrpd.routes import Route, route_from_path, validate_route_cover
 from thvrpd.transform import build_transformed_graph, duplicate_node
-from thvrpd.branching import BranchRestrictions
+from thvrpd.warm_start_regeneration import screen_warm_start_candidate
+from thvrpd.pc8_performance_regeneration import (
+    bpc_trial_qualifies,
+    compact_trial_qualifies,
+    cross_solver_bounds_consistent,
+)
 
 
 def _setup():
@@ -146,423 +91,36 @@ def _setup():
     return instance, weights, objective, graph
 
 
-def _arc_customer_sets(graph):
-    return {arc: graph.arc_customer_set(arc) for arc in graph.arcs}
-
-
-def _with_arrival_deadlines(base: InstanceData) -> InstanceData:
-    baseline = build_objective_data(base, ObjectiveWeights(0.4, 0.3, 0.3))
-    manual_bounds = {customer: baseline.bounds.arrival_lb[customer] for customer in base.customers}
-    return replace(base, config=replace(base.config, service_deadline_mode="manual", service_deadline_manual_bounds=manual_bounds))
-
-
-def _source_label(instance, graph) -> _Label:
-    return _Label(
-        path=(instance.depot_source,),
-        represented=frozenset(),
-        truck_visited=frozenset({instance.depot_source}),
-        truck_load=0.0,
-        active_pad=None,
-        active_pad_arrival=0.0,
-        active_wait=0.0,
-        block_count=0,
-        physical_time=0.0,
-        service_times=tuple(),
-        sr_counts=tuple(),
-        reduced_cost=-1_000_000.0,
-        used_arcs=frozenset(),
-        represented_mask=0,
-        truck_node_mask=0,
-    )
-
-
-def test_forward_extension_rejects_customer_after_service_envelope() -> None:
+def _two_hub_branch_index_setup():
     base = tiny_instance()
-    instance = _with_arrival_deadlines(base)
-    objective = build_objective_data(instance, ObjectiveWeights(0.4, 0.3, 0.3))
-    graph = build_transformed_graph(instance)
-    duals = PricingDuals(mu={customer: 0.0 for customer in instance.customers}, kappa=0.0)
-    label = _extend(_source_label(instance, graph), "C2", graph, objective, duals, tuple(), False)
-    assert _extension_rejected_by_service_deadline(label, "C3", graph, objective)
-
-
-def test_deadline_aware_reward_bound_removes_unreachable_customer() -> None:
-    base = tiny_instance()
-    instance = _with_arrival_deadlines(base)
-    objective = build_objective_data(instance, ObjectiveWeights(0.4, 0.3, 0.3))
-    graph = build_transformed_graph(instance)
-    duals = PricingDuals(mu={customer: 0.0 for customer in instance.customers}, kappa=0.0)
-    duals = PricingDuals(mu={**duals.mu, "C3": 1.0}, kappa=0.0)
-    label = _extend(_source_label(instance, graph), "C2", graph, objective, duals, tuple(), False)
-    shortest = _shortest_truck_times(graph)
-    bounds = _build_pricing_bounds(graph, duals, frozenset({"C3"}), shortest)
-    counters = _DeadlinePricingCounters(shortest=shortest)
-    assert _dual_reward_bound(label, graph, bounds, objective, shortest, counters) == 0.0
-    assert counters.deadline_reward_bound_calls == 1
-    assert counters.reward_set_size_before_deadline == 1
-    assert counters.reward_set_size_after_deadline == 0
-    assert counters.deadline_reachability_removed == 1
-
-
-def test_deadline_pricing_diagnostics_and_forward_only_engine() -> None:
-    base = tiny_instance()
-    instance = _with_arrival_deadlines(base)
-    objective = build_objective_data(instance, ObjectiveWeights(0.4, 0.3, 0.3))
-    graph = build_transformed_graph(instance)
-    duals = PricingDuals(mu={customer: 1.0 for customer in instance.customers}, kappa=0.0)
-    result = price_route(
-        graph,
-        objective,
-        frozenset(instance.customers),
-        BranchRestrictions(),
-        duals,
-        next_route_id=0,
-        pricing_tolerance=1e-7,
-        batch_size=2,
-        pricing_worker_backend="thread",
-        parallel_workers=2,
-    )
-    assert result.diagnostics.pricing_engine == "source_neighbor_parallel_forward"
-    assert result.diagnostics.backward_labels_generated == 0
-    assert result.diagnostics.join_pairs_tested == 0
-    assert result.diagnostics.extensions_attempted > 0
-    assert result.diagnostics.extensions_rejected_by_deadline >= 0
-    assert result.diagnostics.deadline_reward_bound_calls >= 0
-
-
-def test_solver_config_default_pricing_tolerance_is_five_hundredths() -> None:
-    assert SolverConfig().pricing_tolerance == pytest.approx(0.05)
-
-
-def test_cli_defaults_force_compact_after_constructive() -> None:
-    assert 'default="full_budget"' in Path("thvrpd/solve.py").read_text()
-    assert 'default="full_budget"' in Path("thvrpd/experiments.py").read_text()
-
-
-def test_pricing_tolerance_controls_negative_column_acceptance() -> None:
-    instance, _, objective, graph = _setup()
-    residual = frozenset({"C1"})
-    base_route = route_from_path(1, ("Source", "C1", "Sink"), graph, objective)
-    threshold = SolverConfig().pricing_tolerance
-
-    not_negative_duals = PricingDuals(
-        mu={"C1": base_route.cost + threshold - 0.001, "C2": 0.0, "C3": 0.0},
-        kappa=0.0,
-        nu={},
-    )
-    not_negative = price_route(
-        graph,
-        objective,
-        residual,
-        BranchRestrictions(),
-        not_negative_duals,
-        next_route_id=10,
-        pricing_tolerance=threshold,
-        batch_size=4,
-    )
-    assert route_reduced_cost(base_route, not_negative_duals) == pytest.approx(-0.049)
-    assert not not_negative.routes
-
-    negative_duals = PricingDuals(
-        mu={"C1": base_route.cost + threshold + 0.001, "C2": 0.0, "C3": 0.0},
-        kappa=0.0,
-        nu={},
-    )
-    negative = price_route(
-        graph,
-        objective,
-        residual,
-        BranchRestrictions(),
-        negative_duals,
-        next_route_id=20,
-        pricing_tolerance=threshold,
-        batch_size=4,
-    )
-    assert route_reduced_cost(base_route, negative_duals) == pytest.approx(-0.051)
-    assert len(negative.routes) == 1
-    assert negative.reduced_costs == pytest.approx((-0.051,))
-
-
-def test_root_constructive_heuristic_produces_verified_service_window_incumbent() -> None:
-    instance, _, objective, graph = _setup()
-    routes = {}
-    _add_initial_routes(graph, objective, routes)
-    stats = BPCStats()
-    generated, selected = _construct_root_incumbent_routes(
-        graph,
-        objective,
-        SolverConfig(root_constructive_time_limit=1.0),
-        routes,
-        stats,
-        time.time() + 5.0,
-    )
-    assert generated
-    assert selected
-    selected_routes = tuple(routes[path] for path in selected)
-    assert frozenset().union(*(route.served for route in selected_routes)) == frozenset(instance.customers)
-    assert all(
-        service_time <= objective.bounds.service_ub[customer] + 1e-9
-        for route in selected_routes
-        for customer, service_time in route.service_times.items()
-    )
-    assert stats.root_constructive_status == "success"
-
-
-def test_drone_diversification_warm_start_generates_only_verified_variants() -> None:
-    _, _, objective, graph = _setup()
-    base_path = ("Source", "H1", "C1", "Sink")
-    base_route = route_from_path(0, base_path, graph, objective)
-    routes = {base_path: base_route}
-    stats = BPCStats(root_constructive_value=base_route.cost)
-    generated = _diversify_constructive_drone_routes(
-        graph,
-        objective,
-        SolverConfig(enable_drone_diversification_warm_start=True),
-        routes,
-        stats,
-        bpc_module._IncumbentState(value=base_route.cost, routes=(base_route,)),
-        (base_path,),
-        time.time(),
-        time.time() + 5.0,
-    )
-    expected = ("Source", "H1", duplicate_node("H1", "C1"), "Sink")
-    assert generated == {expected}
-    assert expected in routes
-    assert routes[expected].served == base_route.served
-    assert routes[expected].drone_sorties == 1
-    assert all(
-        service_time <= objective.bounds.service_ub[customer] + 1e-9
-        for customer, service_time in routes[expected].service_times.items()
-    )
-    assert stats.drone_diversification_attempted is True
-    assert stats.drone_diversification_routes_generated == 1
-    assert stats.drone_diversification_columns_accepted == 1
-    assert stats.drone_insertion_attempts >= 1
-    assert stats.drone_insertion_verified == 1
-    assert stats.drone_primal_pool_size == 1
-
-
-def test_compact_warm_start_skips_after_constructive_incumbent_by_policy() -> None:
-    instance, weights, objective, graph = _setup()
-    stats = BPCStats()
-    routes = {}
-    extracted = _extract_root_routes(
-        instance,
-        weights,
-        SolverConfig(root_compact_after_constructive="skip"),
-        graph,
-        objective,
-        routes,
-        stats,
-        time.time() + 60.0,
-        constructive_incumbent_found=True,
-    )
-    assert extracted == set()
-    assert stats.root_compact_status == "skipped"
-    assert stats.root_compact_skipped_reason == "constructive_incumbent"
-    assert stats.root_compact_attempted is False
-
-
-def test_forced_compact_policy_runs_after_good_constructive_incumbent(monkeypatch) -> None:
-    instance, weights, objective, graph = _setup()
-    stats = BPCStats(
-        root_constructive_incumbent_found=True,
-        root_constructive_diversity_score=1.0,
-        root_constructive_drone_sorties=1,
-        root_constructive_truck_count=1,
-        root_constructive_value=0.01,
-    )
-    calls = []
-    routes = {}
-
-    def fake_compact_solution(*args, **kwargs):
-        calls.append(kwargs)
-        return CompactSolution(
-            objective_full=1.0,
-            route_paths=(("Source", "C1", "Sink"),),
-            timing=CompactTiming(model_build_time=0.25, solve_time=0.5, route_decode_time=0.1),
-            status="success",
-        )
-
-    monkeypatch.setattr(bpc_module, "solve_compact_solution", fake_compact_solution)
-    extracted = _extract_root_routes(
-        instance,
-        weights,
-        SolverConfig(root_compact_solve_time_limit=0.5),
-        graph,
-        objective,
-        routes,
-        stats,
-        time.time() + 60.0,
-        constructive_incumbent_found=True,
-    )
-    assert extracted == {("Source", "C1", "Sink")}
-    assert calls
-    assert calls[0]["time_limit"] == pytest.approx(0.5)
-    assert calls[0]["objective"] is objective
-    assert "wall_deadline" not in calls[0]
-    assert stats.root_compact_attempted is True
-    assert stats.root_compact_conditional_triggered is False
-    assert stats.root_compact_status == "success"
-    assert stats.root_compact_budget_seconds == pytest.approx(0.5)
-    assert stats.root_compact_solve_budget_seconds == pytest.approx(0.5)
-
-
-def test_conditional_compact_policy_triggers_small_budget_for_low_diversity() -> None:
-    instance, weights, objective, graph = _setup()
-    stats = BPCStats(
-        root_constructive_incumbent_found=True,
-        root_constructive_diversity_score=0.0,
-        root_constructive_drone_sorties=0,
-        root_constructive_truck_count=instance.num_trucks,
-        root_constructive_value=1.0,
-    )
-    extracted = _extract_root_routes(
-        instance,
-        weights,
-        SolverConfig(
-            root_compact_after_constructive="conditional_small_budget",
-            root_compact_time_limit_after_constructive=0.0,
-        ),
-        graph,
-        objective,
-        {},
-        stats,
-        time.time() + 60.0,
-        constructive_incumbent_found=True,
-    )
-    assert extracted == set()
-    assert stats.root_compact_conditional_triggered is True
-    assert "low_diversity" in stats.root_compact_conditional_reason
-    assert stats.root_compact_status == "skipped"
-    assert stats.root_compact_skipped_reason == "zero_budget"
-
-
-def test_conditional_compact_uses_fixed_solve_budget_and_processes_incumbent(monkeypatch) -> None:
-    instance, weights, objective, graph = _setup()
-    stats = BPCStats(
-        root_constructive_incumbent_found=True,
-        root_constructive_diversity_score=0.0,
-        root_constructive_drone_sorties=0,
-        root_constructive_truck_count=instance.num_trucks,
-    )
-    calls = []
-    routes = {}
-
-    def fake_compact_solution(*args, **kwargs):
-        calls.append(kwargs)
-        return CompactSolution(
-            objective_full=1.0,
-            route_paths=(("Source", "C1", "Sink"),),
-            timing=CompactTiming(model_build_time=1.25, solve_time=0.5, route_decode_time=0.1),
-            status="success",
-        )
-
-    monkeypatch.setattr(bpc_module, "solve_compact_solution", fake_compact_solution)
-    extracted = _extract_root_routes(
-        instance,
-        weights,
-            SolverConfig(
-                root_compact_after_constructive="conditional_wall_budget",
-                root_compact_solve_time_limit=0.5,
-                compact_after_no_drone_incumbent="small_budget",
-            ),
-        graph,
-        objective,
-        routes,
-        stats,
-        time.time() + 60.0,
-        constructive_incumbent_found=True,
-    )
-    assert extracted == {("Source", "C1", "Sink")}
-    assert ("Source", "C1", "Sink") in routes
-    assert calls
-    assert calls[0]["time_limit"] == pytest.approx(0.5)
-    assert calls[0]["objective"] is objective
-    assert "wall_deadline" not in calls[0]
-    assert stats.root_compact_budget_seconds == pytest.approx(0.5)
-    assert stats.root_compact_wall_budget_seconds == pytest.approx(0.0)
-    assert stats.root_compact_solve_budget_seconds == pytest.approx(0.5)
-    assert stats.root_compact_status == "success"
-    assert stats.root_compact_wall_budget_hit is False
-    assert stats.root_model_build_time == pytest.approx(1.25)
-    assert stats.root_model_solve_time == pytest.approx(0.5)
-    assert stats.root_route_decode_time == pytest.approx(0.1)
-    assert stats.root_compact_decode_verification_time >= 0.0
-
-
-def test_rmp_insertion_rejects_late_route_object() -> None:
-    instance, _, objective, graph = _setup()
-    route = route_from_path(0, ("Source", "C1", "Sink"), graph, objective)
-    late_route = replace(route, service_times={"C1": objective.bounds.service_ub["C1"] + 10.0})
-    node = NodeState(
-        id=0,
-        depth=0,
-        restrictions=BranchRestrictions(),
-        fixed_routes=tuple(),
-        residual_customers=frozenset(instance.customers),
-        fleet_limit=instance.num_trucks,
-        fixed_cost=0.0,
-        column_paths=set(),
-        active_sr=set(),
-    )
-    stats = BPCStats()
-    with pytest.raises(RuntimeError, match="service upper bound"):
-        _insert_node_column(late_route, {route.path: route}, node, graph, stats, objective=objective)
-    assert stats.late_rmp_routes_rejected == 1
-
-
-def _two_hub_instance(h1_sink_time: float = 1.0) -> tuple[InstanceData, object, object]:
-    config = InstanceConfig(
-        seed=11,
-        num_trucks=1,
-        num_customers=1,
-        distribution="PS",
-        drones_per_truck=2,
-        num_hubs=2,
-        truck_payload=10.0,
-        drone_payload=10.0,
-        drone_endurance=100.0,
-        truck_cost=0.0,
-        drone_cost=0.0,
-    )
-    source = "Source"
-    sink = "Sink"
-    customers = ("C1",)
-    hubs = ("H1", "H2")
-    nodes = (source,) + customers + hubs + (sink,)
-    truck_arcs = {
-        (source, "C1"),
-        (source, "H1"),
-        (source, "H2"),
-        ("C1", sink),
-        ("C1", "H1"),
-        ("C1", "H2"),
-        ("H1", sink),
-        ("H1", "C1"),
-        ("H1", "H2"),
-        ("H2", sink),
-        ("H2", "C1"),
-        ("H2", "H1"),
+    h2 = "H2"
+    config = replace(base.config, num_hubs=2)
+    nodes = (base.depot_source,) + base.customers + ("H1", h2) + (base.depot_sink,)
+    truck_arcs = set(base.truck_arcs)
+    added_truck_arcs = {
+        (base.depot_source, h2),
+        ("H1", h2),
+        (h2, "H1"),
+        (h2, base.depot_sink),
     }
-    truck_time = {arc: 3.0 for arc in truck_arcs}
-    truck_time[(source, "H1")] = 1.0
-    truck_time[("H1", sink)] = h1_sink_time
-    truck_time[("H1", "H2")] = 1.0
-    truck_time[("H2", sink)] = 1.0
-    truck_time[(source, "C1")] = 2.0
-    truck_time[("C1", sink)] = 2.0
-    drone_arcs = {("H1", "C1"), ("H2", "C1")}
-    drone_time = {("H1", "C1"): 1.0, ("C1", "H1"): 1.0, ("H2", "C1"): 1.0, ("C1", "H2"): 1.0}
-    drone_trip_time = {("H1", "C1"): 2.0, ("H2", "C1"): 2.0}
-    demand = {source: 0.0, sink: 0.0, "C1": 1.0, "H1": 0.0, "H2": 0.0}
-    locations = {source: (0.0, 0.0), sink: (0.0, 0.0), "C1": (1.0, 0.0), "H1": (0.0, 1.0), "H2": (1.0, 1.0)}
-    instance = InstanceData(
+    truck_arcs.update(added_truck_arcs)
+    truck_time = dict(base.truck_time)
+    truck_time.update({arc: 1.0 for arc in added_truck_arcs})
+    drone_arcs = set(base.drone_arcs)
+    drone_arcs.add((h2, "C1"))
+    drone_time = dict(base.drone_time)
+    drone_time[(h2, "C1")] = 1.0
+    drone_time[("C1", h2)] = 1.0
+    drone_trip_time = dict(base.drone_trip_time)
+    drone_trip_time[(h2, "C1")] = 2.0
+    demand = dict(base.demand)
+    demand[h2] = 0.0
+    locations = dict(base.locations)
+    locations[h2] = (2.0, 2.0)
+    instance = replace(
+        base,
         config=config,
-        depot_source=source,
-        depot_sink=sink,
-        customers=customers,
-        hubs=hubs,
+        hubs=("H1", h2),
         nodes=nodes,
         truck_arcs=frozenset(truck_arcs),
         drone_arcs=frozenset(drone_arcs),
@@ -572,1365 +130,449 @@ def _two_hub_instance(h1_sink_time: float = 1.0) -> tuple[InstanceData, object, 
         demand=demand,
         locations=locations,
     )
-    objective = build_objective_data(instance, ObjectiveWeights(0.0, 1.0, 0.0))
+    weights = ObjectiveWeights(0.4, 0.3, 0.3)
+    objective = build_objective_data(instance, weights)
     graph = build_transformed_graph(instance)
     return instance, objective, graph
 
 
-def _pricing_source_label(instance, objective, duals, farkas: bool = False) -> _Label:
-    source_cost = -duals.kappa if farkas else objective.coeffs.cost * instance.truck_cost - duals.kappa
+def _label(
+    endpoint: str,
+    *,
+    active_pad: str = "H1",
+    represented: frozenset[str] = frozenset(),
+    truck_visited: frozenset[str] = frozenset({"Source", "H1"}),
+    arrival: float = 0.0,
+    wait: float = 0.0,
+    reduced_cost: float = 0.0,
+    sr_counts: tuple[tuple[tuple[str, str, str], int], ...] = tuple(),
+) -> _Label:
     return _Label(
-        path=(instance.depot_source,),
-        represented=frozenset(),
-        truck_visited=frozenset({instance.depot_source}),
+        path=("Source", active_pad, endpoint),
+        represented=represented,
+        truck_visited=truck_visited,
         truck_load=0.0,
-        active_pad=None,
-        active_pad_arrival=0.0,
-        active_wait=0.0,
+        active_pad=active_pad,
+        active_pad_arrival=arrival,
+        active_wait=wait,
         block_count=0,
-        physical_time=0.0,
+        physical_time=arrival,
         service_times=tuple(),
-        sr_counts=tuple(),
-        reduced_cost=source_cost,
-        used_arcs=frozenset(),
+        sr_counts=sr_counts,
+        reduced_cost=reduced_cost,
+        used_arcs=frozenset({("Source", active_pad), (active_pad, endpoint)}),
+        represented_mask=0,
+        truck_node_mask=0,
     )
 
 
-def test_backward_label_resources_exclude_meet_node() -> None:
-    instance, _, _, graph = _setup()
-    suffix = _build_backward_label(("C1", "C2", instance.depot_sink), graph, frozenset(instance.customers))
-    assert suffix.path == ("C1", "C2", instance.depot_sink)
-    assert suffix.represented == frozenset({"C2"})
-    assert suffix.truck_visited == frozenset({"C2"})
-    assert suffix.truck_load == pytest.approx(instance.demand["C2"])
-
-
-def test_backward_expansion_preserves_arc_validity_and_elementarity() -> None:
-    instance, _, _, graph = _setup()
-    sink_suffix = _build_backward_label((instance.depot_sink,), graph, frozenset(instance.customers))
-    expansion = _expand_backward_label(
-        sink_suffix,
-        graph,
-        frozenset(instance.customers),
-        tuple(),
-        BranchRestrictions(),
-        _arc_customer_sets(graph),
-    )
-    assert expansion.labels
-    assert all((i, j) in graph.arcs for label in expansion.labels for i, j in zip(label.path, label.path[1:]))
-    duplicate = duplicate_node("H1", "C1")
-    assert _try_build_backward_label(("H1", duplicate, "C1", instance.depot_sink), graph, frozenset(instance.customers)) is None
-
-
-def test_backward_profile_matches_full_route_decoding_after_join() -> None:
-    instance, _, objective, graph = _setup()
-    restrictions = BranchRestrictions().with_together("C1", "C2").with_trans_arc_required(("H1", duplicate_node("H1", "C1")))
-    active_sr = (tuple(instance.customers),)
-    suffix = _build_backward_label(
-        ("H1", duplicate_node("H1", "C1"), instance.depot_sink),
-        graph,
-        frozenset(instance.customers),
-        active_sr,
-        restrictions,
-        _arc_customer_sets(graph),
-    )
-    duals = PricingDuals(mu={c: 0.0 for c in instance.customers}, kappa=0.0, nu={active_sr[0]: -0.1})
-    prefix = _extend(_pricing_source_label(instance, objective, duals), "H1", graph, objective, duals, active_sr, False)
-    route = route_from_path(0, prefix.path + suffix.path[1:], graph, objective)
-    profile = suffix.profile
-    assert profile is not None
-    assert suffix.represented == frozenset({"C1"})
-    assert suffix.truck_served == frozenset()
-    assert suffix.pad_served == frozenset({("H1", "C1")})
-    assert suffix.sr_counts == ((active_sr[0], 1),)
-    assert suffix.branch_state is not None
-    assert suffix.branch_state.together == ((True, False),)
-    assert suffix.branch_state.required_arcs == ((("H1", duplicate_node("H1", "C1")), True, True),)
-    assert _evaluate_time_expr(dict(profile.service_times)["C1"], prefix) == pytest.approx(route.service_times["C1"])
-    assert _evaluate_time_expr(profile.return_time, prefix) == pytest.approx(route.return_time)
-
-
-def test_backward_insertion_rejects_duplicate_suffix_and_prunes_nonidentical_dominated_suffix() -> None:
-    instance, objective, graph = _two_hub_instance(h1_sink_time=1.0)
-    residual = frozenset(instance.customers)
-    restrictions = BranchRestrictions()
-    arc_customer_sets = _arc_customer_sets(graph)
-    duals = PricingDuals(mu={"C1": 0.0}, kappa=0.0, nu={})
-    direct = _build_backward_label(("H1", instance.depot_sink), graph, residual, tuple(), restrictions, arc_customer_sets)
-    detour = _build_backward_label(("H1", "H2", instance.depot_sink), graph, residual, tuple(), restrictions, arc_customer_sets)
-
-    by_node: dict[str, list] = {}
-    paths: set[tuple[str, ...]] = set()
-    assert _insert_nondominated_backward_label(by_node, paths, detour, graph, objective, restrictions, arc_customer_sets, duals, False) == (True, 0, 0, 0)
-    inserted, rejected, purged, tests = _insert_nondominated_backward_label(
-        by_node,
-        paths,
-        direct,
-        graph,
-        objective,
-        restrictions,
-        arc_customer_sets,
-        duals,
-        False,
-    )
-    assert (inserted, rejected, purged) == (True, 0, 1)
-    assert tests > 0
-    assert by_node["H1"] == [direct]
-    assert detour.path not in paths
-    assert _insert_nondominated_backward_label(by_node, paths, direct, graph, objective, restrictions, arc_customer_sets, duals, False) == (False, 1, 0, 0)
-
-
-def test_backward_dominance_rejects_uncertified_resource_and_branch_cases() -> None:
-    instance, objective, graph = _two_hub_instance(h1_sink_time=1.0)
-    residual = frozenset(instance.customers)
-    restrictions = BranchRestrictions()
-    arc_customer_sets = _arc_customer_sets(graph)
-    duals_positive = PricingDuals(mu={"C1": 5.0}, kappa=0.0, nu={})
-    empty_suffix = _build_backward_label(("H1", instance.depot_sink), graph, residual, tuple(), restrictions, arc_customer_sets)
-    customer_suffix = _build_backward_label(("H1", "C1", instance.depot_sink), graph, residual, tuple(), restrictions, arc_customer_sets)
-    assert not _backward_dominates(
-        empty_suffix,
-        customer_suffix,
-        graph,
-        objective,
-        restrictions,
-        arc_customer_sets,
-        duals_positive,
-        False,
-    )
-
-    duals = PricingDuals(mu={"C1": -1.0}, kappa=0.0, nu={})
-    drone_suffix = _build_backward_label(
-        ("H1", duplicate_node("H1", "C1"), instance.depot_sink),
-        graph,
-        residual,
-        tuple(),
-        restrictions,
-        arc_customer_sets,
-    )
-    assert not _backward_dominates(
-        customer_suffix,
-        drone_suffix,
-        graph,
-        objective,
-        restrictions,
-        arc_customer_sets,
-        duals,
-        False,
-    )
-    branch_restrictions = BranchRestrictions().with_route_forbidden(("Source", "H1", instance.depot_sink))
-    branch_direct = _build_backward_label(("H1", instance.depot_sink), graph, residual, tuple(), branch_restrictions, arc_customer_sets)
-    branch_detour = _build_backward_label(("H1", "H2", instance.depot_sink), graph, residual, tuple(), branch_restrictions, arc_customer_sets)
-    assert not _backward_dominates(
-        branch_direct,
-        branch_detour,
-        graph,
-        objective,
-        branch_restrictions,
-        arc_customer_sets,
-        duals,
-        False,
-    )
-
-
-def test_backward_farkas_dominance_uses_farkas_valid_suffix_comparison() -> None:
-    instance, objective, graph = _two_hub_instance(h1_sink_time=10.0)
-    residual = frozenset(instance.customers)
-    restrictions = BranchRestrictions()
-    arc_customer_sets = _arc_customer_sets(graph)
-    duals = PricingDuals(mu={"C1": 0.0}, kappa=0.0, nu={})
-    slow_direct = _build_backward_label(("H1", instance.depot_sink), graph, residual, tuple(), restrictions, arc_customer_sets)
-    fast_detour = _build_backward_label(("H1", "H2", instance.depot_sink), graph, residual, tuple(), restrictions, arc_customer_sets)
-    assert not _backward_dominates(
-        slow_direct,
-        fast_detour,
-        graph,
-        objective,
-        restrictions,
-        arc_customer_sets,
-        duals,
-        False,
-    )
-    assert _backward_dominates(
-        slow_direct,
-        fast_detour,
-        graph,
-        objective,
-        restrictions,
-        arc_customer_sets,
-        duals,
-        True,
-    )
-
-
-def test_branch_state_records_together_and_required_arc_automata() -> None:
-    instance, _, objective, graph = _setup()
-    duals = PricingDuals(mu={c: 0.0 for c in instance.customers}, kappa=0.0, nu={})
-    source = _pricing_source_label(instance, objective, duals)
-    prefix = _extend(source, "H1", graph, objective, duals, tuple(), False)
-    required_arc = ("H1", duplicate_node("H1", "C1"))
-    drone_label = _extend(prefix, required_arc[1], graph, objective, duals, tuple(), False)
-    truck_label = _extend(source, "C1", graph, objective, duals, tuple(), False)
-    restrictions = BranchRestrictions().with_together("C1", "C2").with_trans_arc_required(required_arc)
-    arc_customer_sets = {arc: graph.arc_customer_set(arc) for arc in graph.arcs}
-
-    drone_state = _branch_state(drone_label, restrictions, arc_customer_sets)
-    truck_state = _branch_state(truck_label, restrictions, arc_customer_sets)
-
-    assert drone_state.together == ((True, False),)
-    assert drone_state.required_arcs == ((required_arc, True, True),)
-    assert truck_state.required_arcs == ((required_arc, True, False),)
-
-
-def test_same_node_join_decodes_and_matches_direct_reduced_costs() -> None:
-    instance, _, objective, graph = _setup()
-    duals = PricingDuals(mu={c: 10.0 for c in instance.customers}, kappa=-1.0, nu={tuple(instance.customers): -0.25})
-    source = _pricing_source_label(instance, objective, duals)
-    prefix = _extend(source, "H1", graph, objective, duals, tuple(sorted(duals.nu)), False)
-    suffix_path = ("H1", duplicate_node("H1", "C1"), instance.depot_sink)
-    suffix = _build_backward_label(suffix_path, graph, frozenset(instance.customers))
-    arc_customer_sets = {arc: graph.arc_customer_set(arc) for arc in graph.arcs}
-    candidate = _join_forward_backward(
-        prefix,
-        suffix,
-        graph,
-        objective,
-        frozenset(instance.customers),
-        BranchRestrictions(),
-        arc_customer_sets,
-        duals,
-        False,
-    )
-    assert candidate is not None
-    full_path = prefix.path + suffix.path[1:]
-    route = route_from_path(0, full_path, graph, objective)
-    assert candidate.path == full_path
-    assert candidate.reduced_cost == pytest.approx(route_reduced_cost(route, duals))
-
-    farkas_source = _pricing_source_label(instance, objective, duals, True)
-    farkas_prefix = _extend(farkas_source, "H1", graph, objective, duals, tuple(sorted(duals.nu)), True)
-    farkas_candidate = _join_forward_backward(
-        farkas_prefix,
-        suffix,
-        graph,
-        objective,
-        frozenset(instance.customers),
-        BranchRestrictions(),
-        arc_customer_sets,
-        duals,
-        True,
-    )
-    assert farkas_candidate is not None
-    assert farkas_candidate.reduced_cost == pytest.approx(route_farkas_reduced_cost(route, duals))
-
-
-def test_backward_cost_function_and_sr_join_correction_match_direct_route() -> None:
-    instance, _, objective, graph = _setup()
-    active_sr = (tuple(instance.customers),)
-    duals = PricingDuals(mu={c: 4.0 for c in instance.customers}, kappa=-0.3, nu={active_sr[0]: -0.7})
-    source = replace(_pricing_source_label(instance, objective, duals), sr_counts=tuple((triplet, 0) for triplet in active_sr))
-    prefix = _extend(source, "C2", graph, objective, duals, active_sr, False)
-    suffix = _build_backward_label(
-        ("C2", "C1", instance.depot_sink),
-        graph,
-        frozenset(instance.customers),
-        active_sr,
-        BranchRestrictions(),
-        _arc_customer_sets(graph),
-    )
-    candidate = _join_forward_backward(
-        prefix,
-        suffix,
-        graph,
-        objective,
-        frozenset(instance.customers),
-        BranchRestrictions(),
-        _arc_customer_sets(graph),
-        duals,
-        False,
-    )
-    assert candidate is not None
-    route = route_from_path(0, candidate.path, graph, objective)
-    assert candidate.reduced_cost == pytest.approx(route_reduced_cost(route, duals))
-    assert _sr_join_correction(dict(prefix.sr_counts), dict(suffix.sr_counts), duals) == pytest.approx(0.7)
-
-    farkas_source = replace(_pricing_source_label(instance, objective, duals, True), sr_counts=tuple((triplet, 0) for triplet in active_sr))
-    farkas_prefix = _extend(farkas_source, "C2", graph, objective, duals, active_sr, True)
-    farkas_candidate = _join_forward_backward(
-        farkas_prefix,
-        suffix,
-        graph,
-        objective,
-        frozenset(instance.customers),
-        BranchRestrictions(),
-        _arc_customer_sets(graph),
-        duals,
-        True,
-    )
-    assert farkas_candidate is not None
-    assert farkas_candidate.reduced_cost == pytest.approx(route_farkas_reduced_cost(route, duals))
-
-
-def test_backward_lower_envelope_is_certified_for_standard_interfaces() -> None:
-    instance, _, objective, graph = _setup()
-    active_sr = (tuple(instance.customers),)
-    duals = PricingDuals(mu={"C1": 5.0, "C2": -2.0, "C3": 0.0}, kappa=0.0, nu={active_sr[0]: -0.4})
-    suffix = _build_backward_label(
-        ("C2", "C1", instance.depot_sink),
-        graph,
-        frozenset(instance.customers),
-        active_sr,
-        BranchRestrictions(),
-        _arc_customer_sets(graph),
-    )
-    assert suffix.cost_function is not None
-    assert suffix.lower_envelope is not None
-    for interface in (
-        _BackwardInterface(physical_time=0.0, pad_arrival=0.0, active_wait=0.0),
-        _BackwardInterface(physical_time=7.5, pad_arrival=3.0, active_wait=1.25),
-        _BackwardInterface(physical_time=20.0, pad_arrival=12.0, active_wait=6.0),
-    ):
-        lower = suffix.lower_envelope.evaluate(duals, farkas=False)
-        exact = suffix.cost_function.evaluate(interface, graph, objective, duals, farkas=False)
-        assert lower <= exact + 1e-9
-    with pytest.raises(ValueError, match="Farkas"):
-        suffix.lower_envelope.evaluate(duals, farkas=True)
-
-
-def test_join_lower_bound_valid_and_farkas_bypasses_standard_envelope() -> None:
-    instance, _, objective, graph = _setup()
-    active_sr = (tuple(instance.customers),)
-    duals = PricingDuals(mu={c: 4.0 for c in instance.customers}, kappa=-0.2, nu={active_sr[0]: -0.5})
-    source = replace(_pricing_source_label(instance, objective, duals), sr_counts=tuple((triplet, 0) for triplet in active_sr))
-    prefix = _extend(source, "C2", graph, objective, duals, active_sr, False)
-    suffix = _build_backward_label(
-        ("C2", "C1", instance.depot_sink),
-        graph,
-        frozenset(instance.customers),
-        active_sr,
-        BranchRestrictions(),
-        _arc_customer_sets(graph),
-    )
-    lower_bound = _join_lower_bound(prefix, suffix, graph, duals, farkas=False)
-    exact = _joined_reduced_cost(prefix, suffix, graph, objective, duals, farkas=False)
-    assert lower_bound <= exact + 1e-9
-    assert _join_lower_bound(prefix, suffix, graph, duals, farkas=True) == float("-inf")
-    assert _join_lower_bound(prefix, suffix, graph, duals, farkas=False, enable_join_lower_envelope=False) == float("-inf")
-
-
-def test_join_interface_cache_invalidation_by_dual_and_active_sr_version() -> None:
-    instance, _, objective, graph = _setup()
-    active_sr = (tuple(instance.customers),)
-    duals = PricingDuals(mu={c: 4.0 for c in instance.customers}, kappa=-0.2, nu={active_sr[0]: -0.5})
-    source = replace(_pricing_source_label(instance, objective, duals), sr_counts=tuple((triplet, 0) for triplet in active_sr))
-    prefix = _extend(source, "C2", graph, objective, duals, active_sr, False)
-    suffix = _build_backward_label(
-        ("C2", "C1", instance.depot_sink),
-        graph,
-        frozenset(instance.customers),
-        active_sr,
-        BranchRestrictions(),
-        _arc_customer_sets(graph),
-    )
-    cache = _JoinEvalCache()
-    key = _dual_solution_key(duals)
-    first = _joined_reduced_cost_cached(prefix, suffix, graph, objective, duals, False, cache, 1, key)
-    second = _joined_reduced_cost_cached(prefix, suffix, graph, objective, duals, False, cache, 1, key)
-    assert first == pytest.approx(_joined_reduced_cost(prefix, suffix, graph, objective, duals, False))
-    assert second == pytest.approx(first)
-    assert cache.misses == 1
-    assert cache.hits == 1
-    _joined_reduced_cost_cached(prefix, suffix, graph, objective, duals, False, cache, 2, key)
-    assert cache.misses == 2
-    duals_changed = PricingDuals(mu={c: 3.0 for c in instance.customers}, kappa=-0.2, nu={active_sr[0]: -0.5})
-    _joined_reduced_cost_cached(prefix, suffix, graph, objective, duals_changed, False, cache, 1, _dual_solution_key(duals_changed))
-    assert cache.misses == 3
-
-
-def test_same_node_join_rejects_branch_incompatible_suffix() -> None:
-    instance, _, objective, graph = _setup()
-    duals = PricingDuals(mu={c: 10.0 for c in instance.customers}, kappa=0.0, nu={})
-    source = _pricing_source_label(instance, objective, duals)
-    prefix = _extend(source, "H1", graph, objective, duals, tuple(), False)
-    suffix = _build_backward_label(("H1", duplicate_node("H1", "C1"), instance.depot_sink), graph, frozenset(instance.customers))
-    arc_customer_sets = {arc: graph.arc_customer_set(arc) for arc in graph.arcs}
-    candidate = _join_forward_backward(
-        prefix,
-        suffix,
-        graph,
-        objective,
-        frozenset(instance.customers),
-        BranchRestrictions().with_truck_service("C1"),
-        arc_customer_sets,
-        duals,
-        False,
-    )
-    assert candidate is None
-
-
-def test_source_neighbor_partition_disjoint_exhaustive() -> None:
-    neighbors = tuple(f"N{i}" for i in range(1, 9))
-    blocks = _partition_source_neighbors(neighbors, 4)
-    assert blocks == (
-        ("N1", "N5"),
-        ("N2", "N6"),
-        ("N3", "N7"),
-        ("N4", "N8"),
-    )
-    flattened = [node for block in blocks for node in block]
-    assert sorted(flattened) == sorted(neighbors)
-    assert sum(len(block) for block in blocks) == len(set(flattened))
-
-    sparse_blocks = _partition_source_neighbors(("A", "B", "C"), 5)
-    assert sparse_blocks == (("A",), ("B",), ("C",), tuple(), tuple())
-    assert len(sparse_blocks) == 5
-    assert tuple(node for block in sparse_blocks for node in block) == ("A", "B", "C")
-
-    empty_blocks = _partition_source_neighbors(tuple(), 3)
-    assert empty_blocks == (tuple(), tuple(), tuple())
-
-
-def test_sr_cut_batch_selects_most_violated_triplets_deterministically() -> None:
-    activities = {
-        ("C1", "C2", "C3"): 1.10,
-        ("C1", "C2", "C4"): 1.40,
-        ("C1", "C3", "C4"): 1.40,
-        ("C2", "C3", "C4"): 1.20,
-    }
-    selected = _select_sr_cut_batch(activities, 2)
-    assert list(selected) == [("C1", "C2", "C4"), ("C1", "C3", "C4")]
-    assert set(activities) - set(selected) == {("C1", "C2", "C3"), ("C2", "C3", "C4")}
-
-
-def test_balanced_source_neighbor_partition_is_disjoint_and_load_balanced() -> None:
-    instance, _, objective, graph = _setup()
-    neighbors = tuple(sorted(node for node in graph.out_arcs[instance.depot_source] if node != instance.depot_sink))
-
-    partition = _balanced_source_neighbor_partition(
-        neighbors,
-        3,
-        graph=graph,
+def _dominance_context(
+    instance: InstanceData,
+    objective,
+    restrictions: BranchRestrictions,
+    residual_customers: frozenset[str] | None = None,
+) -> _DominanceExtensionContext:
+    return _DominanceExtensionContext(
         objective=objective,
-        residual_customers=frozenset(instance.customers),
-        balance_config=_KCoreBalanceConfig(enabled=True),
+        residual_customers=residual_customers or frozenset(instance.customers),
+        restrictions=restrictions,
     )
 
-    flattened = tuple(node for block in partition.blocks for node in block)
-    assert sorted(flattened) == sorted(neighbors)
-    assert len(flattened) == len(set(flattened))
-    assert len(partition.blocks) == 3
-    assert len(partition.loads) == 3
-    assert partition.imbalance_max_mean >= 0.0
 
-
-def test_dynamic_kcore_refinement_conserves_prefix_subspaces() -> None:
-    instance, _, objective, graph = _setup()
-    neighbors = tuple(sorted(node for node in graph.out_arcs[instance.depot_source] if node != instance.depot_sink))
-
-    plan = _build_balanced_dynamic_task_plan(
-        graph,
-        objective,
-        frozenset(instance.customers),
-        BranchRestrictions(),
-        neighbors,
-        2,
-        prefix_task_depth=1,
-        balance_config=_KCoreBalanceConfig(enabled=True),
-        refinement_config=_DynamicRefinementConfig(
-            enabled=True,
-            split_label_threshold=1,
-            split_gap_multiplier=10.0,
-            split_time_threshold=0.0,
-            split_work_threshold=1.0,
-            refinement_depth=2,
-            checkpoint_extension_period=1,
-        ),
-        pricing_tolerance=0.01,
-    )
-
-    expected_prefixes = _source_neighbor_prefix_tasks(
-        graph,
-        objective,
-        frozenset(instance.customers),
-        BranchRestrictions(),
-        2,
-    )
-    planned_prefixes = tuple(prefix for block in plan.source_prefix_blocks for prefix in block)
-    planned_neighbors = sorted(node for block in plan.source_neighbor_blocks for node in block)
-    assert sorted(planned_prefixes) == sorted(expected_prefixes)
-    assert set(planned_neighbors).issubset(set(neighbors))
-    assert len(plan.source_neighbor_blocks) == len(plan.source_prefix_blocks)
-    assert sum(len(block) for block in plan.source_prefix_blocks) == len(expected_prefixes)
-    assert plan.labels_transferred_to_idle_workers <= len(expected_prefixes)
-    assert plan.dynamic_split_candidates >= plan.dynamic_splits_performed
-    assert plan.dynamic_splits_performed > 0
-    for block, prefixes in zip(plan.source_neighbor_blocks, plan.source_prefix_blocks):
-        for prefix in prefixes:
-            assert prefix
-            assert prefix[0] in block
-
-
-def test_parallel_forward_certification_matches_serial_forward() -> None:
-    instance, _, objective, graph = _setup()
-    duals = PricingDuals(mu={c: 0.0 for c in instance.customers}, kappa=0.0, nu={})
-    serial = price_route(
-        graph,
-        objective,
-        frozenset(instance.customers),
-        BranchRestrictions(),
-        duals,
-        next_route_id=700,
-        batch_size=1000,
-        use_standard_acceleration=False,
-        parallel_workers=1,
-    )
-    threaded = price_route(
-        graph,
-        objective,
-        frozenset(instance.customers),
-        BranchRestrictions(),
-        duals,
-        next_route_id=800,
-        batch_size=1000,
-        use_standard_acceleration=False,
-        pricing_mode="closure",
-        parallel_workers=2,
-        pricing_worker_backend="thread",
-    )
-    assert threaded.diagnostics.pricing_engine == "source_neighbor_parallel_forward"
-    assert threaded.diagnostics.exact_completion is True
-    assert threaded.diagnostics.certification_mode == "source_neighbor_partitions_closed"
-    assert threaded.diagnostics.parallel_calls == 1
-    assert threaded.diagnostics.pricing_first_hit_enabled is False
-    assert threaded.diagnostics.core_subspace_count == 2
-    assert threaded.diagnostics.root_closed_by_all_cores is True
-    assert threaded.diagnostics.source_neighbor_count == len(
-        [node for node in graph.out_arcs[instance.depot_source] if node != instance.depot_sink]
-    )
-    assert threaded.best_reduced_cost == pytest.approx(serial.best_reduced_cost)
-    assert threaded.routes == tuple()
-    assert threaded.diagnostics.backward_labels_generated == 0
-    assert threaded.diagnostics.join_pairs_tested == 0
-
-
-def test_parallel_forward_farkas_thread_and_process_return_valid_columns() -> None:
-    instance, _, objective, graph = _setup()
-    duals = PricingDuals(mu={c: 2.0 for c in instance.customers}, kappa=-0.5, nu={tuple(instance.customers): -0.1})
-    threaded = price_route(
-        graph,
-        objective,
-        frozenset(instance.customers),
-        BranchRestrictions(),
-        duals,
-        next_route_id=900,
-        farkas=True,
-        batch_size=1,
-        parallel_workers=2,
-        pricing_worker_backend="thread",
-    )
-    processed = price_route(
-        graph,
-        objective,
-        frozenset(instance.customers),
-        BranchRestrictions(),
-        duals,
-        next_route_id=1000,
-        farkas=True,
-        batch_size=1,
-        parallel_workers=2,
-        pricing_worker_backend="process",
-    )
-    assert threaded.routes
-    assert processed.routes
-    for result in (threaded, processed):
-        assert result.diagnostics.pricing_engine == "source_neighbor_parallel_forward"
-        assert result.diagnostics.parallel_calls == 1
-        assert result.diagnostics.pricing_status == "NEGATIVE_BATCH"
-        assert result.diagnostics.backward_labels_generated == 0
-        assert result.diagnostics.join_exact_rc_evals == 0
-        for route, reduced_cost in zip(result.routes, result.reduced_costs):
-            assert reduced_cost < 0.0
-            assert reduced_cost == pytest.approx(route_farkas_reduced_cost(route, duals))
-
-
-def test_source_neighbor_task_chunks_are_disjoint_and_exhaustive() -> None:
-    neighbors = ("A", "B", "C", "D", "E")
-
-    chunks = _chunk_source_neighbors(neighbors, 2)
-
-    assert chunks == (("A", "B"), ("C", "D"), ("E",))
-    assert tuple(item for chunk in chunks for item in chunk) == neighbors
-    assert len(set(item for chunk in chunks for item in chunk)) == len(neighbors)
-
-
-def test_diversity_selection_is_deterministic_and_uses_verified_routes_only() -> None:
-    instance, _, objective, graph = _setup()
-    routes = [
-        route_from_path(1, ("Source", "C1", "Sink"), graph, objective),
-        route_from_path(2, ("Source", "C2", "Sink"), graph, objective),
-        route_from_path(3, ("Source", "C1", "C2", "Sink"), graph, objective),
-    ]
-    candidates = [(routes[0], -3.0, 0), (routes[1], -2.0, 1), (routes[2], -1.0, 0)]
-
-    selected, quota = _select_diverse_pricing_candidates(candidates, frozenset(instance.customers), 2, 0.5)
-
-    assert quota == 1
-    assert [route.path for route, _, _ in selected] == [routes[2].path, routes[0].path]
-    selected_again, _ = _select_diverse_pricing_candidates(candidates, frozenset(instance.customers), 2, 0.5)
-    assert selected_again == selected
-
-
-def test_persistent_process_pool_reuses_workers_and_returns_batch() -> None:
-    instance, _, objective, graph = _setup()
-    duals = PricingDuals(mu={c: 100.0 for c in instance.customers}, kappa=0.0, nu={})
-    pool = SourceNeighborPricingPool(graph, objective, 2, source_neighbor_task_size=1)
-    try:
-        first = price_route(
-            graph,
-            objective,
-            frozenset(instance.customers),
-            BranchRestrictions(),
-            duals,
-            next_route_id=1100,
-            farkas=False,
-            batch_size=4,
-            parallel_workers=2,
-            pricing_worker_backend="process",
-            pricing_process_pool=pool,
-            productive_candidate_multiplier=1.0,
-            source_neighbor_task_size=1,
-            pricing_diversity_batch_fraction=0.5,
-        )
-        second = price_route(
-            graph,
-            objective,
-            frozenset(instance.customers),
-            BranchRestrictions(),
-            duals,
-            next_route_id=1200,
-            farkas=False,
-            batch_size=4,
-            parallel_workers=2,
-            pricing_worker_backend="process",
-            pricing_process_pool=pool,
-            productive_candidate_multiplier=1.0,
-            source_neighbor_task_size=1,
-            pricing_diversity_batch_fraction=0.5,
-        )
-    finally:
-        pool.shutdown()
-    assert first.routes
-    assert len(first.routes) > 1
-    assert first.diagnostics.pricing_engine == "source_neighbor_parallel_forward"
-    assert first.diagnostics.pricing_worker_backend == "process"
-    assert first.diagnostics.pricing_pool_startup_count == 1
-    assert second.diagnostics.pricing_pool_startup_count == 0
-    assert first.diagnostics.pricing_pool_reused_calls == 1
-    assert second.diagnostics.pricing_pool_reused_calls == 1
-    assert first.diagnostics.pricing_first_hit_enabled is False
-    assert first.diagnostics.first_hit_exits == 0
-    assert first.diagnostics.pricing_batch_target == 4
-    assert first.diagnostics.pricing_returned_batch_size == len(first.routes)
-    assert first.diagnostics.pricing_worker_payload_count == first.diagnostics.source_neighbor_task_count
-    assert first.diagnostics.pricing_worker_response_count == first.diagnostics.source_neighbor_task_count
-    assert first.diagnostics.source_neighbor_task_count == 2
-    assert first.diagnostics.core_subspace_count == 2
-    assert len(first.diagnostics.source_neighbor_block_sizes) == 2
-    assert sum(first.diagnostics.source_neighbor_block_sizes) == first.diagnostics.source_neighbor_count
-    assert first.diagnostics.local_worker_candidate_quota >= 1
-    assert first.diagnostics.diversity_quota == 2
-    assert first.diagnostics.diversity_selected_routes == len(first.routes)
-    assert first.diagnostics.pricing_candidate_paths_before_merge >= first.diagnostics.pricing_candidate_paths_after_merge
-    assert first.diagnostics.pricing_decoded_routes_in_main >= len(first.routes)
-    assert first.diagnostics.pricing_verified_routes_in_main >= len(first.routes)
-    assert first.diagnostics.backward_labels_generated == 0
-    assert first.diagnostics.join_pairs_tested == 0
-    for route, reduced_cost in zip(first.routes, first.reduced_costs):
-        assert reduced_cost < 0.0
-        assert reduced_cost == pytest.approx(route_reduced_cost(route, duals))
-
-
-def test_persistent_process_merge_rejects_stale_call_id() -> None:
-    instance, _, objective, graph = _setup()
-    diagnostics = PricingDiagnostics(
-        labels_generated=1,
-        labels_dominated=0,
-        labels_pruned=0,
-        max_queue_size=1,
-        complete_routes_generated=0,
-        returned_routes=0,
-        best_reduced_cost=None,
-        exact_completion=True,
-    )
-    duals = PricingDuals(mu={c: 0.0 for c in instance.customers}, kappa=0.0, nu={})
-    epoch = _pricing_epoch(objective, frozenset(instance.customers), BranchRestrictions(), duals, None, None)
-    stale = _WorkerPricingResult(
-        call_id=1,
-        dual_id=1,
-        epoch=epoch,
-        worker_id=0,
-        route_paths=tuple(),
-        reduced_costs=tuple(),
-        best_path=None,
-        best_reduced_cost=None,
-        diagnostics=diagnostics,
-    )
-    with pytest.raises(RuntimeError, match="stale"):
-        _merge_compact_worker_results(
-            [stale],
-            graph,
-            objective,
-            frozenset(instance.customers),
-            BranchRestrictions(),
-            duals,
-            next_route_id=1300,
-            farkas=False,
-            pricing_tolerance=1e-7,
-            existing_routes=None,
-            existing_column_paths=None,
-            pricing_mode="productive",
-            pricing_yield_ratio=0.0,
-            pricing_worker_backend="process",
-            source_neighbor_count=1,
-            source_neighbor_block_sizes=(1,),
-            parallel_workers=1,
-            selected=None,
-            force_time_limit=False,
-            call_id=2,
-            dual_id=1,
-            expected_epoch=epoch,
-            submission_time_seconds=0.0,
-            pool_startup_time_seconds=0.0,
-            pool_startup_count=0,
-            pool_reused_calls=1,
-            first_hit_enabled=False,
-            batch_target=4,
-        )
-
-
-def test_productive_slice_timeout_is_unresolved_not_global_time_limit() -> None:
-    instance, _, _, _ = _setup()
-    node = NodeState(
-        id=1,
+def _root_node(instance, paths: set[tuple[str, ...]], active_sr=None) -> NodeState:
+    return NodeState(
+        id=0,
         depth=0,
         restrictions=BranchRestrictions(),
         fixed_routes=tuple(),
         residual_customers=frozenset(instance.customers),
         fleet_limit=instance.num_trucks,
         fixed_cost=0.0,
-        column_paths=set(),
-        active_sr=set(),
-    )
-    stats = BPCStats()
-    diagnostics = PricingDiagnostics(
-        labels_generated=1,
-        labels_dominated=0,
-        labels_pruned=0,
-        max_queue_size=1,
-        complete_routes_generated=0,
-        returned_routes=0,
-        best_reduced_cost=None,
-        exact_completion=False,
-        termination_reason="time_limit_unresolved",
-        certification_mode="not_certified_time_limit",
-        pricing_mode="productive",
-        pricing_status="TIME_LIMIT_NO_COLUMNS",
+        column_paths=set(paths),
+        active_sr=set(active_sr or set()),
     )
 
-    _record_productive_slice_timeout(
-        stats,
-        PricingTimeLimitReached(diagnostics),
-        SolverConfig(),
-        node,
-        {},
-        set(),
-        RouteSignatureCache(),
+
+def test_forward_extension_rejects_customer_after_service_envelope() -> None:
+    base = tiny_instance()
+    objective = build_objective_data(base, ObjectiveWeights(0.4, 0.3, 0.3))
+    bounds = dict(objective.bounds.service_ub)
+    bounds["C1"] = objective.bounds.arrival_lb["C1"]
+    instance = replace(base, config=replace(base.config, service_deadline_mode="manual", service_deadline_manual_bounds=bounds))
+    graph = build_transformed_graph(instance)
+    objective = build_objective_data(instance, ObjectiveWeights(0.4, 0.3, 0.3))
+    source = _Label(
+        path=("Source", "C2"), represented=frozenset({"C2"}), truck_visited=frozenset({"Source", "C2"}),
+        truck_load=instance.demand["C2"], active_pad=None, active_pad_arrival=0.0, active_wait=0.0,
+        block_count=0, physical_time=instance.truck_time[("Source", "C2")], service_times=tuple(),
+        sr_counts=tuple(), reduced_cost=0.0, used_arcs=frozenset({("Source", "C2")}),
     )
-
-    assert stats.status == "unknown"
-    assert stats.pricing_productive_time_limit_no_columns == 1
-    assert stats.pricing_productive_mode_calls == 1
-    assert stats.pricing_closure_mode_calls == 0
-    assert stats.pricing_diagnostics[-1]["certification_mode"] == "not_certified_time_limit"
+    assert _extension_rejected_by_service_deadline(source, "C1", graph, objective)
 
 
-def test_solver_config_yield_alignment_defaults_and_validation() -> None:
-    config = SolverConfig(first_incumbent_route_pool_time_limit=0.0)
-
-    assert config.enable_bidirectional_pricing is False
-    assert config.enable_join_lower_envelope is False
-    assert config.enable_bucket_join_envelope is False
-    assert config.enable_join_profile_cache is False
-    assert config.productive_slice_min_seconds == 5.0
-    assert config.productive_slice_max_seconds == 30.0
-    assert config.closure_attempt_batch_period == 4
-    assert config.closure_attempt_time_period == 120.0
-    assert config.closure_batch_size == 32
-    assert config.prefix_task_depth == 1
-    assert config.prefix_task_depth_root == 1
-    assert config.prefix_task_depth_child == 1
-    assert config.prefix_task_min_branching_for_depth2 == 4
-    assert config.post_incumbent_primal_budget_factor == 0.25
-    assert config.enable_constructive_root_incumbent is True
-    assert config.root_compact_after_constructive == "full_budget"
-    assert config.root_compact_time_limit_after_constructive == 60.0
-    assert config.root_compact_time_limit_without_constructive == 60.0
-    assert config.constructive_diversity_threshold == 0.35
-    assert config.enable_sr_aging is True
-    assert config.sr_inactive_age_threshold == 1
-    assert config.sr_removal_batch_size == 32
-    assert config.sr_max_removals_per_node == 32
-    assert config.sr_removal_min_active_count == 64
-    assert config.sr_removal_rmp_growth_threshold == 0.20
-    assert config.enable_node_column_aging is True
-    assert config.child_certification_slice_seconds == 30.0
-    assert config.child_productive_before_certification is False
-    assert config.enable_rmp_basis_reuse is True
-    assert config.root_compact_wall_time_limit == 0.0
-    assert config.root_compact_solve_time_limit == 60.0
-    assert config.enable_drone_diversification_warm_start is True
-    assert config.enable_balanced_kcore_pricing is True
-    assert config.enable_dynamic_kcore_refinement is True
-    assert config.kcore_balance_alpha_reachable_customers == pytest.approx(1.0)
-    assert config.kcore_balance_alpha_out_degree == pytest.approx(0.25)
-    assert config.kcore_balance_alpha_drone_pads == pytest.approx(0.5)
-    assert config.kcore_balance_alpha_deadline_customers == pytest.approx(0.5)
-    assert config.dynamic_split_label_threshold == 2000
-    assert config.dynamic_split_gap_multiplier == pytest.approx(10.0)
-    assert config.dynamic_split_time_threshold == pytest.approx(5.0)
-    assert config.dynamic_split_work_threshold == pytest.approx(2000.0)
-    assert config.dynamic_refinement_depth == 2
-    assert config.checkpoint_extension_period == 5000
-    assert config.enable_incremental_rmp is True
-    assert config.enable_active_coefficient_cache is True
-    assert config.enable_global_branch_route_index is True
-    assert config.enable_resumable_child_certification is True
-    assert config.enable_child_closure_batch_adaptation is False
-    assert config.child_closure_batch_min == 16
-    assert config.child_closure_batch_initial == 32
-    assert config.child_closure_batch_max == 128
-    assert config.child_certification_yield_window == 5
-    assert config.child_certification_yield_low == pytest.approx(0.20)
-    assert config.child_certification_yield_high == pytest.approx(0.60)
-    assert config.child_cert_useful_yield_window == 5
-    assert config.child_cert_no_route_yield_window == 5
-    assert config.child_cert_dual_stability_window == 3
-    assert config.child_closure_batch_growth_factor == pytest.approx(1.0)
-    assert config.child_closure_batch_shrink_factor == pytest.approx(1.0)
-    assert config.child_useful_yield_low == pytest.approx(0.20)
-    assert config.child_useful_yield_high == pytest.approx(0.60)
-    assert config.child_no_route_yield_high == pytest.approx(1.0)
-    assert config.use_row_local_sr_coeff_cache is True
-    assert config.use_dominance_prefilter_keys is True
-    assert config.enable_closure_frontier_cells is True
-    assert config.enable_mask_trie_frontier is True
-    assert config.enable_mask_containment_index is True
-    assert config.enable_cell_envelope_rejection is True
-    assert config.enable_cell_lb_certificates is True
-    assert config.frontier_cell_max_labels == 512
-    assert config.frontier_cell_split_min_pairs == 2048
-    assert config.max_frontier_cell_size == 512
-    assert config.max_frontier_pair_product == 2000
-    assert config.max_frontier_split_depth == 6
-    assert config.enable_resource_restricted_closure_bound is True
-    assert config.resource_bound_method == "greedy"
-    assert config.resource_bound_payload_bucket == 0
-    assert config.closure_queue_enabled is True
-    assert config.closure_queue_mode == "cell_lb"
-    assert config.closure_mode_rebuild_frontier is True
-    assert config.use_promised_drone_construction is False
-    assert config.no_drone_incumbent_trigger is False
-    assert config.compact_after_no_drone_incumbent == "small_budget"
-    assert config.logging_mode == "audit"
-    assert config.progress_snapshot_period == 1
-    assert config.pricing_jsonl_enabled is True
-
-    with pytest.raises(ValueError, match="productive pricing slice must be positive"):
-        SolverConfig(productive_pricing_slice_seconds=0.0)
-    with pytest.raises(ValueError, match="first-incumbent route-pool time limit must be nonnegative"):
-        SolverConfig(first_incumbent_route_pool_time_limit=-1.0)
-    with pytest.raises(ValueError, match="productive slice bounds"):
-        SolverConfig(productive_slice_min_seconds=40.0, productive_slice_max_seconds=30.0)
-    with pytest.raises(ValueError, match="productive yield thresholds"):
-        SolverConfig(productive_yield_low_threshold=2.0, productive_yield_high_threshold=1.0)
-    with pytest.raises(ValueError, match="prefix_task_depth"):
-        SolverConfig(prefix_task_depth=0)
-    with pytest.raises(ValueError, match="post-incumbent primal budget factor"):
-        SolverConfig(post_incumbent_primal_budget_factor=1.5)
-    with pytest.raises(ValueError, match="root_compact_after_constructive"):
-        SolverConfig(root_compact_after_constructive="bad")
-    with pytest.raises(ValueError, match="logging_mode"):
-        SolverConfig(logging_mode="verbose")
-    with pytest.raises(ValueError, match="root compact time limits"):
-        SolverConfig(root_compact_wall_time_limit=-1.0)
-    with pytest.raises(ValueError, match="root compact time limits"):
-        SolverConfig(root_compact_solve_time_limit=-1.0)
-    with pytest.raises(ValueError, match="pricing batch sizes must be positive"):
-        SolverConfig(dynamic_refinement_depth=0)
-    with pytest.raises(ValueError, match="pricing batch sizes must be positive"):
-        SolverConfig(checkpoint_extension_period=0)
-    with pytest.raises(ValueError, match="balanced dynamic K-core"):
-        SolverConfig(kcore_balance_alpha_reachable_customers=-1.0)
-    with pytest.raises(ValueError, match="child closure batches"):
-        SolverConfig(child_closure_batch_min=32, child_closure_batch_initial=16)
-    with pytest.raises(ValueError, match="child certification yield thresholds"):
-        SolverConfig(child_certification_yield_low=0.9, child_certification_yield_high=0.1)
-    with pytest.raises(ValueError, match="child useful yield thresholds"):
-        SolverConfig(child_useful_yield_low=0.9, child_useful_yield_high=0.1)
-    with pytest.raises(ValueError, match="child no-route yield threshold"):
-        SolverConfig(child_no_route_yield_high=1.1)
-    with pytest.raises(ValueError, match="compact_after_no_drone_incumbent"):
-        SolverConfig(compact_after_no_drone_incumbent="bad")
-    with pytest.raises(ValueError, match="pricing batch sizes must be positive"):
-        SolverConfig(frontier_cell_max_labels=0)
-    with pytest.raises(ValueError, match="pricing batch sizes must be positive"):
-        SolverConfig(max_frontier_cell_size=0)
-    with pytest.raises(ValueError, match="pricing batch sizes must be positive"):
-        SolverConfig(max_frontier_pair_product=0)
-    with pytest.raises(ValueError, match="pricing batch sizes must be positive"):
-        SolverConfig(max_frontier_split_depth=0)
-    with pytest.raises(ValueError, match="resource bound payload bucket"):
-        SolverConfig(resource_bound_payload_bucket=-1)
-    with pytest.raises(ValueError, match="resource_bound_method"):
-        SolverConfig(resource_bound_method="dynamic")
-    with pytest.raises(ValueError, match="closure_queue_mode"):
-        SolverConfig(closure_queue_mode="fifo")
-
-
-def test_closure_aware_state_forces_certification_by_count_and_time() -> None:
-    config = SolverConfig(closure_attempt_batch_period=2, closure_attempt_time_period=10.0)
-    state = _ClosureAwarePricingState()
-    assert not state.should_certify(config)
-    state.observe_productive_batch(3.0)
-    assert not state.should_certify(config)
-    state.observe_productive_batch(1.0)
-    assert state.should_certify(config)
-    state.reset_after_certification_attempt()
-    assert not state.should_certify(config)
-    state.observe_productive_batch(11.0)
-    assert state.should_certify(config)
-    state.reset_after_certification_attempt()
-    state.force_next_certification = True
-    assert state.should_certify(config)
-
-
-def test_mask_containment_trie_matches_bruteforce_subset_and_superset_queries() -> None:
-    masks = (0b0000, 0b0001, 0b0011, 0b0101, 0b1010, 0b1111)
-    trie = MaskContainmentTrie(bit_count=4)
-    for mask in masks:
-        trie.insert(mask, f"m{mask}")
-
-    for query in range(16):
-        expected_subsets = tuple(f"m{mask}" for mask in masks if mask & ~query == 0)
-        expected_supersets = tuple(f"m{mask}" for mask in masks if query & ~mask == 0)
-        assert sorted(trie.query_subsets(query)) == sorted(expected_subsets)
-        assert sorted(trie.query_supersets(query)) == sorted(expected_supersets)
-
-
-def test_adaptive_productive_slice_controller_updates_bounds_and_stats() -> None:
-    controller = _AdaptiveProductiveSliceController(
-        current_seconds=20.0,
-        min_seconds=5.0,
-        max_seconds=30.0,
-        low_threshold=0.5,
-        high_threshold=2.0,
-        window_size=1,
-    )
-    assert controller.observe(10.0, 1, 1) == "decrease"
-    assert controller.current_seconds == pytest.approx(10.0)
-    assert controller.observe(1.0, 5, 5) == "increase"
-    assert controller.current_seconds == pytest.approx(12.5)
-
-    stats = BPCStats()
-    state = _ClosureAwarePricingState()
-    state.observe_productive_batch(7.0)
-    _sync_closure_aware_pricing_stats(stats, state, controller, SolverConfig())
-    assert stats.productive_batches_since_last_cert == 1
-    assert stats.productive_time_since_last_cert == pytest.approx(7.0)
-    assert stats.adaptive_slice_decreases == 1
-    assert stats.adaptive_slice_increases == 1
-    assert stats.productive_yield_window_rate == pytest.approx(5.0)
-
-
-def test_dual_stabilization_blend_uses_true_dual_verification_in_master() -> None:
+def test_branch_interface_ignores_branch_infeasible_first_continuation() -> None:
     instance, _, objective, graph = _setup()
-    current = PricingDuals(mu={c: -100.0 for c in instance.customers}, kappa=0.0, nu={})
-    previous = PricingDuals(mu={c: 100.0 for c in instance.customers}, kappa=0.0, nu={})
-    blended = _blend_pricing_duals(current, previous, 0.3)
-    assert blended is not None
-    assert blended.mu[instance.customers[0]] == pytest.approx(40.0)
+    left = duplicate_node("C1")
+    right = duplicate_node("C2")
+    restrictions = BranchRestrictions().with_conditioned_arc_forbidden("C3", (right, "Sink"))
+    represented = frozenset(instance.customers)
+    a = _label(left, represented=represented, arrival=1.0, reduced_cost=-1.0)
+    b = _label(right, represented=represented, arrival=2.0, reduced_cost=0.0)
+    context = _dominance_context(instance, objective, restrictions)
 
-    pool = SourceNeighborPricingPool(graph, objective, 2, source_neighbor_task_size=1)
-    try:
-        result = price_route(
-            graph,
-            objective,
-            frozenset(instance.customers),
-            BranchRestrictions(),
-            current,
-            next_route_id=820,
-            batch_size=4,
-            pricing_worker_backend="process",
-            parallel_workers=2,
-            pricing_process_pool=pool,
-            search_duals=previous,
-        )
-    finally:
-        pool.shutdown()
-    assert result.diagnostics.stabilized_dual_enabled is True
-    assert result.diagnostics.stabilized_candidates_returned >= result.diagnostics.true_dual_rejected_candidates
-    assert not result.routes
-    assert result.diagnostics.true_dual_rejected_candidates > 0
+    assert "Sink" not in _feasible_first_successors(b, graph, context)
+    assert _branch_interface_compatible(a, b, graph, context)
+    assert _paper_dominates(a, b, graph, PricingDuals(mu={}, kappa=0.0), context)
+    assert _farkas_dominates(a, b, graph, context)
 
 
-def test_prefix_task_depth_two_matches_source_neighbor_closure_on_tiny_instance() -> None:
+def test_branch_interface_rejects_distinct_endpoint_required_arc_mismatch() -> None:
     instance, _, objective, graph = _setup()
-    residual = frozenset(instance.customers)
-    restrictions = BranchRestrictions()
-    prefixes = _source_neighbor_prefix_tasks(graph, objective, residual, restrictions, 2)
-    assert prefixes
-    assert all(prefix[0] in _admissible_source_neighbors(graph) for prefix in prefixes)
+    left = duplicate_node("C1")
+    right = duplicate_node("C2")
+    restrictions = BranchRestrictions().with_conditioned_arc_required("C3", (right, "Sink"))
+    represented = frozenset(instance.customers)
+    a = _label(left, represented=represented, arrival=1.0, reduced_cost=-1.0)
+    b = _label(right, represented=represented, arrival=2.0, reduced_cost=0.0)
+    context = _dominance_context(instance, objective, restrictions)
 
-    duals = PricingDuals(mu={c: -10.0 for c in instance.customers}, kappa=0.0, nu={})
-    source_neighbor_result = price_route(
+    assert "Sink" in _feasible_first_successors(b, graph, context)
+    assert "Sink" not in _feasible_first_successors(a, graph, context)
+    assert not _branch_interface_compatible(a, b, graph, context)
+    assert not _paper_dominates(a, b, graph, PricingDuals(mu={}, kappa=0.0), context)
+    assert not _farkas_dominates(a, b, graph, context)
+
+
+def test_same_endpoint_branch_interface_is_automatic() -> None:
+    instance, _, objective, graph = _setup()
+    endpoint = duplicate_node("C1")
+    restrictions = BranchRestrictions().with_conditioned_arc_forbidden("C3", (endpoint, "Sink"))
+    label = _label(endpoint)
+    context = _dominance_context(instance, objective, restrictions)
+    assert _branch_interface_compatible(label, label, graph, context)
+
+
+def test_feasible_first_successors_apply_all_production_extension_filters() -> None:
+    instance, _, objective, graph = _setup()
+    endpoint = duplicate_node("C1")
+    successor = duplicate_node("C2")
+    base_label = _label(endpoint, represented=frozenset({"C1"}))
+
+    elementary_label = replace(base_label, represented=frozenset({"C1", "C2"}))
+    elementary_context = _dominance_context(instance, objective, BranchRestrictions())
+    assert successor not in _feasible_first_successors(elementary_label, graph, elementary_context)
+
+    residual_context = _dominance_context(
+        instance,
+        objective,
+        BranchRestrictions(),
+        frozenset({"C1", "C3"}),
+    )
+    assert successor not in _feasible_first_successors(base_label, graph, residual_context)
+
+    payload_label = replace(base_label, truck_load=instance.truck_payload - 1.0)
+    payload_context = _dominance_context(instance, objective, BranchRestrictions())
+    assert successor not in _feasible_first_successors(payload_label, graph, payload_context)
+
+    drone_count_label = replace(base_label, block_count=instance.drones_per_truck)
+    drone_count_context = _dominance_context(instance, objective, BranchRestrictions())
+    assert successor not in _feasible_first_successors(drone_count_label, graph, drone_count_context)
+
+    pad_context = _dominance_context(
+        instance,
+        objective,
+        BranchRestrictions().with_pad_forbidden("H1", "C2"),
+    )
+    assert successor not in _feasible_first_successors(base_label, graph, pad_context)
+
+    pair_context = _dominance_context(
+        instance,
+        objective,
+        BranchRestrictions().with_separate("C1", "C2"),
+    )
+    assert successor not in _feasible_first_successors(base_label, graph, pair_context)
+
+    conditioned_context = _dominance_context(
+        instance,
+        objective,
+        BranchRestrictions().with_conditioned_arc_forbidden("C1", (endpoint, successor)),
+    )
+    assert successor not in _feasible_first_successors(base_label, graph, conditioned_context)
+
+    bounds = dict(objective.bounds.service_ub)
+    bounds["C2"] = objective.bounds.arrival_lb["C2"]
+    deadline_instance = replace(
+        instance,
+        config=replace(
+            instance.config,
+            service_deadline_mode="manual",
+            service_deadline_manual_bounds=bounds,
+        ),
+    )
+    deadline_graph = build_transformed_graph(deadline_instance)
+    deadline_objective = build_objective_data(deadline_instance, ObjectiveWeights(0.4, 0.3, 0.3))
+    deadline_context = _dominance_context(deadline_instance, deadline_objective, BranchRestrictions())
+    late_label = replace(base_label, active_pad_arrival=5.0, physical_time=5.0)
+    assert successor not in _feasible_first_successors(late_label, deadline_graph, deadline_context)
+
+
+def test_feasible_first_successor_cache_is_local_to_pricing_context() -> None:
+    instance, _, objective, graph = _setup()
+    label = _label(duplicate_node("C1"), represented=frozenset({"C1"}))
+    successor = duplicate_node("C2")
+    full_context = _dominance_context(instance, objective, BranchRestrictions())
+    reduced_context = _dominance_context(
+        instance,
+        objective,
+        BranchRestrictions(),
+        frozenset({"C1", "C3"}),
+    )
+
+    assert successor in _feasible_first_successors(label, graph, full_context)
+    assert successor not in _feasible_first_successors(label, graph, reduced_context)
+    assert full_context.feasible_first_successors is not reduced_context.feasible_first_successors
+
+
+def test_together_branch_partner_reachability_predicate() -> None:
+    instance, _, objective, graph = _setup()
+    restrictions = BranchRestrictions().with_together("C1", "C2")
+    shortest = _shortest_truck_times(graph)
+    represented_one = replace(
+        _label(
+            "C1",
+            represented=frozenset({"C1"}),
+            truck_visited=frozenset({"Source", "H1", "C1"}),
+        ),
+        truck_load=instance.demand["C1"],
+    )
+
+    assert not _together_branch_partner_unreachable(
+        represented_one,
         graph,
         objective,
-        residual,
+        shortest,
+        frozenset(instance.customers),
+        restrictions,
+    )
+    assert _together_branch_partner_unreachable(
+        represented_one,
+        graph,
+        objective,
+        shortest,
+        frozenset({"C1", "C3"}),
+        restrictions,
+    )
+
+    payload_exhausted = replace(represented_one, truck_load=instance.truck_payload - 1.0)
+    assert _together_branch_partner_unreachable(
+        payload_exhausted,
+        graph,
+        objective,
+        shortest,
+        frozenset(instance.customers),
+        restrictions,
+    )
+
+    unreachable_shortest = dict(shortest)
+    unreachable_shortest[("C1", "C2")] = float("inf")
+    unreachable_shortest[("C2", "Sink")] = float("inf")
+    for hub in instance.hubs:
+        unreachable_shortest[("C1", hub)] = float("inf")
+    assert _together_branch_partner_unreachable(
+        represented_one,
+        graph,
+        objective,
+        unreachable_shortest,
+        frozenset(instance.customers),
+        restrictions,
+    )
+
+    neither = replace(represented_one, represented=frozenset())
+    both = replace(represented_one, represented=frozenset({"C1", "C2"}))
+    assert not _together_branch_partner_unreachable(
+        neither,
+        graph,
+        objective,
+        unreachable_shortest,
+        frozenset(instance.customers),
+        restrictions,
+    )
+    assert not _together_branch_partner_unreachable(
+        both,
+        graph,
+        objective,
+        unreachable_shortest,
+        frozenset(instance.customers),
+        restrictions,
+    )
+
+
+def test_together_branch_partner_deadline_pruning_applies_to_prefix_and_resumed_labels() -> None:
+    base = tiny_instance()
+    baseline = build_objective_data(base, ObjectiveWeights(0.4, 0.3, 0.3))
+    bounds = dict(baseline.bounds.service_ub)
+    bounds["C2"] = baseline.bounds.arrival_lb["C2"]
+    instance = replace(
+        base,
+        config=replace(
+            base.config,
+            service_deadline_mode="manual",
+            service_deadline_manual_bounds=bounds,
+        ),
+    )
+    objective = build_objective_data(instance, ObjectiveWeights(0.4, 0.3, 0.3))
+    graph = build_transformed_graph(instance)
+    restrictions = BranchRestrictions().with_together("C2", "C3")
+    duals = PricingDuals(mu={customer: 10.0 for customer in instance.customers}, kappa=0.0)
+
+    prefix_standard = _price_route_forward_only(
+        graph,
+        objective,
+        frozenset(instance.customers),
         restrictions,
         duals,
-        next_route_id=830,
-        batch_size=32,
-        pricing_mode="closure",
-        pricing_worker_backend="process",
-        parallel_workers=2,
-        source_neighbor_task_size=1,
-        prefix_task_depth=1,
-    )
-    prefix_result = price_route(
-        graph,
-        objective,
-        residual,
-        restrictions,
-        duals,
-        next_route_id=840,
-        batch_size=32,
-        pricing_mode="closure",
-        pricing_worker_backend="process",
-        parallel_workers=2,
-        source_neighbor_task_size=1,
-        prefix_task_depth=2,
-    )
-    assert not source_neighbor_result.routes
-    assert not prefix_result.routes
-    assert source_neighbor_result.diagnostics.exact_completion is True
-    assert prefix_result.diagnostics.exact_completion is True
-    assert prefix_result.diagnostics.prefix_task_depth == 2
-    assert prefix_result.diagnostics.certification_mode == source_neighbor_result.diagnostics.certification_mode
-
-
-def test_production_cli_help_hides_legacy_join_and_bidirectional_controls() -> None:
-    repo_root = Path(__file__).resolve().parents[1]
-    for module_name in ("thvrpd.solve", "thvrpd.experiments"):
-        completed = subprocess.run(
-            [sys.executable, "-m", module_name, "--help"],
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-
-        assert "--productive-pricing-slice-seconds" in completed.stdout
-        assert "--pricing-tolerance" in completed.stdout
-        assert "--pricing-worker-backend" in completed.stdout
-        assert "--join" not in completed.stdout
-        assert "--disable-bidirectional-pricing" not in completed.stdout
-
-
-def test_standard_and_farkas_pricing_match_direct_route_cost() -> None:
-    instance, _, objective, graph = _setup()
-    duals = PricingDuals(mu={c: 10.0 for c in instance.customers}, kappa=-1.0, nu={tuple(instance.customers): -0.5})
-    result = price_route(
-        graph,
-        objective,
-        frozenset(instance.customers),
-        BranchRestrictions(),
-        duals,
-        next_route_id=100,
-        farkas=False,
-    )
-    assert result.route is not None
-    assert abs(result.reduced_cost - route_reduced_cost(result.route, duals)) < 1e-8
-    farkas = price_route(
-        graph,
-        objective,
-        frozenset(instance.customers),
-        BranchRestrictions(),
-        duals,
-        next_route_id=101,
-        farkas=True,
-    )
-    assert farkas.route is not None
-    assert abs(farkas.reduced_cost - route_farkas_reduced_cost(farkas.route, duals)) < 1e-8
-
-
-def test_pricing_rejects_positive_inequality_dual_signs() -> None:
-    instance, _, objective, graph = _setup()
-    with pytest.raises(ValueError, match="nonpositive"):
-        price_route(
-            graph,
-            objective,
-            frozenset(instance.customers),
-            BranchRestrictions(),
-            PricingDuals(mu={c: 0.0 for c in instance.customers}, kappa=0.0, nu={tuple(instance.customers): 0.1}),
-            next_route_id=150,
-        )
-
-
-def test_productive_batch_pricing_returns_diagnostics() -> None:
-    instance, _, objective, graph = _setup()
-    duals = PricingDuals(mu={c: 100.0 for c in instance.customers}, kappa=0.0, nu={})
-    result = price_route(
-        graph,
-        objective,
-        frozenset(instance.customers),
-        BranchRestrictions(),
-        duals,
-        next_route_id=500,
-        farkas=False,
-        batch_size=2,
-    )
-    assert len(result.routes) == 2
-    assert all(cost < 0.0 for cost in result.reduced_costs)
-    assert result.diagnostics.returned_routes == 2
-    assert result.diagnostics.labels_generated >= result.diagnostics.returned_routes
-    assert result.diagnostics.max_queue_size >= 1
-    assert result.diagnostics.exact_completion is False
-    assert result.diagnostics.termination_reason == "productive_batch_found"
-    assert result.diagnostics.certification_mode == "not_certified_productive"
-    assert result.diagnostics.pricing_status == "NEGATIVE_BATCH"
-    assert result.diagnostics.productive_calls == 1
-    assert result.diagnostics.certification_calls == 0
-    assert result.diagnostics.negative_routes_inserted == result.diagnostics.returned_routes
-    assert result.diagnostics.negative_routes_verified >= result.diagnostics.returned_routes
-    assert result.diagnostics.elapsed_seconds >= 0.0
-    assert result.diagnostics.pricing_engine == "source_neighbor_parallel_forward"
-    assert result.diagnostics.pricing_worker_backend == "thread"
-    assert result.diagnostics.parallel_calls == 1
-    assert result.diagnostics.first_hit_exits == 0
-    assert result.diagnostics.source_neighbor_count > 0
-    assert result.diagnostics.process_cpu_time_seconds >= 0.0
-    assert result.diagnostics.cpu_core_equivalent >= 0.0
-    assert result.diagnostics.dominance_work_estimate >= 0
-    assert result.diagnostics.dominance_activation_mode in {"none", "direct_dominated", "indexed_dominated", "mixed"}
-    assert result.diagnostics.side_pool_candidates_seen >= result.diagnostics.side_pool_routes_retained
-    assert result.diagnostics.backward_labels_generated == 0
-    assert result.diagnostics.backward_cost_function_eval_time_seconds == 0.0
-    assert result.diagnostics.join_pairs_tested == 0
-    assert result.diagnostics.join_exact_rc_evals == 0
-
-
-def test_closure_mode_negative_batch_does_not_certify_closure() -> None:
-    instance, _, objective, graph = _setup()
-    duals = PricingDuals(mu={c: 100.0 for c in instance.customers}, kappa=0.0, nu={})
-    result = price_route(
-        graph,
-        objective,
-        frozenset(instance.customers),
-        BranchRestrictions(),
-        duals,
-        next_route_id=550,
-        farkas=False,
-        batch_size=1,
-        pricing_mode="closure",
-    )
-    assert result.routes
-    assert result.diagnostics.exact_completion is False
-    assert result.diagnostics.termination_reason == "closure_negative_batch_found"
-    assert result.diagnostics.certification_mode == "not_certified_closure_returned_columns"
-    assert result.diagnostics.pricing_status == "NEGATIVE_BATCH"
-    assert result.diagnostics.certification_calls == 1
-
-
-def test_productive_pricing_batch_cap_preserves_direct_cost_verification() -> None:
-    instance, _, objective, graph = _setup()
-    duals = PricingDuals(mu={c: 50.0 for c in instance.customers}, kappa=0.0, nu={})
-    one = price_route(
-        graph,
-        objective,
-        frozenset(instance.customers),
-        BranchRestrictions(),
-        duals,
-        next_route_id=600,
-        batch_size=1,
-    )
-    large = price_route(
-        graph,
-        objective,
-        frozenset(instance.customers),
-        BranchRestrictions(),
-        duals,
-        next_route_id=700,
+        next_route_id=0,
+        use_standard_acceleration=False,
         batch_size=64,
+        pricing_mode="closure",
+        source_prefixes=(("C3",),),
     )
-    assert one.routes
-    assert large.routes
-    assert len(large.routes) >= len(one.routes)
-    assert len(large.routes) <= 64
-    for route, reduced_cost in zip(large.routes, large.reduced_costs):
-        assert reduced_cost == pytest.approx(route_reduced_cost(route, duals))
+    prefix_farkas = _price_route_forward_only(
+        graph,
+        objective,
+        frozenset(instance.customers),
+        restrictions,
+        duals,
+        next_route_id=0,
+        farkas=True,
+        batch_size=64,
+        pricing_mode="closure",
+        source_prefixes=(("C3",),),
+    )
+    assert prefix_standard.diagnostics.together_branch_reachability_pruned == 1
+    assert prefix_farkas.diagnostics.together_branch_reachability_pruned == 1
+    assert prefix_standard.diagnostics.standard_bound_pruned == 0
+    assert prefix_farkas.diagnostics.farkas_bound_pruned == 0
 
-
-def test_interrupted_pricing_is_not_a_certificate() -> None:
-    instance, _, objective, graph = _setup()
-    duals = PricingDuals(mu={c: 0.0 for c in instance.customers}, kappa=0.0, nu={})
-    with pytest.raises(PricingTimeLimitReached) as raised:
-        price_route(
-            graph,
-            objective,
-            frozenset(instance.customers),
-            BranchRestrictions(),
-            duals,
-            next_route_id=501,
-            farkas=False,
-            deadline=time.time() - 1.0,
-            parallel_workers=1,
-        )
-    assert raised.value.diagnostics.exact_completion is False
-    assert raised.value.diagnostics.returned_routes == 0
-    assert raised.value.diagnostics.termination_reason == "time_limit_unresolved"
-    assert raised.value.diagnostics.certification_mode == "not_certified_time_limit"
-    assert raised.value.diagnostics.pricing_status == "TIME_LIMIT_NO_COLUMNS"
-
-
-def test_dual_reward_bound_uses_fractional_knapsack_item() -> None:
-    instance, _, _, graph = _setup()
-    duals = PricingDuals(mu={"C1": 200.0, "C2": 100.0, "C3": 0.0}, kappa=0.0, nu={})
-    shortest = _shortest_truck_times(graph)
-    bounds = _build_pricing_bounds(graph, duals, frozenset({"C1", "C2"}), shortest)
-    label = _Label(
-        path=(instance.depot_source,),
-        represented=frozenset(),
-        truck_visited=frozenset({instance.depot_source}),
-        truck_load=17.5,
+    resumed_label = _Label(
+        path=("Source", "C3"),
+        represented=frozenset({"C3"}),
+        truck_visited=frozenset({"Source", "C3"}),
+        truck_load=instance.demand["C3"],
         active_pad=None,
         active_pad_arrival=0.0,
         active_wait=0.0,
         block_count=0,
-        physical_time=0.0,
-        service_times=tuple(),
-        sr_counts=tuple(),
-        reduced_cost=-1_000_000.0,
-        used_arcs=frozenset(),
-    )
-    reward = _dual_reward_bound(label, graph, bounds)
-    expected = duals.mu["C1"] + duals.mu["C2"] * 0.5 / instance.demand["C2"]
-    assert reward == pytest.approx(expected)
-    assert duals.mu["C1"] < reward < duals.mu["C1"] + duals.mu["C2"]
-
-
-def test_dual_reward_bound_excludes_customers_over_total_residual_payload() -> None:
-    instance, _, _, graph = _setup()
-    duals = PricingDuals(mu={"C1": 0.0, "C2": 100.0, "C3": 0.0}, kappa=0.0, nu={})
-    shortest = _shortest_truck_times(graph)
-    bounds = _build_pricing_bounds(graph, duals, frozenset({"C2"}), shortest)
-    label = _Label(
-        path=(instance.depot_source,),
-        represented=frozenset(),
-        truck_visited=frozenset({instance.depot_source}),
-        truck_load=19.0,
-        active_pad=None,
-        active_pad_arrival=0.0,
-        active_wait=0.0,
-        block_count=0,
-        physical_time=0.0,
-        service_times=tuple(),
-        sr_counts=tuple(),
-        reduced_cost=-1_000_000.0,
-        used_arcs=frozenset(),
-    )
-    assert _dual_reward_bound(label, graph, bounds) == 0.0
-
-
-def test_dual_reward_bound_uses_cardinality_cap() -> None:
-    instance, _, _, graph = _setup()
-    duals = PricingDuals(mu={"C1": 100.0, "C2": 90.0, "C3": 80.0}, kappa=0.0, nu={})
-    shortest = _shortest_truck_times(graph)
-    bounds = _build_pricing_bounds(graph, duals, frozenset(instance.customers), shortest)
-    label = _Label(
-        path=(instance.depot_source, "H1"),
-        represented=frozenset(),
-        truck_visited=frozenset({instance.depot_source, "H1", "C2", "C3"}),
-        truck_load=0.0,
-        active_pad=None,
-        active_pad_arrival=0.0,
-        active_wait=0.0,
-        block_count=0,
-        physical_time=0.0,
-        service_times=tuple(),
-        sr_counts=tuple(),
-        reduced_cost=-1_000_000.0,
-        used_arcs=frozenset({(instance.depot_source, "H1")}),
-    )
-    assert _dual_reward_bound(label, graph, bounds) == pytest.approx(duals.mu["C1"])
-
-
-def test_same_node_dominance_uses_return_time_credit() -> None:
-    instance, _, objective, graph = _setup()
-    duals = PricingDuals(mu={c: 0.0 for c in instance.customers}, kappa=0.0, nu={})
-    credit = objective.coeffs.return_time * 5.0
-    assert credit > 0.0
-    earlier = _Label(
-        path=("Source", "C1"),
-        represented=frozenset({"C1"}),
-        truck_visited=frozenset({"Source", "C1"}),
-        truck_load=instance.demand["C1"],
-        active_pad=None,
-        active_pad_arrival=0.0,
-        active_wait=0.0,
-        block_count=0,
-        physical_time=5.0,
-        service_times=(("C1", 5.0),),
-        sr_counts=tuple(),
-        reduced_cost=0.5 * credit,
-        used_arcs=frozenset({("Source", "C1")}),
-    )
-    later = _Label(
-        path=("Source", "C1"),
-        represented=frozenset({"C1"}),
-        truck_visited=frozenset({"Source", "C1"}),
-        truck_load=instance.demand["C1"],
-        active_pad=None,
-        active_pad_arrival=0.0,
-        active_wait=0.0,
-        block_count=0,
-        physical_time=10.0,
-        service_times=(("C1", 10.0),),
+        physical_time=instance.truck_time[("Source", "C3")],
+        service_times=(("C3", instance.truck_time[("Source", "C3")]),),
         sr_counts=tuple(),
         reduced_cost=0.0,
-        used_arcs=frozenset({("Source", "C1")}),
+        used_arcs=frozenset({("Source", "C3")}),
     )
-    arc_customer_sets = {arc: graph.arc_customer_set(arc) for arc in graph.arcs}
-    counters = _DeadlinePricingCounters(shortest=_shortest_truck_times(graph))
-    assert _paper_dominates(earlier, later, graph, objective, duals, BranchRestrictions(), arc_customer_sets, counters)
-    assert counters.dom_gate_pairs_seen == 1
-    assert counters.forward_same_node_dominance_tests == 1
-    assert counters.forward_return_time_credit_checks == 1
-    assert counters.forward_return_time_credit_checks_skipped == 0
-    assert counters.dom_prefilter_pairs == 1
-    assert counters.dom_full_tests == 1
-    assert counters.dom_full_tests_same_node == 1
-    assert counters.dom_full_tests_physical_location == 0
-    assert counters.dom_full_rejections == 1
-    assert counters.labels_dominated_same_node == 1
-    assert counters.dom_labels_deleted_same_node == 1
-    assert counters.labels_dominated_physical == 0
-    assert counters.dom_labels_deleted_physical_location == 0
+    resumed = _price_route_forward_only(
+        graph,
+        objective,
+        frozenset(instance.customers),
+        restrictions,
+        duals,
+        next_route_id=0,
+        use_standard_acceleration=False,
+        batch_size=64,
+        pricing_mode="closure",
+        initial_open_labels=(resumed_label,),
+    )
+    assert resumed.diagnostics.together_branch_reachability_pruned == 1
+    assert resumed.diagnostics.labels_pruned == 1
 
 
-def test_dominance_gate_skip_does_not_delete_label() -> None:
+@pytest.mark.parametrize("farkas", [False, True])
+def test_together_reachability_pruning_preserves_complete_pricing_routes(monkeypatch, farkas: bool) -> None:
+    base = tiny_instance()
+    baseline = build_objective_data(base, ObjectiveWeights(0.4, 0.3, 0.3))
+    bounds = dict(baseline.bounds.service_ub)
+    bounds["C2"] = baseline.bounds.arrival_lb["C2"]
+    instance = replace(
+        base,
+        config=replace(
+            base.config,
+            service_deadline_mode="manual",
+            service_deadline_manual_bounds=bounds,
+        ),
+    )
+    objective = build_objective_data(instance, ObjectiveWeights(0.4, 0.3, 0.3))
+    graph = build_transformed_graph(instance)
+    restrictions = BranchRestrictions().with_together("C2", "C3")
+    duals = PricingDuals(mu={customer: 10.0 for customer in instance.customers}, kappa=0.0)
+    kwargs = dict(
+        graph=graph,
+        objective=objective,
+        residual_customers=frozenset(instance.customers),
+        restrictions=restrictions,
+        duals=duals,
+        next_route_id=0,
+        farkas=farkas,
+        pricing_tolerance=1e-7,
+        use_standard_acceleration=not farkas,
+        batch_size=64,
+        parallel_workers=1,
+        pricing_mode="closure",
+    )
+    enabled = price_route(**kwargs)
+    monkeypatch.setattr(pricing_module, "_together_branch_partner_unreachable", lambda *args, **kwargs: False)
+    disabled = price_route(**kwargs)
+
+    assert {route.path for route in enabled.routes} == {route.path for route in disabled.routes}
+    assert enabled.diagnostics.exact_completion == disabled.diagnostics.exact_completion
+    assert enabled.diagnostics.together_branch_reachability_pruned > 0
+    assert disabled.diagnostics.together_branch_reachability_pruned == 0
+    assert enabled.diagnostics.labels_generated <= disabled.diagnostics.labels_generated
+
+
+def test_branch_hierarchy_uses_pair_then_pad_then_conditioned_arc() -> None:
     instance, _, objective, graph = _setup()
-    duals = PricingDuals(mu={c: 0.0 for c in instance.customers}, kappa=0.0, nu={})
-    c1 = _Label(
+    config = SolverConfig(enable_root_compact_warm_start=False)
+
+    pair_paths = {
+        ("Source", "C1", "C2", "Sink"),
+        ("Source", "C1", "C3", "Sink"),
+    }
+    pair_routes = {
+        path: route_from_path(index, path, graph, objective)
+        for index, path in enumerate(sorted(pair_paths))
+    }
+    pair_node = _root_node(instance, pair_paths)
+    pair_decision = _branch(pair_node, {path: 0.5 for path in pair_paths}, pair_routes, graph, 1, 2, config)
+    assert pair_decision.branch_type == "customer_pair"
+
+    truck_path = ("Source", "C1", "Sink")
+    drone_path = ("Source", "H1", duplicate_node("C1"), "Sink")
+    pad_paths = {truck_path, drone_path}
+    pad_routes = {
+        path: route_from_path(index, path, graph, objective)
+        for index, path in enumerate(sorted(pad_paths))
+    }
+    pad_node = _root_node(instance, pad_paths)
+    pad_decision = _branch(pad_node, {path: 0.5 for path in pad_paths}, pad_routes, graph, 3, 4, config)
+    assert pad_decision.branch_type == "launch_pad"
+
+    forward_path = ("Source", "C1", "C2", "Sink")
+    reverse_path = ("Source", "C2", "C1", "Sink")
+    arc_paths = {forward_path, reverse_path}
+    arc_routes = {
+        path: route_from_path(index, path, graph, objective)
+        for index, path in enumerate(sorted(arc_paths))
+    }
+    arc_node = _root_node(instance, arc_paths)
+    arc_decision = _branch(arc_node, {path: 0.5 for path in arc_paths}, arc_routes, graph, 5, 6, config)
+    assert arc_decision.branch_type == "conditioned_arc"
+    assert arc_decision.left is not None and arc_decision.left.restrictions.conditioned_arc_forbidden
+    assert arc_decision.right is not None and arc_decision.right.restrictions.conditioned_arc_required
+
+
+def test_conditioned_arc_down_is_enforced_in_both_event_orders() -> None:
+    instance, _, objective, graph = _setup()
+    arc_before_customer = ("Source", "C1")
+    before = _Label(
         path=("Source", "C1"),
         represented=frozenset({"C1"}),
         truck_visited=frozenset({"Source", "C1"}),
@@ -1939,13 +581,17 @@ def test_dominance_gate_skip_does_not_delete_label() -> None:
         active_pad_arrival=0.0,
         active_wait=0.0,
         block_count=0,
-        physical_time=5.0,
-        service_times=(("C1", 5.0),),
+        physical_time=instance.truck_time[arc_before_customer],
+        service_times=(("C1", instance.truck_time[arc_before_customer]),),
         sr_counts=tuple(),
-        reduced_cost=-1_000_000.0,
-        used_arcs=frozenset({("Source", "C1")}),
+        reduced_cost=0.0,
+        used_arcs=frozenset({arc_before_customer}),
     )
-    c2 = _Label(
+    before_restriction = BranchRestrictions().with_conditioned_arc_forbidden("C2", arc_before_customer)
+    assert not _extension_allowed(before, "C2", graph, frozenset(instance.customers), before_restriction)
+
+    arc_after_customer = ("C2", "C1")
+    after = _Label(
         path=("Source", "C2"),
         represented=frozenset({"C2"}),
         truck_visited=frozenset({"Source", "C2"}),
@@ -1954,2493 +600,1233 @@ def test_dominance_gate_skip_does_not_delete_label() -> None:
         active_pad_arrival=0.0,
         active_wait=0.0,
         block_count=0,
-        physical_time=5.0,
-        service_times=(("C2", 5.0),),
+        physical_time=instance.truck_time[("Source", "C2")],
+        service_times=(("C2", instance.truck_time[("Source", "C2")]),),
         sr_counts=tuple(),
         reduced_cost=0.0,
         used_arcs=frozenset({("Source", "C2")}),
     )
-    counters = _DeadlinePricingCounters(shortest=_shortest_truck_times(graph))
+    after_restriction = BranchRestrictions().with_conditioned_arc_forbidden("C2", arc_after_customer)
+    assert not _extension_allowed(after, "C1", graph, frozenset(instance.customers), after_restriction)
 
-    assert not _paper_dominates(c1, c2, graph, objective, duals, BranchRestrictions(), _arc_customer_sets(graph), counters)
-    assert counters.dom_gate_pairs_seen == 1
-    assert counters.dom_gate_scalar_failures == 1
-    assert counters.forward_return_time_credit_checks_skipped == 1
-    assert counters.dom_full_tests == 0
-    assert counters.dom_full_rejections == 0
-    assert counters.labels_dominated_same_node == 0
-    assert counters.labels_dominated_physical == 0
+    source = _Label(
+        path=("Source",),
+        represented=frozenset(),
+        truck_visited=frozenset({"Source"}),
+        truck_load=0.0,
+        active_pad=None,
+        active_pad_arrival=0.0,
+        active_wait=0.0,
+        block_count=0,
+        physical_time=0.0,
+        service_times=tuple(),
+        sr_counts=tuple(),
+        reduced_cost=0.0,
+        used_arcs=frozenset(),
+    )
+    required_before = BranchRestrictions().with_conditioned_arc_required("C2", arc_before_customer)
+    assert not _extension_allowed(source, "C2", graph, frozenset(instance.customers), required_before)
+    required_after = BranchRestrictions().with_conditioned_arc_required("C2", arc_after_customer)
+    assert _extension_allowed(source, "C2", graph, frozenset(instance.customers), required_after)
+    assert not _extension_allowed(after, "C3", graph, frozenset(instance.customers), required_after)
+    assert _extension_allowed(after, "C1", graph, frozenset(instance.customers), required_after)
+
+    before_route = route_from_path(0, ("Source", "C1", "C2", "Sink"), graph, objective)
+    after_route = route_from_path(1, ("Source", "C2", "C1", "Sink"), graph, objective)
+    assert not before_restriction.route_allowed(before_route)
+    assert not after_restriction.route_allowed(after_route)
+    assert required_before.route_allowed(before_route)
+    assert required_after.route_allowed(after_route)
 
 
-def test_dominance_bucket_gate_skips_comparison_without_deleting_label() -> None:
+def test_branch_index_matches_exact_route_filtering_for_all_three_families() -> None:
     instance, _, objective, graph = _setup()
-    duals = PricingDuals(mu={c: 0.0 for c in instance.customers}, kappa=0.0, nu={})
-    h1_c1 = duplicate_node("H1", "C1")
-    h1_c2 = duplicate_node("H1", "C2")
-    label_c1 = _Label(
-        path=("Source", "H1", h1_c1),
-        represented=frozenset({"C1"}),
-        truck_visited=frozenset({"Source", "H1"}),
-        truck_load=instance.demand["C1"],
-        active_pad="H1",
-        active_pad_arrival=5.0,
-        active_wait=1.0,
-        block_count=1,
-        physical_time=5.0,
-        service_times=(("C1", 6.0),),
-        sr_counts=tuple(),
-        reduced_cost=0.0,
-        used_arcs=frozenset({("Source", "H1"), ("H1", h1_c1)}),
+    paths = {
+        ("Source", "C1", "Sink"),
+        ("Source", "H1", duplicate_node("C1"), "Sink"),
+        ("Source", "C1", "C2", "Sink"),
+        ("Source", "C2", "C1", "Sink"),
+    }
+    routes = {
+        path: route_from_path(index, path, graph, objective)
+        for index, path in enumerate(sorted(paths))
+    }
+    index = build_branch_route_index(paths, routes, graph, frozenset(instance.customers))
+    restrictions_to_check = (
+        BranchRestrictions().with_together("C1", "C2"),
+        BranchRestrictions().with_separate("C1", "C2"),
+        BranchRestrictions().with_pad_forbidden("H1", "C1"),
+        BranchRestrictions().with_pad_required("H1", "C1"),
+        BranchRestrictions().with_conditioned_arc_forbidden("C1", ("Source", "C1")),
+        BranchRestrictions().with_conditioned_arc_required("C1", ("Source", "C1")),
     )
-    label_c2 = _Label(
-        path=("Source", "H1", h1_c2),
-        represented=frozenset({"C2"}),
-        truck_visited=frozenset({"Source", "H1"}),
-        truck_load=instance.demand["C2"],
-        active_pad="H1",
-        active_pad_arrival=5.0,
-        active_wait=1.0,
-        block_count=1,
-        physical_time=5.0,
-        service_times=(("C2", 6.0),),
-        sr_counts=tuple(),
-        reduced_cost=0.0,
-        used_arcs=frozenset({("Source", "H1"), ("H1", h1_c2)}),
-    )
-    kept: dict[str, list[_Label]] = {}
-    counters = _DeadlinePricingCounters(shortest=_shortest_truck_times(graph))
-    arc_customer_sets = _arc_customer_sets(graph)
+    for restrictions in restrictions_to_check:
+        indexed, _ = query_branch_route_index(index, restrictions)
+        brute_force = {path for path, route in routes.items() if restrictions.route_allowed(route)}
+        assert indexed == brute_force
 
-    assert _insert_nondominated_standard_label(
-        kept,
-        label_c1,
-        graph,
-        objective,
-        duals,
-        BranchRestrictions(),
-        arc_customer_sets,
-        counters,
-    ) == (True, 0, 0)
-    assert _insert_nondominated_standard_label(
-        kept,
-        label_c2,
-        graph,
-        objective,
-        duals,
-        BranchRestrictions(),
-        arc_customer_sets,
-        counters,
-    ) == (True, 0, 0)
-    assert kept["H1"] == [label_c1, label_c2]
-    assert counters.dom_frontier_queries >= 2
-    assert counters.mask_trie_subset_queries + counters.mask_trie_superset_queries > 0
-    assert counters.dom_frontier_keys_skipped_by_mask >= 1
-    assert counters.dom_pairs_avoided_before_materialization >= 1
-    assert counters.dom_candidate_pairs_materialized == 0
-    assert counters.dom_full_tests == 0
-    assert counters.labels_dominated_same_node == 0
-    assert counters.labels_dominated_physical == 0
+    for customer in instance.customers:
+        for arc in graph.arcs:
+            for restrictions in (
+                BranchRestrictions().with_conditioned_arc_forbidden(customer, arc),
+                BranchRestrictions().with_conditioned_arc_required(customer, arc),
+            ):
+                indexed, _ = query_branch_route_index(index, restrictions)
+                brute_force = {path for path, route in routes.items() if restrictions.route_allowed(route)}
+                assert indexed == brute_force
 
 
-def test_frontier_materialized_pair_deletes_only_after_full_same_node_witness() -> None:
+def test_branch_index_retains_required_noncustomer_arc_routes() -> None:
+    instance, objective, graph = _two_hub_branch_index_setup()
+    r1 = ("Source", "H1", duplicate_node("C1"), "Sink")
+    r2 = ("Source", "H2", duplicate_node("C1"), "Sink")
+    r3 = ("Source", "H1", duplicate_node("C2"), "Sink")
+    paths = {r1, r2, r3}
+    routes = {
+        path: route_from_path(route_id, path, graph, objective)
+        for route_id, path in enumerate(sorted(paths))
+    }
+    index = build_branch_route_index(paths, routes, graph, frozenset(instance.customers))
+
+    required = BranchRestrictions().with_conditioned_arc_required("C1", ("Source", "H1"))
+    forbidden = BranchRestrictions().with_conditioned_arc_forbidden("C1", ("Source", "H1"))
+
+    assert required.route_allowed(routes[r1])
+    assert query_branch_route_index(index, required)[0] == {r1, r3}
+    assert query_branch_route_index(index, forbidden)[0] == {r2, r3}
+
+
+def test_incremental_branch_index_matches_full_rebuild_for_every_transformed_arc() -> None:
+    instance, objective, graph = _two_hub_branch_index_setup()
+    initial_paths = {
+        ("Source", "H1", duplicate_node("C1"), "Sink"),
+        ("Source", "H2", duplicate_node("C1"), "Sink"),
+    }
+    added_paths = {
+        ("Source", "H1", duplicate_node("C2"), "Sink"),
+        ("Source", "H1", "H2", duplicate_node("C1"), "Sink"),
+        ("Source", "H1", duplicate_node("C1"), duplicate_node("C2"), "Sink"),
+        ("Source", "C2", "H1", "Sink"),
+    }
+    all_paths = initial_paths | added_paths
+    routes = {
+        path: route_from_path(route_id, path, graph, objective)
+        for route_id, path in enumerate(sorted(all_paths))
+    }
+    residual = frozenset(instance.customers)
+    initial = build_branch_route_index(initial_paths, routes, graph, residual)
+    incremental = extend_branch_route_index(initial, added_paths, routes, graph, residual)
+    rebuilt = build_branch_route_index(all_paths, routes, graph, residual)
+
+    assert incremental == rebuilt
+    for customer in instance.customers:
+        for arc in graph.arcs:
+            for restrictions in (
+                BranchRestrictions().with_conditioned_arc_forbidden(customer, arc),
+                BranchRestrictions().with_conditioned_arc_required(customer, arc),
+            ):
+                indexed, _ = query_branch_route_index(incremental, restrictions)
+                brute_force = {path for path, route in routes.items() if restrictions.route_allowed(route)}
+                assert indexed == brute_force
+
+
+def test_shared_duplicate_labels_from_different_active_pads_are_not_comparable() -> None:
     instance, _, objective, graph = _setup()
-    duals = PricingDuals(mu={c: 0.0 for c in instance.customers}, kappa=0.0, nu={})
-    later = _Label(
-        path=("Source", "C1"),
-        represented=frozenset({"C1"}),
-        truck_visited=frozenset({"Source", "C1"}),
-        truck_load=instance.demand["C1"],
-        active_pad=None,
-        active_pad_arrival=0.0,
-        active_wait=0.0,
-        block_count=0,
-        physical_time=10.0,
-        service_times=(("C1", 10.0),),
-        sr_counts=tuple(),
-        reduced_cost=-1_000_000.0,
-        used_arcs=frozenset({("Source", "C1")}),
-        represented_mask=1,
-        truck_node_mask=0,
-    )
-    earlier = _Label(
-        path=("Source", "C1"),
-        represented=frozenset({"C1"}),
-        truck_visited=frozenset({"Source", "C1"}),
-        truck_load=instance.demand["C1"],
-        active_pad=None,
-        active_pad_arrival=0.0,
-        active_wait=0.0,
-        block_count=0,
-        physical_time=5.0,
-        service_times=(("C1", 5.0),),
-        sr_counts=tuple(),
-        reduced_cost=-1_000_000.0,
-        used_arcs=frozenset({("Source", "C1")}),
-        represented_mask=1,
-        truck_node_mask=0,
-    )
-    kept: dict[str, list[_Label]] = {}
-    counters = _DeadlinePricingCounters(shortest=_shortest_truck_times(graph))
-    arc_customer_sets = _arc_customer_sets(graph)
-
-    assert _insert_nondominated_standard_label(
-        kept,
-        later,
+    endpoint = duplicate_node("C1")
+    h1 = _label(endpoint, active_pad="H1", reduced_cost=-1.0)
+    h2 = _label(endpoint, active_pad="H2", reduced_cost=0.0)
+    restrictions = BranchRestrictions()
+    context = _dominance_context(instance, objective, restrictions)
+    assert not _paper_dominates(
+        h1,
+        h2,
         graph,
-        objective,
-        duals,
-        BranchRestrictions(),
-        arc_customer_sets,
-        counters,
-    ) == (True, 0, 0)
-    assert _insert_nondominated_standard_label(
-        kept,
-        earlier,
-        graph,
-        objective,
-        duals,
-        BranchRestrictions(),
-        arc_customer_sets,
-        counters,
-    ) == (True, 0, 1)
-    assert kept["C1"] == [earlier]
-    assert counters.dom_candidate_pairs_materialized >= 1
-    assert counters.dom_full_tests_same_node == 1
-    assert counters.dom_labels_deleted_same_node == 1
-    assert counters.dom_labels_deleted_physical_location == 0
-
-
-def test_frontier_cell_envelope_rejects_without_deleting_label() -> None:
-    instance, _, objective, graph = _setup()
-    duals = PricingDuals(mu={c: 0.0 for c in instance.customers}, kappa=0.0, nu={})
-    heavy = _Label(
-        path=("Source", "C1"),
-        represented=frozenset({"C1"}),
-        truck_visited=frozenset({"Source", "C1"}),
-        truck_load=10.0,
-        active_pad=None,
-        active_pad_arrival=0.0,
-        active_wait=0.0,
-        block_count=0,
-        physical_time=5.0,
-        service_times=(("C1", 5.0),),
-        sr_counts=tuple(),
-        reduced_cost=0.0,
-        used_arcs=frozenset({("Source", "C1")}),
+        PricingDuals(mu={}, kappa=0.0),
+        context,
     )
-    light = _Label(
-        path=("Source", "C1"),
-        represented=frozenset({"C1"}),
-        truck_visited=frozenset({"Source", "C1"}),
-        truck_load=1.0,
-        active_pad=None,
-        active_pad_arrival=0.0,
-        active_wait=0.0,
-        block_count=0,
-        physical_time=5.0,
-        service_times=(("C1", 5.0),),
-        sr_counts=tuple(),
-        reduced_cost=1.0,
-        used_arcs=frozenset({("Source", "C1")}),
-    )
-    kept: dict[str, list[_Label]] = {}
-    counters = _DeadlinePricingCounters(shortest=_shortest_truck_times(graph))
-    arc_customer_sets = _arc_customer_sets(graph)
-
-    assert _insert_nondominated_standard_label(
-        kept,
-        heavy,
-        graph,
-        objective,
-        duals,
-        BranchRestrictions(),
-        arc_customer_sets,
-        counters,
-    ) == (True, 0, 0)
-    assert _insert_nondominated_standard_label(
-        kept,
-        light,
-        graph,
-        objective,
-        duals,
-        BranchRestrictions(),
-        arc_customer_sets,
-        counters,
-    ) == (True, 0, 0)
-    assert kept["C1"] == [heavy, light]
-    assert counters.cell_pairs_considered >= 1
-    assert counters.cell_pairs_rejected_by_envelope >= 1
-    assert counters.labels_dominated_same_node == 0
-    assert counters.labels_dominated_physical == 0
+    assert not _farkas_dominates(h1, h2, graph, context)
 
 
-def test_physical_location_dominance_reports_return_credit_rejection() -> None:
-    instance, _, objective, graph = _setup()
-    duals = PricingDuals(mu={c: 0.0 for c in instance.customers}, kappa=0.0, nu={})
-    h1_c1 = duplicate_node("H1", "C1")
-    h1_c2 = duplicate_node("H1", "C2")
-    earlier = _Label(
-        path=("Source", "H1", h1_c1),
-        represented=frozenset({"C1"}),
-        truck_visited=frozenset({"Source", "H1"}),
-        truck_load=instance.demand["C1"],
-        active_pad="H1",
-        active_pad_arrival=5.0,
-        active_wait=1.0,
-        block_count=1,
-        physical_time=5.0,
-        service_times=(("C1", 6.0),),
-        sr_counts=tuple(),
-        reduced_cost=0.0,
-        used_arcs=frozenset({("Source", "H1"), ("H1", h1_c1)}),
-    )
-    later = _Label(
-        path=("Source", "H1", h1_c1, h1_c2),
-        represented=frozenset({"C1", "C2"}),
-        truck_visited=frozenset({"Source", "H1"}),
-        truck_load=instance.demand["C1"] + instance.demand["C2"],
-        active_pad="H1",
-        active_pad_arrival=6.0,
-        active_wait=2.0,
-        block_count=2,
-        physical_time=5.0,
-        service_times=(("C1", 6.0), ("C2", 7.0)),
-        sr_counts=tuple(),
-        reduced_cost=0.0,
-        used_arcs=frozenset({("Source", "H1"), ("H1", h1_c1), (h1_c1, h1_c2)}),
-    )
-    arc_customer_sets = {arc: graph.arc_customer_set(arc) for arc in graph.arcs}
-    counters = _DeadlinePricingCounters(shortest=_shortest_truck_times(graph))
-    assert _paper_dominates(earlier, later, graph, objective, duals, BranchRestrictions(), arc_customer_sets, counters)
-    assert counters.dom_gate_pairs_seen == 1
-    assert counters.forward_physical_location_dominance_tests == 1
-    assert counters.forward_physical_location_dominance_rejections == 1
-    assert counters.forward_return_time_credit_checks == 1
-    assert counters.forward_return_time_credit_checks_skipped == 0
-    assert counters.physical_location_full_tests == 1
-    assert counters.physical_location_rejections == 1
-    assert counters.dom_full_tests_physical_location == 1
-    assert counters.labels_dominated_same_node == 0
-    assert counters.labels_dominated_physical == 1
-    assert counters.dom_labels_deleted_physical_location == 1
+def test_sr_adjustment_is_exactly_active_negative_one_to_two() -> None:
+    triplet = ("C1", "C2", "C3")
+    duals = PricingDuals(mu={}, kappa=0.0, nu={triplet: -2.5})
+    endpoint = "C1"
+    one = _label(endpoint, sr_counts=((triplet, 1),))
+    two = _label(endpoint, sr_counts=((triplet, 2),))
+    zero = _label(endpoint, sr_counts=((triplet, 0),))
+    three = _label(endpoint, sr_counts=((triplet, 3),))
+    assert _sr_extra_penalty_bound(one, two, duals) == pytest.approx(-2.5)
+    assert _sr_extra_penalty_bound(zero, two, duals) == 0.0
+    assert _sr_extra_penalty_bound(one, three, duals) == 0.0
+    assert _sr_extra_penalty_bound(one, two, replace(duals, nu={triplet: 1.0})) == 0.0
 
 
-def test_same_regular_node_dominance_ignores_stale_active_pad_state() -> None:
-    instance, _, objective, graph = _setup()
-    duals = PricingDuals(mu={c: 0.0 for c in instance.customers}, kappa=0.0, nu={})
-    credit = objective.coeffs.return_time * 5.0
-    earlier = _Label(
-        path=("Source", "C1"),
-        represented=frozenset({"C1"}),
-        truck_visited=frozenset({"Source", "C1"}),
-        truck_load=instance.demand["C1"],
-        active_pad="H1",
-        active_pad_arrival=100.0,
-        active_wait=5.0,
-        block_count=0,
-        physical_time=5.0,
-        service_times=(("C1", 5.0),),
-        sr_counts=tuple(),
-        reduced_cost=0.5 * credit,
-        used_arcs=frozenset({("Source", "C1")}),
-    )
-    later = _Label(
-        path=("Source", "C1"),
-        represented=frozenset({"C1"}),
-        truck_visited=frozenset({"Source", "C1"}),
-        truck_load=instance.demand["C1"],
-        active_pad=None,
-        active_pad_arrival=0.0,
-        active_wait=0.0,
-        block_count=0,
-        physical_time=10.0,
-        service_times=(("C1", 10.0),),
-        sr_counts=tuple(),
-        reduced_cost=0.0,
-        used_arcs=frozenset({("Source", "C1")}),
-    )
-    arc_customer_sets = {arc: graph.arc_customer_set(arc) for arc in graph.arcs}
-    assert _paper_dominates(earlier, later, graph, objective, duals, BranchRestrictions(), arc_customer_sets)
-
-
-def test_same_regular_node_farkas_dominance_ignores_stale_active_pad_state() -> None:
-    instance, _, _, graph = _setup()
-    earlier = _Label(
-        path=("Source", "C1"),
-        represented=frozenset({"C1"}),
-        truck_visited=frozenset({"Source", "C1"}),
-        truck_load=instance.demand["C1"],
-        active_pad="H1",
-        active_pad_arrival=100.0,
-        active_wait=5.0,
-        block_count=0,
-        physical_time=5.0,
-        service_times=(("C1", 5.0),),
-        sr_counts=tuple(),
-        reduced_cost=0.0,
-        used_arcs=frozenset({("Source", "C1")}),
-    )
-    later = _Label(
-        path=("Source", "C1"),
-        represented=frozenset({"C1"}),
-        truck_visited=frozenset({"Source", "C1"}),
-        truck_load=instance.demand["C1"],
-        active_pad=None,
-        active_pad_arrival=0.0,
-        active_wait=0.0,
-        block_count=0,
-        physical_time=10.0,
-        service_times=(("C1", 10.0),),
-        sr_counts=tuple(),
-        reduced_cost=0.0,
-        used_arcs=frozenset({("Source", "C1")}),
-    )
-    arc_customer_sets = {arc: graph.arc_customer_set(arc) for arc in graph.arcs}
-    assert _farkas_dominates(earlier, later, graph, BranchRestrictions(), arc_customer_sets)
-
-
-def test_standard_nondominated_label_set_purges_dominated_incumbent() -> None:
-    instance, _, objective, graph = _setup()
-    duals = PricingDuals(mu={c: 0.0 for c in instance.customers}, kappa=0.0, nu={})
-    dominated = _Label(
-        path=("Source", "C1"),
-        represented=frozenset({"C1"}),
-        truck_visited=frozenset({"Source", "C1"}),
-        truck_load=instance.demand["C1"],
-        active_pad=None,
-        active_pad_arrival=0.0,
-        active_wait=0.0,
-        block_count=0,
-        physical_time=10.0,
-        service_times=(("C1", 10.0),),
-        sr_counts=tuple(),
-        reduced_cost=1.0,
-        used_arcs=frozenset({("Source", "C1")}),
-    )
-    stronger = _Label(
-        path=("Source", "C1"),
-        represented=frozenset({"C1"}),
-        truck_visited=frozenset({"Source", "C1"}),
-        truck_load=instance.demand["C1"],
-        active_pad=None,
-        active_pad_arrival=0.0,
-        active_wait=0.0,
-        block_count=0,
-        physical_time=5.0,
-        service_times=(("C1", 5.0),),
-        sr_counts=tuple(),
-        reduced_cost=0.0,
-        used_arcs=frozenset({("Source", "C1")}),
-    )
-    arc_customer_sets = {arc: graph.arc_customer_set(arc) for arc in graph.arcs}
-    kept: dict[str, list[_Label]] = {}
-    assert _insert_nondominated_standard_label(
-        kept,
-        dominated,
-        graph,
-        objective,
-        duals,
-        BranchRestrictions(),
-        arc_customer_sets,
-    ) == (True, 0, 0)
-    assert _insert_nondominated_standard_label(
-        kept,
-        stronger,
-        graph,
-        objective,
-        duals,
-        BranchRestrictions(),
-        arc_customer_sets,
-    ) == (True, 0, 1)
-    assert kept["C1"] == [stronger]
-
-
-def test_farkas_nondominated_label_set_purges_dominated_incumbent() -> None:
-    instance, _, _, graph = _setup()
-    dominated = _Label(
-        path=("Source", "C1"),
-        represented=frozenset({"C1"}),
-        truck_visited=frozenset({"Source", "C1"}),
-        truck_load=instance.demand["C1"],
-        active_pad=None,
-        active_pad_arrival=0.0,
-        active_wait=0.0,
-        block_count=0,
-        physical_time=10.0,
-        service_times=(("C1", 10.0),),
-        sr_counts=tuple(),
-        reduced_cost=1.0,
-        used_arcs=frozenset({("Source", "C1")}),
-    )
-    stronger = _Label(
-        path=("Source", "C1"),
-        represented=frozenset({"C1"}),
-        truck_visited=frozenset({"Source", "C1"}),
-        truck_load=instance.demand["C1"],
-        active_pad=None,
-        active_pad_arrival=0.0,
-        active_wait=0.0,
-        block_count=0,
-        physical_time=5.0,
-        service_times=(("C1", 5.0),),
-        sr_counts=tuple(),
-        reduced_cost=0.0,
-        used_arcs=frozenset({("Source", "C1")}),
-    )
-    arc_customer_sets = {arc: graph.arc_customer_set(arc) for arc in graph.arcs}
-    kept: dict[str, list[_Label]] = {}
-    assert _insert_nondominated_farkas_label(
-        kept,
-        dominated,
-        graph,
-        BranchRestrictions(),
-        arc_customer_sets,
-    ) == (True, 0, 0)
-    assert _insert_nondominated_farkas_label(
-        kept,
-        stronger,
-        graph,
-        BranchRestrictions(),
-        arc_customer_sets,
-    ) == (True, 0, 1)
-    assert kept["C1"] == [stronger]
-
-
-def test_farkas_pricing_invalidates_infeasible_rmp_certificate() -> None:
-    instance, _, objective, graph = _setup()
-    node = NodeState(
-        id=1,
-        depth=0,
-        restrictions=BranchRestrictions(),
-        fixed_routes=tuple(),
-        residual_customers=frozenset(instance.customers),
-        fleet_limit=instance.num_trucks,
-        fixed_cost=0.0,
-        column_paths=set(),
-        active_sr=set(),
-    )
-    result = RestrictedMaster(graph, node, {}, SolverConfig()).solve()
-    assert result.status == GRB.INFEASIBLE
-    assert result.farkas_rhs is not None and result.farkas_rhs > 0.0
-    assert result.max_farkas_column_activity is None
-    priced = price_route(
-        graph,
-        objective,
-        node.residual_customers,
-        node.restrictions,
-        result.duals,
-        next_route_id=200,
-        farkas=True,
-    )
-    assert priced.route is not None
-    assert priced.reduced_cost is not None and priced.reduced_cost < 0.0
-    certificate_activity = (
-        sum(result.duals.mu[customer] for customer in priced.route.served)
-        + result.duals.kappa
-        + sum(dual * priced.route.sr_coeff(triplet) for triplet, dual in result.duals.nu.items())
-    )
-    assert certificate_activity > 0.0
-    assert abs(priced.reduced_cost - route_farkas_reduced_cost(priced.route, result.duals)) < 1e-8
-
-
-def test_rmp_farkas_certificate_satisfies_paper_conditions_for_current_columns() -> None:
-    instance, _, objective, graph = _setup()
-    route = route_from_path(1, ("Source", "C1", "Sink"), graph, objective)
-    routes = {route.path: route}
-    node = NodeState(
-        id=2,
-        depth=0,
-        restrictions=BranchRestrictions(),
-        fixed_routes=tuple(),
-        residual_customers=frozenset(instance.customers),
-        fleet_limit=instance.num_trucks,
-        fixed_cost=0.0,
-        column_paths={route.path},
-        active_sr=set(),
-    )
-    result = RestrictedMaster(graph, node, routes, SolverConfig()).solve()
-    assert result.status == GRB.INFEASIBLE
-    assert result.farkas_rhs is not None and result.farkas_rhs > 0.0
-    assert result.max_farkas_column_activity is not None
-    assert result.max_farkas_column_activity <= 1e-8
-    assert _farkas_rhs(result.duals, node.residual_customers, node.fleet_limit, node.active_sr) == pytest.approx(
-        result.farkas_rhs
-    )
-    assert _farkas_column_activity(route, result.duals) == pytest.approx(result.max_farkas_column_activity)
-
-
-def test_farkas_certificate_validation_rejects_invalid_ray() -> None:
-    instance, _, objective, graph = _setup()
-    route = route_from_path(1, ("Source", "C1", "Sink"), graph, objective)
-    duals = PricingDuals(mu={customer: 1.0 for customer in instance.customers}, kappa=0.0, nu={})
-    with pytest.raises(RuntimeError, match="current-column validity"):
-        _validate_farkas_certificate(
-            duals,
-            {route.path: route},
-            {route.path},
-            frozenset(instance.customers),
-            instance.num_trucks,
-            set(),
-            1e-9,
-        )
-    zero_duals = PricingDuals(mu={customer: 0.0 for customer in instance.customers}, kappa=0.0, nu={})
-    with pytest.raises(RuntimeError, match="residual RHS"):
-        _validate_farkas_certificate(
-            zero_duals,
-            {},
-            set(),
-            frozenset(instance.customers),
-            instance.num_trucks,
-            set(),
-            1e-9,
-        )
-
-
-def test_farkas_certificate_records_best_nonviolating_reduced_cost() -> None:
+def test_deterministic_prefix_tasks_are_prefix_free_disjoint_and_exhaustive() -> None:
     instance, _, objective, graph = _setup()
     restrictions = BranchRestrictions()
-    for first in range(len(instance.customers)):
-        for second in range(first + 1, len(instance.customers)):
-            restrictions = restrictions.with_separate(instance.customers[first], instance.customers[second])
-    duals = PricingDuals(mu={customer: 0.4 for customer in instance.customers}, kappa=-1.0, nu={})
-    priced = price_route(
+    depth_one = _source_neighbor_prefix_tasks(graph, objective, frozenset(instance.customers), restrictions, 1)
+    assert depth_one == tuple((node,) for node in sorted(node for node in graph.out_arcs["Source"] if node != "Sink"))
+    depth_two = _source_neighbor_prefix_tasks(graph, objective, frozenset(instance.customers), restrictions, 2)
+    assert len(depth_two) == len(set(depth_two))
+    assert all(not (len(a) < len(b) and b[: len(a)] == a) for a in depth_two for b in depth_two)
+    assert {prefix[0] for prefix in depth_two} == {prefix[0] for prefix in depth_one}
+
+
+def test_balanced_source_assignment_is_deterministic_disjoint_and_exhaustive() -> None:
+    instance, _, objective, graph = _setup()
+    residual = frozenset(instance.customers)
+    restrictions = BranchRestrictions()
+    duals = PricingDuals(mu={customer: 0.0 for customer in instance.customers}, kappa=0.0)
+    scheduler = PricingSchedulerConfig()
+    first = _balanced_source_neighbor_plan(graph, objective, residual, restrictions, duals, 3, scheduler)
+    second = _balanced_source_neighbor_plan(graph, objective, residual, restrictions, duals, 3, scheduler)
+    assert first == second
+    assigned = [neighbor for block in first.blocks for neighbor in block]
+    assert len(assigned) == len(set(assigned))
+    assert set(assigned) == set(first.source_neighbors)
+    assert len(first.blocks) == len(first.block_scores) == 3
+
+
+def test_dynamic_split_conserves_complete_label_states_and_retains_shallow_labels() -> None:
+    shallow = replace(_label("H1"), path=("Source", "H1"))
+    first = _label("C1", represented=frozenset({"C1"}))
+    second = _label("C2", represented=frozenset({"C2"}))
+    third = replace(first, path=("Source", "H1", "C3"), represented=frozenset({"C3"}))
+    labels = (shallow, first, second, third)
+    retained, children = _split_open_label_frontier(
+        labels,
+        task_root_prefix=tuple(),
+        refinement_depth=2,
+        child_limit=2,
+    )
+    post_split = list(retained)
+    for _, child_labels in children:
+        post_split.extend(child_labels)
+    assert shallow in retained
+    assert len(post_split) == len(labels)
+    assert set(post_split) == set(labels)
+    assert sum(len(child_labels) for _, child_labels in children) > 0
+
+
+def test_audit_progress_keeps_append_only_tree_history(tmp_path: Path) -> None:
+    instance, _, _, _ = _setup()
+    node = _root_node(instance, set())
+    config = SolverConfig(gurobi_log_dir=str(tmp_path / "gurobi_logs"), logging_mode="audit")
+    stats = BPCStats()
+    bpc_module._initialize_progress_history(config)
+    bpc_module._write_progress(config, stats, node, "node_started", {"queue_bound": 0.0})
+    bpc_module._write_progress(config, stats, node, "branch_created", {"left_child": 1, "right_child": 2})
+    history = [json.loads(line) for line in (tmp_path / "bpc_progress.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert [record["event"] for record in history] == ["node_started", "branch_created"]
+    assert [record["event_sequence"] for record in history] == [1, 2]
+    latest = json.loads((tmp_path / "bpc_progress.json").read_text(encoding="utf-8"))
+    assert latest["event"] == "branch_created"
+
+
+def test_parallel_forward_certification_matches_serial() -> None:
+    instance, _, objective, graph = _setup()
+    duals = PricingDuals(mu={customer: 0.0 for customer in instance.customers}, kappa=0.0)
+    common = dict(
+        graph=graph, objective=objective, residual_customers=frozenset(instance.customers),
+        restrictions=BranchRestrictions(), duals=duals, next_route_id=0,
+        pricing_tolerance=0.05, batch_size=128, pricing_mode="closure",
+    )
+    serial = price_route(**common, parallel_workers=1)
+    parallel = price_route(**common, parallel_workers=3, pricing_worker_backend="thread", prefix_task_depth=2)
+    assert serial.routes == parallel.routes == tuple()
+    assert serial.diagnostics.exact_completion
+    assert parallel.diagnostics.exact_completion
+    assert parallel.diagnostics.certification_worker_calls == parallel.diagnostics.source_neighbor_task_count
+    assert not parallel.diagnostics.balanced_process_dynamic
+
+
+def test_shared_duplicate_pricing_matches_brute_force_routes() -> None:
+    instance, _, objective, graph = _setup()
+    residual = frozenset(instance.customers)
+    restrictions = BranchRestrictions()
+    duals = PricingDuals(mu={customer: 10.0 for customer in residual}, kappa=0.0)
+    network = nx.DiGraph()
+    network.add_nodes_from(graph.nodes)
+    network.add_edges_from(graph.arcs)
+    brute_costs = []
+    for index, path in enumerate(
+        nx.all_simple_paths(network, instance.depot_source, instance.depot_sink, cutoff=len(graph.nodes) - 1)
+    ):
+        try:
+            route = route_from_path(index, tuple(path), graph, objective)
+        except ValueError:
+            continue
+        if restrictions.route_allowed(route):
+            brute_costs.append(route_reduced_cost(route, duals))
+    result = price_route(
+        graph,
+        objective,
+        residual,
+        restrictions,
+        duals,
+        0,
+        pricing_tolerance=0.0,
+        use_standard_acceleration=True,
+        batch_size=1024,
+        parallel_workers=1,
+        pricing_mode="closure",
+    )
+    assert result.best_reduced_cost == pytest.approx(min(brute_costs))
+
+
+def test_productive_pricing_never_certifies_closure() -> None:
+    instance, _, objective, graph = _setup()
+    duals = PricingDuals(mu={customer: 0.0 for customer in instance.customers}, kappa=0.0)
+    result = price_route(
+        graph, objective, frozenset(instance.customers), BranchRestrictions(), duals, 0,
+        pricing_tolerance=0.05, batch_size=16, parallel_workers=3,
+        pricing_worker_backend="thread", pricing_mode="productive",
+    )
+    assert not result.diagnostics.exact_completion
+    assert result.diagnostics.certification_calls == 0
+
+
+def test_process_backend_uses_same_deterministic_certification_partition() -> None:
+    instance, _, objective, graph = _setup()
+    duals = PricingDuals(mu={customer: 0.0 for customer in instance.customers}, kappa=0.0)
+    result = price_route(
+        graph,
+        objective,
+        frozenset(instance.customers),
+        BranchRestrictions(),
+        duals,
+        0,
+        pricing_tolerance=0.05,
+        batch_size=32,
+        parallel_workers=2,
+        pricing_worker_backend="process",
+        pricing_mode="closure",
+    )
+    assert result.diagnostics.exact_completion
+    assert result.diagnostics.pricing_worker_backend == "process"
+    assert result.diagnostics.balanced_process_dynamic
+    assert result.diagnostics.certification_worker_calls == result.diagnostics.source_neighbor_task_count
+    assert result.diagnostics.dynamic_splits_performed == 0
+
+
+def test_dynamic_split_gap_uses_paper_bound_and_single_pricing_tolerance() -> None:
+    tolerance = 0.01
+    assert _task_closure_gap(-0.005) == pytest.approx(0.005)
+    assert _task_closure_gap(-0.010) == pytest.approx(0.010)
+    assert _task_closure_gap(-0.015) == pytest.approx(0.015)
+    assert _task_closure_gap(0.020) == 0.0
+
+    assert not _closure_gap_exceeds_split_threshold(0.005, tolerance, 1.0)
+    assert not _closure_gap_exceeds_split_threshold(0.010, tolerance, 1.0)
+    assert _closure_gap_exceeds_split_threshold(0.015, tolerance, 1.0)
+
+
+def test_process_backend_can_split_and_close_dynamic_leaf_tasks() -> None:
+    instance, _, objective, graph = _setup()
+    triplet = tuple(instance.customers)
+    duals = PricingDuals(
+        mu={customer: 1.0 for customer in instance.customers},
+        kappa=-1.0,
+        nu={triplet: -10.0},
+    )
+    scheduler = PricingSchedulerConfig(
+        split_open_labels_min=1,
+        split_gap_factor=0.0,
+        split_elapsed_min=0.0,
+        split_work_min=1,
+        refinement_depth=1,
+        checkpoint_extension_period=1,
+    )
+    result = price_route(
+        graph,
+        objective,
+        frozenset(instance.customers),
+        BranchRestrictions(),
+        duals,
+        0,
+        pricing_tolerance=0.05,
+        use_standard_acceleration=True,
+        batch_size=32,
+        parallel_workers=8,
+        pricing_worker_backend="process",
+        pricing_mode="closure",
+        scheduler_config=scheduler,
+    )
+    assert result.diagnostics.exact_completion
+    assert result.diagnostics.leaf_tasks_created >= 8
+    assert result.diagnostics.leaf_tasks_closed == result.diagnostics.leaf_tasks_created
+    assert result.diagnostics.dynamic_splits_performed > 0
+    assert result.diagnostics.dynamic_labels_transferred > 0
+    assert result.diagnostics.pending_transfer_peak > 0
+
+
+def test_candidate_checkpoint_split_race_does_not_fail_worker_processes() -> None:
+    instance, _, objective, graph = _setup()
+    scheduler = PricingSchedulerConfig(
+        split_open_labels_min=1,
+        split_gap_factor=0.0,
+        split_elapsed_min=0.0,
+        split_work_min=1,
+        refinement_depth=1,
+        checkpoint_extension_period=1,
+    )
+    duals = PricingDuals(mu={customer: 10.0 for customer in instance.customers}, kappa=0.0)
+    pool = SourceNeighborPricingPool(graph, objective, 8, scheduler)
+    try:
+        for call in range(3):
+            result = pool.price(
+                residual_customers=frozenset(instance.customers),
+                restrictions=BranchRestrictions(),
+                duals=duals,
+                next_route_id=call * 100,
+                farkas=False,
+                pricing_tolerance=0.01,
+                use_standard_acceleration=True,
+                stop_at_first_negative=False,
+                batch_size=8,
+                deadline=None,
+                existing_routes=None,
+                existing_column_paths=None,
+                pricing_mode="closure",
+            )
+            assert result.routes
+            assert result.diagnostics.candidate_checkpoints > 0
+    finally:
+        pool.shutdown()
+
+
+def test_farkas_checkpoint_bound_drives_exact_dynamic_splitting() -> None:
+    instance, _, objective, graph = _setup()
+    triplet = tuple(instance.customers)
+    duals = PricingDuals(
+        mu={customer: 1.0 for customer in instance.customers},
+        kappa=-1.0,
+        nu={triplet: -10.0},
+    )
+    scheduler = PricingSchedulerConfig(
+        split_open_labels_min=1,
+        split_gap_factor=0.0,
+        split_elapsed_min=0.0,
+        split_work_min=1,
+        refinement_depth=1,
+        checkpoint_extension_period=1,
+    )
+    result = price_route(
+        graph,
+        objective,
+        frozenset(instance.customers),
+        BranchRestrictions(),
+        duals,
+        0,
+        farkas=True,
+        pricing_tolerance=0.01,
+        batch_size=32,
+        parallel_workers=8,
+        pricing_worker_backend="process",
+        pricing_mode="closure",
+        scheduler_config=scheduler,
+    )
+    assert not result.routes
+    assert result.diagnostics.exact_completion
+    assert result.diagnostics.dynamic_splits_performed > 0
+    assert result.diagnostics.farkas_bound_pruned > 0
+
+
+def test_process_pool_is_reused_across_pricing_epochs() -> None:
+    instance, _, objective, graph = _setup()
+    residual = frozenset(instance.customers)
+    duals = PricingDuals(mu={customer: 0.0 for customer in instance.customers}, kappa=0.0)
+    pool = SourceNeighborPricingPool(graph, objective, 2, PricingSchedulerConfig())
+    try:
+        for _ in range(2):
+            result = pool.price(
+                residual_customers=residual,
+                restrictions=BranchRestrictions(),
+                duals=duals,
+                next_route_id=0,
+                farkas=False,
+                pricing_tolerance=0.05,
+                use_standard_acceleration=True,
+                stop_at_first_negative=False,
+                batch_size=32,
+                deadline=None,
+                existing_routes=None,
+                existing_column_paths=None,
+                pricing_mode="closure",
+            )
+            assert result.diagnostics.exact_completion
+        assert pool.startup_count == 1
+        assert pool.reused_calls == 2
+    finally:
+        pool.shutdown()
+
+
+@pytest.mark.parametrize("farkas", (False, True))
+def test_process_workers_collect_a_global_verified_batch(farkas: bool) -> None:
+    instance, _, objective, graph = _setup()
+    residual = frozenset(instance.customers)
+    duals = PricingDuals(mu={customer: 100.0 for customer in residual}, kappa=0.0)
+    result = price_route(
+        graph,
+        objective,
+        residual,
+        BranchRestrictions(),
+        duals,
+        0,
+        farkas=farkas,
+        pricing_tolerance=0.01,
+        use_standard_acceleration=True,
+        batch_size=2,
+        parallel_workers=2,
+        pricing_worker_backend="process",
+        pricing_mode="closure",
+    )
+    assert len(result.routes) == 2
+    assert result.diagnostics.pricing_candidate_paths_before_merge >= 2
+    assert result.diagnostics.pricing_returned_batch_size == 2
+    assert result.diagnostics.pricing_epoch_invalidations == 1
+    assert result.diagnostics.candidate_checkpoints > 0
+    assert result.diagnostics.candidate_worker_resumptions > 0
+    assert result.diagnostics.global_verified_candidates == 2
+    assert result.diagnostics.global_batch_limit_cancellations == 1
+    direct_costs = tuple(
+        route_farkas_reduced_cost(route, duals) if farkas else route_reduced_cost(route, duals)
+        for route in result.routes
+    )
+    assert result.reduced_costs == pytest.approx(direct_costs)
+    assert all(BranchRestrictions().route_allowed(route) for route in result.routes)
+    assert not result.diagnostics.exact_completion
+
+
+def test_process_collection_returns_smaller_batch_after_all_tasks_exhaust() -> None:
+    instance, _, objective, graph = _setup()
+    residual = frozenset({"C1"})
+    result = price_route(
+        graph,
+        objective,
+        residual,
+        BranchRestrictions(),
+        PricingDuals(mu={"C1": 100.0}, kappa=0.0),
+        0,
+        pricing_tolerance=0.01,
+        batch_size=64,
+        parallel_workers=2,
+        pricing_worker_backend="process",
+        pricing_mode="closure",
+    )
+    assert 0 < len(result.routes) < 64
+    assert result.diagnostics.leaf_tasks_closed == result.diagnostics.leaf_tasks_created
+    assert result.diagnostics.global_batch_limit_cancellations == 0
+    assert not result.diagnostics.exact_completion
+
+
+def test_pricing_epoch_changes_with_every_explicit_node_version() -> None:
+    instance, _, objective, _ = _setup()
+    residual = frozenset(instance.customers)
+    restrictions = BranchRestrictions()
+    duals = PricingDuals(mu={customer: 0.0 for customer in instance.customers}, kappa=0.0)
+    base_context = PricingEpochContext(
+        active_sr_version=1,
+        fixed_route_signature=(("Source", "C1", "Sink"),),
+        active_column_version=(("Source", "C1", "Sink"),),
+        rmp_structure_version=("base",),
+    )
+    base = _pricing_epoch(objective, residual, restrictions, duals, None, None, base_context)
+    variants = (
+        replace(base_context, active_sr_version=2),
+        replace(base_context, fixed_route_signature=(("Source", "C2", "Sink"),)),
+        replace(base_context, active_column_version=(("Source", "C2", "Sink"),)),
+        replace(base_context, rmp_structure_version=("changed",)),
+    )
+    assert all(_pricing_epoch(objective, residual, restrictions, duals, None, None, context) != base for context in variants)
+    assert _pricing_epoch(
+        objective,
+        residual,
+        restrictions,
+        replace(duals, kappa=-1.0),
+        None,
+        None,
+        base_context,
+    ) != base
+    assert _pricing_epoch(
+        objective,
+        frozenset(set(residual) - {next(iter(residual))}),
+        restrictions,
+        duals,
+        None,
+        None,
+        base_context,
+    ) != base
+    assert _pricing_epoch(
+        objective,
+        residual,
+        restrictions.with_conditioned_arc_forbidden("C1", ("Source", "C1")),
+        duals,
+        None,
+        None,
+        base_context,
+    ) != base
+    changed_bounds = replace(objective.bounds, service_ub={**objective.bounds.service_ub, "C1": objective.bounds.service_ub["C1"] + 1.0})
+    assert _pricing_epoch(
+        replace(objective, bounds=changed_bounds),
+        residual,
+        restrictions,
+        duals,
+        None,
+        None,
+        base_context,
+    ) != base
+    assert _pricing_epoch(
+        replace(objective, coeffs=replace(objective.coeffs, cost=objective.coeffs.cost + 1.0)),
+        residual,
+        restrictions,
+        duals,
+        None,
+        None,
+        base_context,
+    ) != base
+
+
+def test_farkas_fractional_knapsack_bound_and_threshold_pruning() -> None:
+    instance, _, objective, graph = _setup()
+    residual = frozenset(instance.customers)
+    duals = PricingDuals(mu={customer: 2.0 for customer in residual}, kappa=0.0)
+    shortest = _shortest_truck_times(graph)
+    bounds = _build_pricing_bounds(graph, duals, residual, shortest)
+    label = _label(
+        "C1",
+        active_pad=None,
+        represented=frozenset({"C1"}),
+        truck_visited=frozenset({"Source", "C1"}),
+        reduced_cost=-2.0,
+    )
+    reward = _dual_reward_bound(label, graph, bounds, objective, shortest)
+    assert _farkas_completion_lower_bound(label, graph, objective, shortest, bounds) == pytest.approx(
+        label.reduced_cost - reward
+    )
+    later_label = replace(label, represented=frozenset({"C1", "C2"}))
+    assert _queue_key(label, graph, objective, shortest, bounds, True, False) < _queue_key(
+        later_label, graph, objective, shortest, bounds, True, False
+    )
+    tight_bounds = replace(
+        objective.bounds,
+        service_ub={**objective.bounds.service_ub, "C2": -1.0},
+    )
+    tight_reward = _dual_reward_bound(label, graph, bounds, replace(objective, bounds=tight_bounds), shortest)
+    assert tight_reward < reward
+
+    zero_duals = PricingDuals(mu={customer: 0.0 for customer in residual}, kappa=0.0)
+    result = price_route(
+        graph, objective, residual, BranchRestrictions(), zero_duals, 0,
+        farkas=True, pricing_tolerance=0.05, use_standard_acceleration=False,
+        batch_size=32, parallel_workers=2, pricing_worker_backend="thread", pricing_mode="closure",
+    )
+    assert result.diagnostics.exact_completion
+    assert result.diagnostics.standard_bound_pruned == 0
+    assert result.diagnostics.farkas_bound_pruned > 0
+
+
+def test_farkas_bound_pricing_matches_exhaustive_route_enumeration() -> None:
+    instance, _, objective, graph = _setup()
+    residual = frozenset(instance.customers)
+    duals = PricingDuals(mu={customer: 1.5 for customer in residual}, kappa=-0.5)
+    network = nx.DiGraph()
+    network.add_nodes_from(graph.nodes)
+    network.add_edges_from(graph.arcs)
+    brute_costs: list[float] = []
+    for index, path in enumerate(
+        nx.all_simple_paths(network, instance.depot_source, instance.depot_sink, cutoff=len(graph.nodes) - 1)
+    ):
+        try:
+            route = route_from_path(index, tuple(path), graph, objective)
+        except ValueError:
+            continue
+        brute_costs.append(route_farkas_reduced_cost(route, duals))
+    result = price_route(
+        graph,
+        objective,
+        residual,
+        BranchRestrictions(),
+        duals,
+        0,
+        farkas=True,
+        pricing_tolerance=0.0,
+        batch_size=1024,
+        parallel_workers=1,
+        pricing_worker_backend="thread",
+        pricing_mode="closure",
+    )
+    assert result.diagnostics.exact_completion
+    assert result.best_reduced_cost == pytest.approx(min(brute_costs))
+
+
+@pytest.mark.parametrize(
+    "restrictions",
+    (
+        BranchRestrictions().with_together("C1", "C2"),
+        BranchRestrictions().with_separate("C1", "C2"),
+        BranchRestrictions().with_pad_forbidden("H1", "C1"),
+        BranchRestrictions().with_pad_required("H1", "C1"),
+        BranchRestrictions().with_conditioned_arc_forbidden("C1", ("Source", "C1")),
+        BranchRestrictions().with_conditioned_arc_required("C1", ("Source", "C1")),
+    ),
+)
+@pytest.mark.parametrize("farkas", (False, True))
+def test_standard_and_farkas_pricing_respect_every_branch_family(
+    restrictions: BranchRestrictions,
+    farkas: bool,
+) -> None:
+    instance, _, objective, graph = _setup()
+    duals = PricingDuals(mu={customer: 100.0 for customer in instance.customers}, kappa=0.0)
+    result = price_route(
         graph,
         objective,
         frozenset(instance.customers),
         restrictions,
         duals,
-        next_route_id=250,
-        farkas=True,
+        0,
+        farkas=farkas,
+        pricing_tolerance=0.01,
+        use_standard_acceleration=not farkas,
+        batch_size=64,
+        parallel_workers=1,
+        pricing_worker_backend="thread",
+        pricing_mode="closure",
     )
-    assert priced.routes == tuple()
-    assert priced.best_route is not None
-    assert priced.diagnostics.exact_completion is True
-    assert priced.diagnostics.complete_routes_generated > 0
-    assert priced.diagnostics.best_reduced_cost is not None
-    assert priced.diagnostics.best_reduced_cost >= 0.0
-    assert priced.diagnostics.standard_bound_pruned == 0
-    assert priced.diagnostics.farkas_bound_pruned == 0
+    assert result.diagnostics.exact_completion
+    assert all(restrictions.route_allowed(route) for route in result.routes)
 
 
-def test_standard_pricing_pruning_certifies_absence_of_negative_column() -> None:
+def test_pricing_tolerance_controls_all_negative_column_acceptance() -> None:
     instance, _, objective, graph = _setup()
-    duals = PricingDuals(mu={c: 0.0 for c in instance.customers}, kappa=0.0, nu={})
-    exhaustive = price_route(
-        graph,
-        objective,
-        frozenset(instance.customers),
-        BranchRestrictions(),
-        duals,
-        next_route_id=100,
-        farkas=False,
-        use_standard_acceleration=False,
+    residual = frozenset({"C1"})
+    base_duals = PricingDuals(mu={"C1": 0.0}, kappa=0.0)
+    base = price_route(
+        graph, objective, residual, BranchRestrictions(), base_duals, 0,
+        pricing_tolerance=0.0, use_standard_acceleration=False, batch_size=128, pricing_mode="closure",
     )
-    pruned = price_route(
-        graph,
-        objective,
-        frozenset(instance.customers),
-        BranchRestrictions(),
-        duals,
-        next_route_id=100,
-        farkas=False,
-        pricing_tolerance=1e-9,
-        use_standard_acceleration=True,
+    assert base.best_reduced_cost is not None
+    not_negative = price_route(
+        graph, objective, residual, BranchRestrictions(),
+        PricingDuals(mu={"C1": base.best_reduced_cost + 0.049}, kappa=0.0), 0,
+        pricing_tolerance=0.05, use_standard_acceleration=False, batch_size=128, pricing_mode="closure",
     )
-    assert exhaustive.route is not None
-    assert exhaustive.reduced_cost is not None and exhaustive.reduced_cost >= 0.0
-    assert pruned.routes == tuple()
-    if pruned.best_reduced_cost is not None:
-        assert pruned.best_reduced_cost >= -1e-9
-    assert pruned.diagnostics.exact_completion is True
-    assert pruned.diagnostics.pricing_status == "EXHAUSTED_NO_NEGATIVE"
-    assert pruned.diagnostics.standard_bound_pruned == pruned.diagnostics.labels_pruned
-    assert pruned.diagnostics.farkas_bound_pruned == 0
+    negative = price_route(
+        graph, objective, residual, BranchRestrictions(),
+        PricingDuals(mu={"C1": base.best_reduced_cost + 0.051}, kappa=0.0), 0,
+        pricing_tolerance=0.05, use_standard_acceleration=False, batch_size=128, pricing_mode="closure",
+    )
+    assert not not_negative.routes
+    assert negative.routes
+    assert all(cost < -0.05 for cost in negative.reduced_costs)
 
 
-def test_pricing_enforces_conditional_branch_automata() -> None:
+def test_fractional_knapsack_reward_bound_has_no_cardinality_alternative() -> None:
     instance, _, objective, graph = _setup()
-    high_c1_duals = PricingDuals(mu={"C1": 100.0, "C2": 0.0, "C3": 0.0}, kappa=0.0, nu={})
-    infeasible_together = price_route(
-        graph,
-        objective,
-        frozenset({"C1"}),
-        BranchRestrictions().with_together("C1", "C2"),
-        high_c1_duals,
-        next_route_id=300,
-        farkas=False,
-        use_standard_acceleration=False,
+    duals = PricingDuals(mu={customer: 10.0 for customer in instance.customers}, kappa=0.0)
+    shortest = _shortest_truck_times(graph)
+    bounds = _build_pricing_bounds(graph, duals, frozenset(instance.customers), shortest)
+    label = _Label(
+        path=("Source",), represented=frozenset(), truck_visited=frozenset({"Source"}), truck_load=0.0,
+        active_pad=None, active_pad_arrival=0.0, active_wait=0.0, block_count=0, physical_time=0.0,
+        service_times=tuple(), sr_counts=tuple(), reduced_cost=0.0, used_arcs=frozenset(),
     )
-    assert infeasible_together.route is None
-
-    required_arc = ("Source", "C1")
-    arc_up = price_route(
-        graph,
-        objective,
-        frozenset({"C1"}),
-        BranchRestrictions().with_trans_arc_required(required_arc),
-        high_c1_duals,
-        next_route_id=301,
-        farkas=False,
-        use_standard_acceleration=False,
-    )
-    assert arc_up.route is not None
-    assert required_arc in arc_up.route.used_arcs
+    value = _dual_reward_bound(label, graph, bounds, objective, shortest, _DeadlinePricingCounters(shortest=shortest))
+    assert value > 0.0
+    assert not hasattr(pricing_module, "_resource_restricted_reward_bound")
 
 
-def test_rmp_residual_customer_model_and_sr_separation() -> None:
+def test_active_sr_set_is_monotone_within_node() -> None:
+    instance, _, _, _ = _setup()
+    node = _root_node(instance, set())
+    stats = BPCStats()
+    first = ("C1", "C2", "C3")
+    assert _activate_sr_cuts(node, {first: 1.4}, stats) == 1
+    version = node.active_sr_version
+    assert _activate_sr_cuts(node, {first: 1.2}, stats) == 0
+    assert node.active_sr == {first}
+    assert node.active_sr_version == version
+    assert not hasattr(node, "removed_sr")
+
+
+def test_row_local_sr_coefficient_cache_matches_popcount_truth() -> None:
     instance, _, objective, graph = _setup()
-    routes = {}
-    for customer in instance.customers:
-        path = ("Source", customer, "Sink")
-        routes[path] = route_from_path(len(routes), path, graph, objective)
-    combo_path = ("Source", "C1", "C2", "Sink")
-    routes[combo_path] = route_from_path(len(routes), combo_path, graph, objective)
-    combo_path_2 = ("Source", "C2", "C3", "Sink")
-    routes[combo_path_2] = route_from_path(len(routes), combo_path_2, graph, objective)
-    node = NodeState(
-        id=1,
-        depth=0,
-        restrictions=BranchRestrictions(),
-        fixed_routes=tuple(),
-        residual_customers=frozenset(instance.customers),
-        fleet_limit=2,
-        fixed_cost=0.0,
-        column_paths=set(routes),
-        active_sr=set(),
-    )
-    rmp = RestrictedMaster(graph, node, routes, SolverConfig())
-    result = rmp.solve()
-    assert result.status == GRB.OPTIMAL
-    cuts = rmp.violated_sr_cuts({combo_path: 0.6, combo_path_2: 0.6}, 1e-9)
-    assert tuple(instance.customers) in cuts
-    node_with_sr = NodeState(
-        id=2,
-        depth=0,
-        restrictions=BranchRestrictions(),
-        fixed_routes=tuple(),
-        residual_customers=frozenset(instance.customers),
-        fleet_limit=2,
-        fixed_cost=0.0,
-        column_paths=set(routes),
-        active_sr={tuple(instance.customers)},
-    )
-    sr_result = RestrictedMaster(graph, node_with_sr, routes, SolverConfig()).solve()
-    assert sr_result.status == GRB.OPTIMAL
-    assert sr_result.duals.kappa <= 1e-9
-    assert all(value <= 1e-9 for value in sr_result.duals.nu.values())
-
-
-def test_incremental_rmp_matches_full_rebuild_after_column_append() -> None:
-    instance, _, objective, graph = _setup()
-    initial_paths = [("Source", "C1", "C2", "Sink"), ("Source", "C3", "Sink")]
-    routes = {path: route_from_path(i, path, graph, objective) for i, path in enumerate(initial_paths)}
-    combo_path = ("Source", "C2", "C3", "Sink")
-    config = SolverConfig(enable_incremental_rmp=True, enable_active_coefficient_cache=True)
-    node = NodeState(
-        id=7,
-        depth=1,
-        restrictions=BranchRestrictions(),
-        fixed_routes=tuple(),
-        residual_customers=frozenset(instance.customers),
-        fleet_limit=2,
-        fixed_cost=0.0,
-        column_paths=set(initial_paths),
-        active_sr=set(),
-    )
+    path = ("Source", "C1", "C2", "C3", "Sink")
+    route = route_from_path(0, path, graph, objective)
+    routes = {path: route}
+    triplet = ("C1", "C2", "C3")
+    node = _root_node(instance, {path}, {triplet})
     cache = RouteSignatureCache()
-    initial = RestrictedMaster(graph, node, routes, config, cache)
-    initial_result = initial.solve()
-    assert initial_result.status == GRB.OPTIMAL
+    rmp = RestrictedMaster(graph, node, routes, SolverConfig(enable_root_compact_warm_start=False), cache)
+    value = rmp._sr_coeff(path, triplet)
+    residual = tuple(sorted(node.residual_customers))
+    truth = sr_coeff_from_mask(customer_mask(route.served, residual, cache), triplet_mask(residual, triplet, cache))
+    assert value == truth == 1
+    assert rmp._sr_coeff(path, triplet) == truth
+    assert cache.stats.sr_coeff_cache_hits >= 1
 
-    routes[combo_path] = route_from_path(len(routes), combo_path, graph, objective)
-    node.column_paths.add(combo_path)
-    incremental = RestrictedMaster(graph, node, routes, config, cache)
-    incremental_result = incremental.solve()
-    assert incremental.used_incremental_update is True
-    assert incremental.used_full_rebuild is False
 
-    full_node = NodeState(
-        id=8,
-        depth=1,
-        restrictions=BranchRestrictions(),
-        fixed_routes=tuple(),
-        residual_customers=frozenset(instance.customers),
-        fleet_limit=2,
-        fixed_cost=0.0,
-        column_paths=set(node.column_paths),
-        active_sr=set(),
-    )
-    full_result = RestrictedMaster(
+def test_incremental_rmp_matches_full_rebuild_objective() -> None:
+    instance, _, objective, graph = _setup()
+    full_path = ("Source", "C1", "C2", "C3", "Sink")
+    alternative_path = ("Source", "C1", "C3", "C2", "Sink")
+    routes = {
+        full_path: route_from_path(0, full_path, graph, objective),
+        alternative_path: route_from_path(1, alternative_path, graph, objective),
+    }
+    incremental_node = _root_node(instance, {full_path})
+    incremental_config = SolverConfig(enable_root_compact_warm_start=False, enable_incremental_rmp=True)
+    first = RestrictedMaster(graph, incremental_node, routes, incremental_config, RouteSignatureCache()).solve()
+    assert first.objective is not None
+    incremental_node.column_paths.add(alternative_path)
+    incremental = RestrictedMaster(graph, incremental_node, routes, incremental_config, RouteSignatureCache()).solve()
+    rebuilt_node = _root_node(instance, {full_path, alternative_path})
+    rebuilt = RestrictedMaster(
         graph,
-        full_node,
+        rebuilt_node,
         routes,
-        replace(config, enable_incremental_rmp=False),
+        replace(incremental_config, enable_incremental_rmp=False),
         RouteSignatureCache(),
     ).solve()
-    assert full_result.status == GRB.OPTIMAL
-    assert incremental_result.objective == pytest.approx(full_result.objective)
-    assert incremental_result.z_values == pytest.approx(full_result.z_values)
+    assert rebuilt.objective == pytest.approx(incremental.objective)
 
 
-def test_incremental_rmp_compatibility_key_rebuilds_on_branch_state_change() -> None:
+def test_full_pool_hard_model_uses_true_route_cost() -> None:
     instance, _, objective, graph = _setup()
-    paths = [("Source", "C1", "Sink"), ("Source", "C2", "C3", "Sink")]
-    routes = {path: route_from_path(i, path, graph, objective) for i, path in enumerate(paths)}
-    config = SolverConfig(enable_incremental_rmp=True)
-    node = NodeState(
-        id=77,
-        depth=1,
-        restrictions=BranchRestrictions(),
-        fixed_routes=tuple(),
-        residual_customers=frozenset(instance.customers),
-        fleet_limit=2,
-        fixed_cost=0.0,
-        column_paths=set(paths),
-        active_sr=set(),
-    )
-    initial = RestrictedMaster(graph, node, routes, config, RouteSignatureCache())
-    assert initial.solve().status == GRB.OPTIMAL
-    node.restrictions = node.restrictions.with_truck_service("C1")
-    rebuilt = RestrictedMaster(graph, node, routes, config, RouteSignatureCache())
-    assert rebuilt.used_full_rebuild is True
-    assert rebuilt.used_incremental_update is False
-    assert "branch_state" in rebuilt.compatibility_failure_reasons
-
-
-def test_rmp_compatibility_signature_tracks_active_sr_version_and_inactive_columns() -> None:
-    instance, _, objective, graph = _setup()
-    paths = [("Source", "C1", "Sink"), ("Source", "C2", "C3", "Sink")]
-    routes = {path: route_from_path(i, path, graph, objective) for i, path in enumerate(paths)}
-    triplet = tuple(instance.customers)
-    config = SolverConfig(enable_incremental_rmp=True)
-    node = NodeState(
-        id=771,
-        depth=1,
-        restrictions=BranchRestrictions(),
-        fixed_routes=tuple(),
-        residual_customers=frozenset(instance.customers),
-        fleet_limit=2,
-        fixed_cost=0.0,
-        column_paths=set(paths),
-        active_sr={triplet},
-        active_sr_version=1,
-    )
-    initial = RestrictedMaster(graph, node, routes, config, RouteSignatureCache())
-    assert initial.solve().status == GRB.OPTIMAL
-
-    node.active_sr_version += 1
-    sr_rebuilt = RestrictedMaster(graph, node, routes, config, RouteSignatureCache())
-    assert sr_rebuilt.used_full_rebuild is True
-    assert "active_sr_version" in sr_rebuilt.compatibility_failure_reasons
-    assert "rmp_structure_version" in sr_rebuilt.compatibility_failure_reasons
-
-    node = NodeState(
-        id=772,
-        depth=1,
-        restrictions=BranchRestrictions(),
-        fixed_routes=tuple(),
-        residual_customers=frozenset(instance.customers),
-        fleet_limit=2,
-        fixed_cost=0.0,
-        column_paths=set(paths),
-        active_sr=set(),
-    )
-    initial = RestrictedMaster(graph, node, routes, config, RouteSignatureCache())
-    assert initial.solve().status == GRB.OPTIMAL
-    inactive_path = paths[0]
-    node.column_paths.remove(inactive_path)
-    node.inactive_column_paths.add(inactive_path)
-    inactive_rebuilt = RestrictedMaster(graph, node, routes, config, RouteSignatureCache())
-    assert inactive_rebuilt.used_full_rebuild is True
-    assert "active_column_version" in inactive_rebuilt.compatibility_failure_reasons
-    assert "rmp_structure_version" in inactive_rebuilt.compatibility_failure_reasons
-
-
-def test_active_sr_coefficient_cache_matches_direct_recomputation_and_reports_density() -> None:
-    instance, _, objective, graph = _setup()
-    paths = [("Source", "C1", "C2", "Sink"), ("Source", "C2", "C3", "Sink")]
-    routes = {path: route_from_path(i, path, graph, objective) for i, path in enumerate(paths)}
-    triplet = tuple(instance.customers)
-    node = NodeState(
-        id=78,
-        depth=1,
-        restrictions=BranchRestrictions(),
-        fixed_routes=tuple(),
-        residual_customers=frozenset(instance.customers),
-        fleet_limit=2,
-        fixed_cost=0.0,
-        column_paths=set(paths),
-        active_sr={triplet},
-        active_sr_version=1,
-    )
-    cache = RouteSignatureCache()
-    rmp = RestrictedMaster(graph, node, routes, SolverConfig(enable_active_coefficient_cache=True), cache)
-    direct_nonzero = sum(1 for path in paths if routes[path].sr_coeff(triplet))
-    assert rmp.active_sr_nonzero_count == direct_nonzero
-    assert rmp.active_sr_coefficient_count == len(paths)
-    assert cache.stats.sr_coeff_cache_misses >= len(paths)
-    hits_before = cache.stats.sr_coeff_cache_hits
-    assert all(rmp._sr_coeff(path, triplet) == routes[path].sr_coeff(triplet) for path in paths)
-    assert cache.stats.sr_coeff_cache_hits >= hits_before + len(paths)
-    assert rmp.active_sr_full_rebuilds == 1
-    assert rmp.active_sr_rows_added == 1
-    path3 = ("Source", "C1", "C3", "Sink")
-    routes[path3] = route_from_path(2, path3, graph, objective)
-    node.column_paths.add(path3)
-    incremental = RestrictedMaster(graph, node, routes, SolverConfig(enable_incremental_rmp=True), RouteSignatureCache())
-    assert incremental.used_incremental_update is True
-    assert incremental.active_sr_row_local_updates >= 1
-
-
-def test_inactive_postroot_sr_cut_removal_requires_reprice_and_can_reactivate() -> None:
-    instance, _, objective, graph = _setup()
-    path = ("Source", "C1", "Sink")
+    path = ("Source", "C1", "C2", "C3", "Sink")
     route = route_from_path(0, path, graph, objective)
     routes = {path: route}
-    triplet = tuple(instance.customers)
-    node = NodeState(
-        id=2,
-        depth=1,
-        restrictions=BranchRestrictions(),
-        fixed_routes=tuple(),
-        residual_customers=frozenset(instance.customers),
-        fleet_limit=instance.num_trucks,
-        fixed_cost=0.0,
-        column_paths={path},
-        active_sr={triplet},
-        sr_cut_meta={triplet: SRCutMetadata()},
+    node = _root_node(instance, {path})
+    result = run_route_pool_heuristic(
+        graph, objective, node, routes, {path},
+        SolverConfig(enable_root_compact_warm_start=False, pricing_parallel_workers=1),
+        incumbent_value=float("inf"),
     )
-    rmp = RestrictedMaster(graph, node, routes, SolverConfig())
-    result = RMPResult(
-        status=GRB.OPTIMAL,
-        objective=route.cost,
-        z_values={path: 1.0},
-        duals=PricingDuals(mu={customer: 0.0 for customer in instance.customers}, kappa=0.0, nu={triplet: 0.0}),
-    )
-    stats = BPCStats()
-    assert _remove_inactive_sr_cuts_after_closure(
-        rmp,
-        result,
-        node,
-        SolverConfig(sr_removal_min_active_count=1, sr_removal_rmp_growth_threshold=0.0),
-        stats,
-    )
-    assert triplet not in node.active_sr
-    assert triplet in node.removed_sr
-    assert node.pending_sr_removal_bound == pytest.approx(route.cost)
-    assert node.sr_removals_performed == 1
-    assert stats.sr_cuts_removed == 1
-    assert stats.sr_removal_nodes == 1
-    assert stats.sr_cut_repricing_after_removal == 1
-    assert stats.sr_removal_candidate_marks == 1
-    assert stats.sr_cut_coefficient_nonzeros_observed >= 0
-    assert stats.sr_cut_coefficient_density_max >= 0.0
-    assert stats.sr_cut_metadata_update_time >= 0.0
-    assert node.sr_cut_meta[triplet].removal_candidate_count == 1
-    assert node.sr_cut_meta[triplet].nonzero_count >= 0
-    assert node.sr_cut_meta[triplet].coefficient_density >= 0.0
-
-    new_count = _activate_sr_cuts(node, {triplet: 1.2}, stats)
-    assert new_count == 0
-    assert triplet in node.active_sr
-    assert triplet not in node.removed_sr
-    assert node.sr_cut_meta[triplet].reactivation_count == 1
-    assert stats.sr_cuts_reactivated == 1
+    assert result.value == pytest.approx(route.cost)
+    assert result.selected_routes == (route,)
+    assert result.diagnostics.full_pool_feasible == 1
+    assert not hasattr(result.diagnostics, "soft_pool_solves")
 
 
-def test_postroot_sr_removal_respects_age_threshold_and_node_cap() -> None:
+def test_infeasible_hard_pool_returns_no_incumbent_without_repair(monkeypatch) -> None:
     instance, _, objective, graph = _setup()
-    path = ("Source", "C1", "Sink")
-    route = route_from_path(0, path, graph, objective)
-    routes = {path: route}
-    triplet = tuple(instance.customers)
-    node = NodeState(
-        id=2,
-        depth=1,
-        restrictions=BranchRestrictions(),
-        fixed_routes=tuple(),
-        residual_customers=frozenset(instance.customers),
-        fleet_limit=instance.num_trucks,
-        fixed_cost=0.0,
-        column_paths={path},
-        active_sr={triplet},
-        sr_cut_meta={triplet: SRCutMetadata()},
+    node = _root_node(instance, set())
+    calls: list[str] = []
+    monkeypatch.setattr(
+        heuristic_module,
+        "_solve_hard_pool_ip",
+        lambda *args, **kwargs: (calls.append("hard") or (None, tuple())),
     )
-    rmp = RestrictedMaster(graph, node, routes, SolverConfig())
-    result = RMPResult(
-        status=GRB.OPTIMAL,
-        objective=route.cost,
-        z_values={path: 1.0},
-        duals=PricingDuals(mu={customer: 0.0 for customer in instance.customers}, kappa=0.0, nu={triplet: 0.0}),
+    result = run_route_pool_heuristic(
+        graph, objective, node, {}, set(), SolverConfig(enable_root_compact_warm_start=False),
+        incumbent_value=float("inf"),
     )
-    stats = BPCStats()
-    assert not _remove_inactive_sr_cuts_after_closure(
-        rmp,
-        result,
-        node,
-        SolverConfig(sr_inactive_age_threshold=2, sr_removal_min_active_count=1, sr_removal_rmp_growth_threshold=0.0),
-        stats,
+    assert calls == ["hard"]
+    assert result.value is None
+    assert not hasattr(heuristic_module, "_solve_soft_pool_ip")
+
+
+def test_unresolved_hard_pool_returns_no_incumbent(monkeypatch) -> None:
+    instance, _, objective, graph = _setup()
+    node = _root_node(instance, set())
+    calls: list[str] = []
+    monkeypatch.setattr(
+        heuristic_module,
+        "_solve_hard_pool_ip",
+        lambda *args, **kwargs: (calls.append("hard") or (None, tuple())),
     )
-    assert triplet in node.active_sr
-    assert _remove_inactive_sr_cuts_after_closure(
-        rmp,
-        result,
-        node,
+
+    result = run_route_pool_heuristic(
+        graph, objective, node, {}, set(), SolverConfig(enable_root_compact_warm_start=False),
+        incumbent_value=float("inf"),
+    )
+    assert calls == ["hard"]
+    assert result.value is None
+
+
+def test_empty_initial_rmp_proceeds_directly_to_farkas_pricing() -> None:
+    instance, _, objective, graph = _setup()
+    node = _root_node(instance, set())
+    routes: dict[tuple[str, ...], Route] = {}
+    stats = BPCStats(pricing_tolerance=0.01)
+    result = _solve_node(
+        graph,
+        objective,
         SolverConfig(
-            sr_inactive_age_threshold=2,
-            sr_max_removals_per_node=1,
-            sr_removal_min_active_count=1,
-            sr_removal_rmp_growth_threshold=0.0,
+            time_limit=30.0,
+            pricing_parallel_workers=1,
+            pricing_worker_backend="thread",
+            enable_root_compact_warm_start=False,
         ),
-        stats,
-    )
-    assert node.sr_removals_performed == 1
-    node.active_sr.add(triplet)
-    assert not _remove_inactive_sr_cuts_after_closure(
-        rmp,
-        result,
         node,
-        SolverConfig(
-            sr_inactive_age_threshold=1,
-            sr_max_removals_per_node=1,
-            sr_removal_min_active_count=1,
-            sr_removal_rmp_growth_threshold=0.0,
-        ),
+        routes,
+        set(),
+        RouteSignatureCache(),
+        _IncumbentState(),
         stats,
+        time.time() + 30.0,
+        time.time(),
+        None,
+        {},
     )
+    assert result is not None
+    assert stats.farkas_pricing_calls > 0
+    assert stats.columns_added_farkas > 0
 
 
-def test_inactive_column_deactivation_requires_repricing_and_rehydrates_negative_column() -> None:
-    instance, _, objective, graph = _setup()
-    path = ("Source", "C1", "Sink")
-    route = route_from_path(0, path, graph, objective)
-    routes = {path: route}
-    node = NodeState(
-        id=3,
-        depth=1,
-        restrictions=BranchRestrictions(),
-        fixed_routes=tuple(),
-        residual_customers=frozenset(instance.customers),
-        fleet_limit=instance.num_trucks,
-        fixed_cost=0.0,
-        column_paths={path},
-        active_sr=set(),
-        column_age={path: 3},
+def test_compact_initialization_decodes_and_verifies_returned_paths(monkeypatch) -> None:
+    instance, weights, objective, graph = _setup()
+    path = ("Source", "C1", "C2", "C3", "Sink")
+    monkeypatch.setattr(
+        bpc_module,
+        "solve_compact_solution",
+        lambda *args, **kwargs: CompactSolution(0.0, (path,), CompactTiming(1.0, 60.0, 2.0), "time_limit"),
     )
-    result = RMPResult(
-        status=GRB.OPTIMAL,
-        objective=route.cost,
-        z_values={path: 0.0},
-        duals=PricingDuals(mu={customer: 0.0 for customer in instance.customers}, kappa=0.0, nu={}),
-    )
+    routes = {}
     stats = BPCStats()
-    config = SolverConfig(column_deactivation_min_active_columns=1, column_inactive_age_min=3)
-    assert _deactivate_inactive_node_columns(node, result, config, stats)
-    assert path not in node.column_paths
-    assert path in node.inactive_column_paths
-    assert node.pending_column_deactivation_bound == pytest.approx(route.cost)
-    assert stats.inactive_columns_deactivated == 1
-
-    duals = PricingDuals(
-        mu={customer: route.cost + 1.0 if customer == "C1" else 0.0 for customer in instance.customers},
-        kappa=0.0,
-        nu={},
+    extracted = _extract_root_routes(
+        instance, weights, SolverConfig(root_compact_solve_time_limit=60.0), graph, objective,
+        routes, stats, time.time() + 1.0,
     )
-    assert _rehydrate_negative_inactive_columns(graph, objective, node, routes, duals, config, stats, RouteSignatureCache())
-    assert path in node.column_paths
-    assert path not in node.inactive_column_paths
-    assert stats.inactive_columns_rehydrated == 1
-    assert stats.inactive_column_reduced_cost_checks == 1
+    assert extracted == {path}
+    assert routes[path] == route_from_path(0, path, graph, objective)
+    assert stats.root_model_build_time == pytest.approx(1.0)
+    assert stats.root_model_solve_time == pytest.approx(60.0)
+    assert stats.root_route_decode_time == pytest.approx(2.0)
+    assert stats.root_compact_incumbent_validated
+    assert stats.root_compact_route_paths == (path,)
 
 
-def test_light_logging_skips_minor_progress_but_preserves_major_snapshot(tmp_path: Path) -> None:
-    node = NodeState(
+def test_validate_route_cover_rejects_missing_or_duplicate_customer_coverage() -> None:
+    _, _, objective, graph = _setup()
+    complete = ("Source", "C1", "C2", "C3", "Sink")
+    routes = validate_route_cover((complete,), graph, objective)
+    assert len(routes) == 1
+    assert routes[0].served == frozenset(("C1", "C2", "C3"))
+
+    with pytest.raises(ValueError, match="exactly once"):
+        validate_route_cover((("Source", "C1", "Sink"),), graph, objective)
+    with pytest.raises(ValueError, match="exactly once"):
+        validate_route_cover((complete, complete), graph, objective)
+
+
+def test_warm_start_screening_accepts_valid_cover_and_resumes_from_record(monkeypatch, tmp_path: Path) -> None:
+    instance, weights, _, _ = _setup()
+    path = ("Source", "C1", "C2", "C3", "Sink")
+    calls = 0
+
+    def solve(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return CompactSolution(
+            0.25,
+            (path,),
+            CompactTiming(0.1, 1.0, 0.1),
+            "success",
+            objective_bound_full=0.2,
+            mip_gap=0.2,
+            status_code=2,
+            node_count=3.0,
+            iteration_count=4.0,
+            first_incumbent_time=0.5,
+        )
+
+    monkeypatch.setattr("thvrpd.compact.solve_compact_solution", solve)
+    candidate_dir = tmp_path / "candidate_000"
+    first = screen_warm_start_candidate(instance, 0, 1, candidate_dir, weights, 60.0, 45.0, 2, 0)
+    second = screen_warm_start_candidate(instance, 0, 1, candidate_dir, weights, 60.0, 45.0, 2, 0)
+
+    assert calls == 2
+    assert first == second
+    assert first.accepted
+    assert first.status == "warm_start_certified"
+    assert first.diagnostics["validation"]["valid"] is True
+    assert first.diagnostics["validation"]["route_count"] == 1
+
+
+def test_warm_start_screening_rejects_timeout_without_incumbent(monkeypatch, tmp_path: Path) -> None:
+    instance, weights, _, _ = _setup()
+    monkeypatch.setattr(
+        "thvrpd.compact.solve_compact_solution",
+        lambda *args, **kwargs: CompactSolution(
+            None,
+            tuple(),
+            CompactTiming(0.1, 60.0, 0.0),
+            "timeout",
+            status_code=9,
+            node_count=100.0,
+            iteration_count=200.0,
+        ),
+    )
+    result = screen_warm_start_candidate(
+        instance,
+        0,
+        1,
+        tmp_path / "candidate_000",
+        weights,
+        60.0,
+        45.0,
+        2,
+        0,
+    )
+
+    assert not result.accepted
+    assert result.status == "warm_start_rejected_no_incumbent"
+    assert result.diagnostics["validation"]["valid"] is None
+
+
+def test_warm_start_screening_rejects_incumbent_after_safety_deadline(monkeypatch, tmp_path: Path) -> None:
+    instance, weights, _, _ = _setup()
+    path = ("Source", "C1", "C2", "C3", "Sink")
+    monkeypatch.setattr(
+        "thvrpd.compact.solve_compact_solution",
+        lambda *args, **kwargs: CompactSolution(
+            0.25,
+            (path,),
+            CompactTiming(0.1, 60.0, 0.1),
+            "success",
+            first_incumbent_time=50.0,
+        ),
+    )
+    result = screen_warm_start_candidate(
+        instance,
+        0,
+        1,
+        tmp_path / "candidate_000",
+        weights,
+        60.0,
+        45.0,
+        2,
+        0,
+    )
+
+    assert not result.accepted
+    assert result.status == "warm_start_rejected_late_incumbent"
+    assert result.diagnostics["screening_repetitions_completed"] == 1
+    assert result.diagnostics["validation"]["valid"] is True
+
+
+def test_pc8_performance_selection_predicates_require_low_bpc_gap_and_compact_timeout() -> None:
+    valid = {"valid": True}
+    base = {"gap_full": 0.05, "bpc_stats": {"root_compact_incumbent_validated": True}}
+    assert bpc_trial_qualifies(base, valid, 0.05)
+    assert not bpc_trial_qualifies({**base, "gap_full": 0.0500001}, valid, 0.05)
+    assert not bpc_trial_qualifies(base, {"valid": False}, 0.05)
+    assert not bpc_trial_qualifies(
+        {**base, "bpc_stats": {"root_compact_incumbent_validated": False}},
+        valid,
+        0.05,
+    )
+    assert compact_trial_qualifies({"status_code": 9})
+    assert not compact_trial_qualifies({"status_code": 2})
+    assert cross_solver_bounds_consistent(
+        {"lower_bound_full": 0.10},
+        {"objective_full": 0.11},
+    )
+    assert not cross_solver_bounds_consistent(
+        {"lower_bound_full": 0.11},
+        {"objective_full": 0.10},
+    )
+
+
+def test_compact_is_the_only_root_initializer_and_sets_complete_incumbent(monkeypatch) -> None:
+    instance, weights, _, _ = _setup()
+    path = ("Source", "C1", "C2", "C3", "Sink")
+    monkeypatch.setattr(
+        bpc_module,
+        "solve_compact_solution",
+        lambda *args, **kwargs: CompactSolution(0.0, (path,), CompactTiming(0.0, 0.0, 0.0), "time_limit"),
+    )
+
+    result = solve_branch_price_cut(
+        instance,
+        weights,
+        SolverConfig(time_limit=30.0, pricing_parallel_workers=1, pricing_worker_backend="thread"),
+    )
+
+    assert result.stats.root_compact_attempted
+    assert result.stats.root_compact_accepted_columns == 1
+    assert result.stats.incumbent_source == "compact_root"
+    assert not any(name.startswith("root_constructive") for name in BPCStats.__dataclass_fields__)
+
+
+@pytest.mark.parametrize(
+    "paths, expected_columns",
+    (
+        (tuple(), 0),
+        ((("Source", "C1", "Sink"),), 1),
+    ),
+)
+def test_empty_or_partial_compact_initialization_proceeds_to_farkas(
+    monkeypatch,
+    paths: tuple[tuple[str, ...], ...],
+    expected_columns: int,
+) -> None:
+    instance, weights, _, _ = _setup()
+    monkeypatch.setattr(
+        bpc_module,
+        "solve_compact_solution",
+        lambda *args, **kwargs: CompactSolution(None, paths, CompactTiming(0.0, 0.0, 0.0), "time_limit"),
+    )
+
+    result = solve_branch_price_cut(
+        instance,
+        weights,
+        SolverConfig(time_limit=30.0, pricing_parallel_workers=1, pricing_worker_backend="thread"),
+    )
+
+    assert result.stats.root_compact_attempted
+    assert result.stats.root_compact_accepted_columns == expected_columns
+    assert not result.stats.root_compact_incumbent_validated
+    assert result.stats.farkas_pricing_calls > 0
+    assert result.stats.columns_added_farkas > 0
+    assert result.stats.incumbent_source != "compact_root"
+
+
+def test_compact_objective_uses_same_normalization_shift() -> None:
+    instance, weights, objective, graph = _setup()
+    compact = solve_compact_solution(instance, weights, time_limit=30.0, threads=1, require_optimal=True, objective=objective)
+    routes = tuple(route_from_path(index, path, graph, objective) for index, path in enumerate(compact.route_paths))
+    shifted = sum(route.cost for route in routes)
+    assert compact.objective_full == pytest.approx(objective.full_value_from_route_sum(shifted), abs=1e-6)
+
+
+def test_bpc_and_compact_report_same_full_objective_on_tiny_instance() -> None:
+    instance, weights, objective, _ = _setup()
+    config = SolverConfig(
+        time_limit=60.0, pricing_tolerance=1e-9, pricing_parallel_workers=1, enable_root_compact_warm_start=False,
+    )
+    bpc = solve_branch_price_cut(instance, weights, config)
+    compact = solve_compact_solution(instance, weights, time_limit=60.0, threads=1, require_optimal=True, objective=objective)
+    assert bpc.objective_full == pytest.approx(compact.objective_full, abs=1e-6)
+    assert bpc.objective_full == pytest.approx(bpc.objective_shifted + bpc.objective.coeffs.shift)
+    assert bpc.lower_bound_full == pytest.approx(bpc.lower_bound_shifted + bpc.objective.coeffs.shift)
+    assert bpc.stats.pricing_tolerance == pytest.approx(1e-9)
+    assert bpc.stats.pricing_engine == "source_neighbor_parallel_forward"
+    assert bpc.stats.root_rmp_is_integer is not None
+    assert bpc.stats.root_fractional_variable_count is not None
+    assert bpc.stats.root_nonzero_variable_count is not None
+    assert bpc.stats.root_max_integrality_violation is not None
+    assert bpc.stats.root_fathom_reason is not None
+
+
+def test_queue_bound_fathoming_and_gap_invariant() -> None:
+    assert _bound_fathoms(0.48, 0.47, 1e-6)
+    assert _bound_fathoms(0.4699995, 0.47, 1e-6)
+    assert not _bound_fathoms(0.46, 0.47, 1e-6)
+    assert not _bound_fathoms(0.48, float("inf"), 1e-6)
+    assert _relative_gap(0.5, 0.4) == pytest.approx(0.2)
+    with pytest.raises(ValueError, match="lower bound exceeds upper bound"):
+        _relative_gap(0.4, 0.5)
+
+
+def test_root_bound_inconsistency_is_reported(monkeypatch) -> None:
+    _validate_root_bound_order(0.4, 0.4, 1e-6)
+    _validate_root_bound_order(0.4000005, 0.4, 1e-6)
+    with pytest.raises(BPCBoundInconsistency, match="root lower bound exceeds") as exc_info:
+        _validate_root_bound_order(0.41, 0.4, 1e-6)
+    assert exc_info.value.lower_bound == pytest.approx(0.41)
+    assert exc_info.value.upper_bound == pytest.approx(0.4)
+    assert exc_info.value.tolerance == pytest.approx(1e-6)
+
+    events = []
+    monkeypatch.setattr(
+        bpc_module,
+        "_write_progress",
+        lambda _config, _stats, _node, event, extra=None: events.append((event, extra)),
+    )
+    root = NodeState(
         id=1,
         depth=0,
         restrictions=BranchRestrictions(),
         fixed_routes=tuple(),
-        residual_customers=frozenset({"C1"}),
+        residual_customers=frozenset(),
         fleet_limit=1,
         fixed_cost=0.0,
         column_paths=set(),
         active_sr=set(),
     )
-    stats = BPCStats()
-    config = SolverConfig(logging_mode="light", gurobi_log_dir=str(tmp_path / "gurobi_logs"))
-    _write_progress(config, stats, node, "rmp_solved", {"rmp_status": GRB.OPTIMAL})
-    assert stats.progress_events_seen == 1
-    assert stats.progress_events_skipped == 1
-    assert not (tmp_path / "bpc_progress.json").exists()
-    _write_progress(config, stats, node, "node_closed", {"bound": 0.0})
-    assert stats.progress_events_written == 1
-    assert (tmp_path / "bpc_progress.json").exists()
+    with pytest.raises(BPCBoundInconsistency):
+        bpc_module._report_root_bound_inconsistency(root, 0.41, 0.4, SolverConfig(), BPCStats())
+    assert events == [
+        (
+            "invalid_root_bound",
+            {"lower_bound": 0.41, "upper_bound": 0.4, "tolerance": 1e-6},
+        )
+    ]
 
 
-def test_child_node_inheritance_filters_by_child_admissibility_and_refreshes_signatures() -> None:
-    instance, _, objective, graph = _setup()
-    truck_path = ("Source", "C1", "Sink")
-    drone_path = ("Source", "H1", duplicate_node("H1", "C1"), "Sink")
-    c2_path = ("Source", "C2", "Sink")
-    routes = {
-        truck_path: route_from_path(0, truck_path, graph, objective),
-        drone_path: route_from_path(1, drone_path, graph, objective),
-        c2_path: route_from_path(2, c2_path, graph, objective),
-    }
-    parent = NodeState(
-        id=1,
-        depth=0,
-        restrictions=BranchRestrictions(),
-        fixed_routes=tuple(),
-        residual_customers=frozenset({"C1", "C2"}),
-        fleet_limit=instance.num_trucks,
-        fixed_cost=0.0,
-        column_paths={truck_path, drone_path},
-        active_sr=set(),
+def test_rmp_integrality_diagnostics_distinguish_fractional_root() -> None:
+    integral = _rmp_integrality_diagnostics(
+        {("r1",): 1.0, ("r2",): 1e-8, ("r3",): 0.0},
+        1e-6,
     )
-    child = parent.copy_for_child(2, parent.restrictions.with_truck_service("C1"))
-    stats = BPCStats()
-    cache = RouteSignatureCache()
-    _inherit_child_routes(graph, objective, parent, child, routes, {c2_path}, stats, cache)
-    assert child.column_paths == {truck_path, c2_path}
-    assert stats.child_branch_index_candidates_before == 3
-    assert stats.child_branch_index_candidates_after == 2
-    assert stats.child_branch_index_reject_service_mode == 1
-    assert stats.child_inherited_route_candidates == 2
-    assert stats.child_inherited_route_accepted == 2
-    assert stats.child_inherited_route_rejected == 0
-    assert stats.child_reject_branch == 0
-    assert stats.child_refresh_count == 2
-    assert stats.child_hydration_time >= 0.0
-    assert child.column_index.matches(child.residual_customers, child.active_sr, child.active_sr_version, child.column_paths)
+    assert integral[:3] == (True, 0, 1)
+    assert integral[3] == pytest.approx(1e-8)
 
-
-def test_child_certification_signature_reuses_only_unchanged_node_and_dual_state() -> None:
-    instance, _, _, _ = _setup()
-    node = NodeState(
-        id=9,
-        depth=1,
-        restrictions=BranchRestrictions().with_truck_service("C1"),
-        fixed_routes=tuple(),
-        residual_customers=frozenset(instance.customers),
-        fleet_limit=instance.num_trucks,
-        fixed_cost=0.0,
-        column_paths={("Source", "C1", "Sink")},
-        active_sr={tuple(instance.customers)},
+    fractional = _rmp_integrality_diagnostics(
+        {("r12",): 0.5, ("r13",): 0.5, ("r23",): 0.5, ("r123",): 0.0},
+        1e-6,
     )
-    duals = PricingDuals(
-        mu={customer: float(i + 1) for i, customer in enumerate(instance.customers)},
-        kappa=-0.25,
-        nu={tuple(instance.customers): -0.5},
-    )
-    signature = _child_certification_signature(node, duals)
-    assert "rmp_structure_version" in dict(signature)
-    assert _child_certification_signature(node, duals) == signature
-    assert _child_certification_signature(node, replace(duals, kappa=-0.30)) != signature
-
-    node.active_sr_version += 1
-    changed = _child_certification_signature(node, duals)
-    assert changed != signature
-    assert dict(changed)["rmp_structure_version"] != dict(signature)["rmp_structure_version"]
+    assert fractional[:3] == (False, 3, 3)
+    assert fractional[3] == pytest.approx(0.5)
 
 
-def test_child_certification_signature_changes_when_visible_route_set_changes() -> None:
-    instance, _, _, _ = _setup()
-    node = NodeState(
-        id=10,
-        depth=1,
-        restrictions=BranchRestrictions(),
-        fixed_routes=tuple(),
-        residual_customers=frozenset(instance.customers),
-        fleet_limit=instance.num_trucks,
-        fixed_cost=0.0,
-        column_paths={("Source", "C1", "Sink")},
-        active_sr=set(),
-    )
-    duals = PricingDuals(mu={customer: 0.0 for customer in instance.customers}, kappa=0.0)
-    signature = _child_certification_signature(node, duals)
-    node.column_paths.add(("Source", "C2", "Sink"))
-    assert _child_certification_signature(node, duals) != signature
-
-
-def test_child_certification_epoch_discard_records_structured_cause() -> None:
-    instance, _, objective, graph = _setup()
-    fixed_c2 = route_from_path(20, ("Source", "C2", "Sink"), graph, objective)
-    fixed_c3 = route_from_path(21, ("Source", "C3", "Sink"), graph, objective)
-    node = NodeState(
-        id=13,
-        depth=1,
-        restrictions=BranchRestrictions().with_truck_service("C1"),
-        fixed_routes=(fixed_c2,),
-        residual_customers=frozenset({"C1", "C3"}),
-        fleet_limit=instance.num_trucks - 1,
-        fixed_cost=0.1,
-        column_paths={("Source", "C1", "Sink")},
-        active_sr={tuple(instance.customers)},
-        active_sr_version=1,
-    )
-    duals = PricingDuals(
-        mu={customer: float(index + 1) for index, customer in enumerate(instance.customers)},
-        kappa=-0.25,
-        nu={tuple(instance.customers): -0.5},
-    )
-    base = _child_certification_signature(node, duals)
-
-    stats = BPCStats()
-    _record_child_certification_epoch_discard(stats, base, _child_certification_signature(node, replace(duals, kappa=-0.3)))
-    assert stats.child_certification_state_discarded_by_dual == 1
-
-    stats = BPCStats()
-    node.active_sr_version += 1
-    _record_child_certification_epoch_discard(stats, base, _child_certification_signature(node, duals))
-    assert stats.child_certification_state_discarded_by_sr == 1
-    node.active_sr_version -= 1
-
-    stats = BPCStats()
-    node.residual_customers = frozenset({"C1"})
-    _record_child_certification_epoch_discard(stats, base, _child_certification_signature(node, duals))
-    assert stats.child_certification_state_discarded_by_residual == 1
-    node.residual_customers = frozenset({"C1", "C3"})
-
-    stats = BPCStats()
-    node.restrictions = node.restrictions.with_drone_service("C3")
-    _record_child_certification_epoch_discard(stats, base, _child_certification_signature(node, duals))
-    assert stats.child_certification_state_discarded_by_branch == 1
-    node.restrictions = BranchRestrictions().with_truck_service("C1")
-
-    stats = BPCStats()
-    node.fixed_routes = node.fixed_routes + (fixed_c3,)
-    _record_child_certification_epoch_discard(stats, base, _child_certification_signature(node, duals))
-    assert stats.child_certification_state_discarded_by_fixed_routes == 1
-    node.fixed_routes = (fixed_c2,)
-
-    stats = BPCStats()
-    node.column_paths.add(("Source", "C3", "Sink"))
-    _record_child_certification_epoch_discard(stats, base, _child_certification_signature(node, duals))
-    assert stats.child_certification_state_discarded_by_active_columns == 1
-    assert stats.child_certification_state_discarded_by_rmp_structure == 1
-
-
-def test_child_certification_yield_tracking_does_not_adapt_batch_limit() -> None:
-    instance, _, _, _ = _setup()
-    node = NodeState(
-        id=11,
-        depth=1,
-        restrictions=BranchRestrictions(),
-        fixed_routes=tuple(),
-        residual_customers=frozenset(instance.customers),
-        fleet_limit=instance.num_trucks,
-        fixed_cost=0.0,
-        column_paths=set(),
-        active_sr=set(),
-    )
+def test_bpc_uses_balanced_process_scheduler_without_changing_warm_start_contract() -> None:
+    instance, weights, _, _ = _setup()
     config = SolverConfig(
-        child_closure_batch_min=16,
-        child_closure_batch_initial=32,
-        child_closure_batch_max=128,
+        time_limit=60.0,
+        pricing_parallel_workers=2,
+        pricing_worker_backend="process",
+        enable_root_compact_warm_start=False,
     )
-    stats = BPCStats()
-    _ensure_child_closure_batch_state(node, config, stats)
-    assert node.child_closure_batch_limit == 32
-    _observe_child_certification_yield(node, 32, config, stats, no_route=False)
-    _observe_child_certification_yield(node, 32, config, stats, no_route=False)
-    assert node.child_closure_batch_limit == 32
-    assert stats.child_closure_batch_increases == 0
-    _observe_child_certification_yield(node, 0, config, stats, no_route=True)
-    _observe_child_certification_yield(node, 0, config, stats, no_route=True)
-    assert node.child_closure_batch_limit == 32
-    assert stats.child_closure_batch_decreases == 0
-    assert stats.child_certification_yield_observations == 4
-    assert node.residual_customers == frozenset(instance.customers)
-    assert node.fixed_routes == tuple()
+    result = solve_branch_price_cut(instance, weights, config)
+    assert result.stats.pricing_balanced_process_dynamic_calls > 0
+    assert result.stats.pricing_parallel_workers_max == 2
+    assert not result.stats.root_compact_attempted
+    assert result.stats.pricing_stale_worker_results_discarded == 0
 
 
-def test_branch_route_index_keeps_every_bruteforce_branch_admissible_route() -> None:
-    _, _, objective, graph = _setup()
-    paths = {
-        ("Source", "C1", "Sink"),
-        ("Source", "H1", duplicate_node("H1", "C1"), "Sink"),
-        ("Source", "C2", "Sink"),
-        ("Source", "C1", "C2", "Sink"),
-    }
-    routes = {path: route_from_path(i, path, graph, objective) for i, path in enumerate(sorted(paths))}
-    restrictions = BranchRestrictions().with_truck_service("C1").with_separate("C1", "C2")
-    arc_customer_sets = _arc_customer_sets(graph)
-    index = build_branch_route_index(paths, routes, graph, frozenset({"C1", "C2"}), RouteSignatureCache())
-    indexed, counts = query_branch_route_index(index, restrictions, arc_customer_sets)
-    brute_force = {
-        path
-        for path, route in routes.items()
-        if restrictions.route_allowed(route, arc_customer_sets)
-    }
-    assert brute_force.issubset(indexed)
-    assert indexed == brute_force
-    assert counts["service_mode"] == 1
-    assert counts["separate"] == 1
-
-
-def test_extended_branch_route_index_matches_full_rebuild_query() -> None:
-    _, _, objective, graph = _setup()
-    initial_paths = {
-        ("Source", "C1", "Sink"),
-        ("Source", "H1", duplicate_node("H1", "C1"), "Sink"),
-    }
-    new_paths = {
-        ("Source", "C2", "Sink"),
-        ("Source", "C1", "C2", "Sink"),
-    }
-    all_paths = initial_paths | new_paths
-    routes = {path: route_from_path(i, path, graph, objective) for i, path in enumerate(sorted(all_paths))}
-    residual = frozenset({"C1", "C2"})
-    cache = RouteSignatureCache()
-    full = build_branch_route_index(all_paths, routes, graph, residual, cache)
-    incremental = extend_branch_route_index(
-        build_branch_route_index(initial_paths, routes, graph, residual, RouteSignatureCache()),
-        new_paths,
-        routes,
-        graph,
-        residual,
-        RouteSignatureCache(),
-    )
-    restrictions = BranchRestrictions().with_drone_service("C1").with_separate("C1", "C2")
-    arc_customer_sets = _arc_customer_sets(graph)
-    full_candidates, full_counts = query_branch_route_index(full, restrictions, arc_customer_sets)
-    incremental_candidates, incremental_counts = query_branch_route_index(incremental, restrictions, arc_customer_sets)
-    assert incremental.all_paths == full.all_paths
-    assert incremental_candidates == full_candidates
-    assert incremental_counts == full_counts
-
-
-def test_branch_decision_reports_customer_pair_rule() -> None:
-    instance, _, objective, graph = _setup()
-    paths = [
-        ("Source", "C1", "C2", "Sink"),
-        ("Source", "C1", "Sink"),
-        ("Source", "C2", "Sink"),
-    ]
-    routes = {path: route_from_path(i, path, graph, objective) for i, path in enumerate(paths)}
-    node = NodeState(
-        id=1,
-        depth=0,
-        restrictions=BranchRestrictions(),
-        fixed_routes=tuple(),
-        residual_customers=frozenset({"C1", "C2"}),
-        fleet_limit=instance.num_trucks,
-        fixed_cost=0.0,
-        column_paths=set(routes),
-        active_sr=set(),
-    )
-    decision = _branch(
-        node,
-        {paths[0]: 0.5, paths[1]: 0.5, paths[2]: 0.5},
-        routes,
-        graph,
-        2,
-        3,
-        SolverConfig(),
-    )
-    assert decision.branch_type == "customer_pair"
-    assert ("C1", "C2") in decision.left.restrictions.together_pairs
-    assert ("C1", "C2") in decision.right.restrictions.separate_pairs
-
-
-def test_branch_decision_reports_service_mode_rule() -> None:
-    instance, _, objective, graph = _setup()
-    drone_path = ("Source", "H1", duplicate_node("H1", "C1"), "Sink")
-    truck_path = ("Source", "C1", "Sink")
-    routes = {
-        truck_path: route_from_path(0, truck_path, graph, objective),
-        drone_path: route_from_path(1, drone_path, graph, objective),
-    }
-    node = NodeState(
-        id=1,
-        depth=0,
-        restrictions=BranchRestrictions(),
-        fixed_routes=tuple(),
-        residual_customers=frozenset({"C1"}),
-        fleet_limit=instance.num_trucks,
-        fixed_cost=0.0,
-        column_paths=set(routes),
-        active_sr=set(),
-    )
-    decision = _branch(node, {truck_path: 0.5, drone_path: 0.5}, routes, graph, 2, 3, SolverConfig())
-    assert decision.branch_type == "service_mode"
-    assert "C1" in decision.left.restrictions.truck_service
-    assert "C1" in decision.right.restrictions.drone_service
-
-
-def test_branch_decision_reports_launch_pad_rule() -> None:
-    instance = generate_instance(
-        InstanceConfig(
-            seed=1,
-            num_trucks=2,
-            num_customers=3,
-            num_hubs=2,
-            drones_per_truck=4,
-            distribution="PS",
-            hub_arc_probability=1.0,
-            mandatory_drone_customer_fraction=0.0,
-        )
-    )
-    objective = build_objective_data(instance, ObjectiveWeights(0.4, 0.3, 0.3))
-    graph = build_transformed_graph(instance)
-    customer = "C2"
-    h1_path = ("Source", "H1", duplicate_node("H1", customer), "Sink")
-    h2_path = ("Source", "H2", duplicate_node("H2", customer), "Sink")
-    routes = {
-        h1_path: route_from_path(0, h1_path, graph, objective),
-        h2_path: route_from_path(1, h2_path, graph, objective),
-    }
-    node = NodeState(
-        id=1,
-        depth=0,
-        restrictions=BranchRestrictions(),
-        fixed_routes=tuple(),
-        residual_customers=frozenset({customer}),
-        fleet_limit=instance.num_trucks,
-        fixed_cost=0.0,
-        column_paths=set(routes),
-        active_sr=set(),
-    )
-    decision = _branch(node, {h1_path: 0.5, h2_path: 0.5}, routes, graph, 2, 3, SolverConfig())
-    assert decision.branch_type == "launch_pad"
-    assert ("H1", customer) in decision.left.restrictions.pad_forbidden
-    assert ("H1", customer) in decision.right.restrictions.pad_required
-
-
-def test_branch_decision_reports_transformed_arc_rule() -> None:
-    instance, _, objective, graph = _setup()
-    c1_c2 = ("Source", "C1", "C2", "Sink")
-    c2_c1 = ("Source", "C2", "C1", "Sink")
-    routes = {
-        c1_c2: route_from_path(0, c1_c2, graph, objective),
-        c2_c1: route_from_path(1, c2_c1, graph, objective),
-    }
-    node = NodeState(
-        id=1,
-        depth=0,
-        restrictions=BranchRestrictions(),
-        fixed_routes=tuple(),
-        residual_customers=frozenset({"C1", "C2"}),
-        fleet_limit=instance.num_trucks,
-        fixed_cost=0.0,
-        column_paths=set(routes),
-        active_sr=set(),
-    )
-    decision = _branch(node, {c1_c2: 0.5, c2_c1: 0.5}, routes, graph, 2, 3, SolverConfig())
-    assert decision.branch_type == "transformed_arc"
-    assert decision.left.restrictions.trans_arc_forbidden
-    assert decision.right.restrictions.trans_arc_required
-
-
-def test_branch_decision_reports_route_variable_fallback() -> None:
-    instance, _, objective, graph = _setup()
-    path = ("Source", "C1", "Sink")
-    alias = ("alias",)
-    route = route_from_path(0, path, graph, objective)
-    routes = {path: route, alias: route}
-    node = NodeState(
-        id=1,
-        depth=0,
-        restrictions=BranchRestrictions(),
-        fixed_routes=tuple(),
-        residual_customers=frozenset({"C1"}),
-        fleet_limit=instance.num_trucks,
-        fixed_cost=0.0,
-        column_paths=set(routes),
-        active_sr=set(),
-    )
-    decision = _branch(node, {path: 0.5, alias: 0.5}, routes, graph, 2, 3, SolverConfig())
-    assert decision.branch_type == "route_variable"
-    assert path in decision.left.restrictions.route_forbidden
-    assert decision.right.fixed_routes == (route,)
-    assert decision.right.residual_customers == frozenset()
-    assert decision.right.fleet_limit == instance.num_trucks - 1
-
-
-def test_route_variable_up_branch_drops_sr_cuts_involving_fixed_route_customers() -> None:
-    instance, _, objective, graph = _setup()
-    path = ("Source", "C1", "Sink")
-    alias = ("alias",)
-    route = route_from_path(0, path, graph, objective)
-    routes = {path: route, alias: route}
-    triplet = tuple(instance.customers)
-    node = NodeState(
-        id=1,
-        depth=0,
-        restrictions=BranchRestrictions(),
-        fixed_routes=tuple(),
-        residual_customers=frozenset(instance.customers),
-        fleet_limit=instance.num_trucks,
-        fixed_cost=0.0,
-        column_paths=set(routes),
-        active_sr={triplet},
-        sr_cut_meta={triplet: SRCutMetadata(age=2, last_activity=1.0)},
-    )
-    decision = _branch(node, {path: 0.5, alias: 0.5}, routes, graph, 2, 3, SolverConfig())
-    assert decision.branch_type == "route_variable"
-    assert decision.right.fixed_routes == (route,)
-    assert decision.right.residual_customers == frozenset({"C2", "C3"})
-    assert decision.right.active_sr == set()
-    assert decision.right.sr_cut_meta == {}
-    assert decision.right.column_paths == set()
-
-
-def test_branch_decision_counters_are_recorded_by_type() -> None:
-    stats = BPCStats()
-    for branch_type in (
-        "customer_pair",
-        "service_mode",
-        "launch_pad",
-        "transformed_arc",
-        "route_variable",
+def test_retired_pricing_symbols_are_absent() -> None:
+    for name in (
+        "_BackwardLabel", "_price_route_bidirectional", "_join_forward_backward",
+        "_build_balanced_dynamic_task_plan", "_select_diverse_pricing_candidates",
+        "_resource_restricted_reward_bound",
     ):
-        _record_branch_decision(stats, branch_type)
-    assert stats.customer_pair_branches == 1
-    assert stats.service_mode_branches == 1
-    assert stats.launch_pad_branches == 1
-    assert stats.transformed_arc_branches == 1
-    assert stats.route_variable_branches == 1
-
-
-def test_phase_i_seeding_identifies_residual_coverage_slack() -> None:
-    instance, weights, objective, graph = _setup()
-    routes = {}
-    for customer in instance.customers:
-        path = ("Source", customer, "Sink")
-        routes[path] = route_from_path(len(routes), path, graph, objective)
-    node = NodeState(
-        id=1,
-        depth=0,
-        restrictions=BranchRestrictions(),
-        fixed_routes=tuple(),
-        residual_customers=frozenset(instance.customers),
-        fleet_limit=2,
-        fixed_cost=0.0,
-        column_paths=set(routes),
-        active_sr=set(),
-    )
-    phase_i = PhaseISeeder(graph, node, routes, SolverConfig()).solve()
-    assert phase_i.objective > 0.0
-    assert phase_i.uncovered
-
-    bpc = solve_branch_price_cut(
-        instance,
-        weights,
-        SolverConfig(root_extraction_time_limit=0.0, root_constructive_time_limit=0.0),
-    )
-    assert bpc.stats.phase_i_solves > 0
-    assert bpc.stats.phase_i_columns_added > 0
-
-
-def test_bpc_batch_size_one_and_large_batch_same_tiny_objective() -> None:
-    instance, weights, _, _ = _setup()
-    one = solve_branch_price_cut(
-        instance,
-        weights,
-        SolverConfig(
-            root_extraction_time_limit=0.0,
-            pricing_tolerance=1e-7,
-            pricing_batch_size=1,
-            route_pool_time_limit=0.1,
-        ),
-    )
-    large = solve_branch_price_cut(
-        instance,
-        weights,
-        SolverConfig(
-            root_extraction_time_limit=0.0,
-            pricing_tolerance=1e-7,
-            pricing_batch_size=64,
-            route_pool_time_limit=0.1,
-        ),
-    )
-
-    assert one.objective_full == pytest.approx(large.objective_full)
-    assert one.gap_full == pytest.approx(0.0)
-    assert large.gap_full == pytest.approx(0.0)
-
-
-def test_bpc_process_backend_uses_persistent_pool() -> None:
-    instance, weights, _, _ = _setup()
-    result = solve_branch_price_cut(
-        instance,
-        weights,
-        SolverConfig(
-            root_extraction_time_limit=0.0,
-            pricing_batch_size=8,
-            pricing_parallel_workers=2,
-            pricing_worker_backend="process",
-            source_neighbor_task_size=1,
-            productive_candidate_multiplier=1.0,
-            pricing_diversity_batch_fraction=0.5,
-            route_pool_time_limit=0.1,
-            time_limit=60.0,
-        ),
-    )
-    assert result.gap_full == pytest.approx(0.0)
-    assert result.stats.pricing_pool_startup_count == 1
-    assert result.stats.pricing_pool_reused_calls == result.stats.pricing_worker_backend_process_calls
-    assert result.stats.pricing_pool_shutdown_time >= 0.0
-    assert result.stats.pricing_first_hit_enabled_calls == 0
-    assert result.stats.pricing_returned_batch_size_max > 1
-    assert result.stats.pricing_decoded_routes_in_main >= result.stats.pricing_negative_routes_inserted
-    assert result.stats.pricing_verified_routes_in_main >= result.stats.pricing_negative_routes_inserted
-    assert result.stats.pricing_source_neighbor_task_count_max >= result.stats.pricing_parallel_workers_max
-    assert result.stats.pricing_local_worker_candidate_quota_max >= 1
-    assert result.stats.pricing_diversity_quota_max > 0
-    assert result.stats.pricing_diversity_selected_routes >= result.stats.pricing_negative_routes_inserted
-    assert result.stats.pricing_backward_labels_generated == 0
-    assert result.stats.pricing_join_pairs_tested == 0
-
-
-def test_duplicate_signature_merging_keeps_one_observable_column() -> None:
-    instance, _, objective, graph = _setup()
-    path = ("Source", "C1", "Sink")
-    route = route_from_path(0, path, graph, objective)
-    routes = {path: route, ("alias",): route}
-    merged = merge_duplicate_column_paths(set(routes), routes, graph, frozenset(instance.customers))
-    assert len(merged) == 1
-
-
-def test_cost_dominated_duplicate_merge_keeps_lower_cost_observable_column() -> None:
-    instance, _, objective, graph = _setup()
-    path = ("Source", "C1", "Sink")
-    base_route = route_from_path(0, path, graph, objective)
-    high_path = ("high",)
-    low_path = ("low",)
-    high_route = replace(base_route, id=1, path=high_path, cost=base_route.cost + 1.0)
-    low_route = replace(base_route, id=2, path=low_path, cost=base_route.cost - 1.0)
-    routes = {high_path: high_route, low_path: low_route}
-
-    merged = merge_duplicate_column_paths(set(routes), routes, graph, frozenset(instance.customers))
-
-    assert merged == {low_path}
-
-
-def test_route_signature_cache_keeps_different_launch_pads_distinct() -> None:
-    instance, objective, graph = _two_hub_instance()
-    h1_path = ("Source", "H1", duplicate_node("H1", "C1"), "Sink")
-    h2_path = ("Source", "H2", duplicate_node("H2", "C1"), "Sink")
-    h1_route = route_from_path(0, h1_path, graph, objective)
-    h2_route = route_from_path(1, h2_path, graph, objective)
-    cache = RouteSignatureCache()
-
-    h1_signature = route_signature(h1_route, graph, frozenset(instance.customers), cache)
-    h2_signature = route_signature(h2_route, graph, frozenset(instance.customers), cache)
-    repeated_h1 = route_signature(h1_route, graph, frozenset(instance.customers), cache)
-
-    assert h1_signature != h2_signature
-    assert repeated_h1 == h1_signature
-    assert cache.stats.signature_cache_hits >= 1
-    merged = merge_duplicate_column_paths(
-        {h1_path, h2_path},
-        {h1_path: h1_route, h2_path: h2_route},
-        graph,
-        frozenset(instance.customers),
-        cache,
-    )
-    assert merged == {h1_path, h2_path}
-
-
-def test_sr_coeff_from_served_mask_matches_route_coefficient() -> None:
-    instance, _, objective, graph = _setup()
-    route = route_from_path(0, ("Source", "C1", "C2", "Sink"), graph, objective)
-    residual_key = tuple(sorted(instance.customers))
-    triplet = tuple(sorted(instance.customers))
-    cache = RouteSignatureCache()
-
-    served_mask = customer_mask(route.served, residual_key, cache)
-    mask_coeff = sr_coeff_from_mask(served_mask, triplet_mask(residual_key, triplet, cache))
-
-    assert mask_coeff == route.sr_coeff(triplet)
-    assert cache.stats.triplet_masks_built == 1
-
-
-def test_active_signature_refines_only_active_sr_coefficients() -> None:
-    instance, _, objective, graph = _setup()
-    route = route_from_path(0, ("Source", "C1", "C2", "Sink"), graph, objective)
-    residual = frozenset(instance.customers)
-    triplet = tuple(sorted(instance.customers))
-    cache = RouteSignatureCache()
-
-    inactive = route_signature(route, graph, residual, cache, active_sr=tuple(), active_sr_version=0)
-    active = route_signature(route, graph, residual, cache, active_sr=(triplet,), active_sr_version=1)
-
-    assert inactive.core.served_mask == active.core.served_mask
-    assert inactive.core.pad_assignment_key == active.core.pad_assignment_key
-    assert inactive.active_sr_coeff_key == tuple()
-    assert active.active_sr_coeff_key == (route.sr_coeff(triplet),)
-    assert cache.stats.active_sr_coeffs_computed == 1
-
-
-def test_bucketed_join_generator_matches_exhaustive_prefilter() -> None:
-    instance, objective, graph = _two_hub_instance()
-    residual = frozenset(instance.customers)
-    restrictions = BranchRestrictions()
-    arc_customer_sets = _arc_customer_sets(graph)
-    duals = PricingDuals(mu={"C1": 0.0}, kappa=0.0, nu={})
-    source = _pricing_source_label(instance, objective, duals)
-    forward_labels = [
-        _extend(source, "H1", graph, objective, duals, tuple(), False),
-        _extend(source, "H2", graph, objective, duals, tuple(), False),
-    ]
-    backward_labels = [
-        _build_backward_label(("H1", instance.depot_sink), graph, residual, tuple(), restrictions, arc_customer_sets),
-        _build_backward_label(("H2", instance.depot_sink), graph, residual, tuple(), restrictions, arc_customer_sets),
-        _build_backward_label(("H1", "H2", instance.depot_sink), graph, residual, tuple(), restrictions, arc_customer_sets),
-    ]
-
-    exhaustive = {
-        (forward.path, backward.path)
-        for forward in forward_labels
-        for backward in backward_labels
-        if _join_prefilter(forward, backward, graph)
-    }
-    bucketed = _bucketed_join_pairs(forward_labels, backward_labels, graph, small_join_pair_threshold=1)
-    generated = {(forward.path, backward.path) for forward, backward in bucketed["pairs"]}
-
-    assert generated == exhaustive
-    assert bucketed["compatible_key_lookups"] > 0
-    assert bucketed["key_cache_misses"] > 0
-
-
-def test_lazy_join_generators_match_bucketed_pairs_and_have_valid_bounds() -> None:
-    instance, objective, graph = _two_hub_instance()
-    residual = frozenset(instance.customers)
-    restrictions = BranchRestrictions()
-    arc_customer_sets = _arc_customer_sets(graph)
-    duals = PricingDuals(mu={"C1": 3.0}, kappa=0.0, nu={})
-    source = _pricing_source_label(instance, objective, duals)
-    forward_labels = [
-        _extend(source, "H1", graph, objective, duals, tuple(), False),
-        _extend(source, "H2", graph, objective, duals, tuple(), False),
-    ]
-    backward_labels = [
-        _build_backward_label(("H1", instance.depot_sink), graph, residual, tuple(), restrictions, arc_customer_sets),
-        _build_backward_label(("H2", instance.depot_sink), graph, residual, tuple(), restrictions, arc_customer_sets),
-        _build_backward_label(("H1", "H2", instance.depot_sink), graph, residual, tuple(), restrictions, arc_customer_sets),
-    ]
-
-    pair_result = _bucketed_join_pairs(forward_labels, backward_labels, graph, small_join_pair_threshold=1)
-    generator_result = _bucketed_join_generators(
-        forward_labels,
-        backward_labels,
-        graph,
-        duals,
-        farkas=False,
-        small_join_pair_threshold=1,
-        pricing_tolerance=1e-9,
-    )
-    generated_pairs = set()
-    for generator in generator_result["generators"]:
-        for forward, backward in _iter_join_generator_pairs(generator, graph):
-            if _join_prefilter(forward, backward, graph):
-                generated_pairs.add((forward.path, backward.path))
-                assert generator.lower_bound <= _joined_reduced_cost(forward, backward, graph, objective, duals, False) + 1e-9
-
-    assert generated_pairs == {(forward.path, backward.path) for forward, backward in pair_result["pairs"]}
-    assert generator_result["indexed_activation_count"] == 1
-    assert generator_result["bucket_lower_envelope_rejects"] >= 0
-
-
-def test_join_group_lower_bound_is_disabled_for_farkas() -> None:
-    instance, objective, graph = _two_hub_instance()
-    residual = frozenset(instance.customers)
-    restrictions = BranchRestrictions()
-    arc_customer_sets = _arc_customer_sets(graph)
-    duals = PricingDuals(mu={"C1": 3.0}, kappa=0.0, nu={})
-    source = _pricing_source_label(instance, objective, duals)
-    forward = (_extend(source, "H1", graph, objective, duals, tuple(), False),)
-    backward = (
-        _build_backward_label(("H1", instance.depot_sink), graph, residual, tuple(), restrictions, arc_customer_sets),
-    )
-
-    assert _join_group_lower_bound(forward, backward, duals, farkas=False) <= _joined_reduced_cost(
-        forward[0],
-        backward[0],
-        graph,
-        objective,
-        duals,
-        False,
-    )
-    assert _join_group_lower_bound(forward, backward, duals, farkas=True) == float("-inf")
-
-
-def test_small_join_bypass_matches_indexed_join_pairs() -> None:
-    instance, objective, graph = _two_hub_instance()
-    residual = frozenset(instance.customers)
-    restrictions = BranchRestrictions()
-    arc_customer_sets = _arc_customer_sets(graph)
-    duals = PricingDuals(mu={"C1": 0.0}, kappa=0.0, nu={})
-    source = _pricing_source_label(instance, objective, duals)
-    forward_labels = [
-        _extend(source, "H1", graph, objective, duals, tuple(), False),
-        _extend(source, "H2", graph, objective, duals, tuple(), False),
-    ]
-    backward_labels = [
-        _build_backward_label(("H1", instance.depot_sink), graph, residual, tuple(), restrictions, arc_customer_sets),
-        _build_backward_label(("H2", instance.depot_sink), graph, residual, tuple(), restrictions, arc_customer_sets),
-        _build_backward_label(("H1", "H2", instance.depot_sink), graph, residual, tuple(), restrictions, arc_customer_sets),
-    ]
-
-    direct = _bucketed_join_pairs(forward_labels, backward_labels, graph)
-    indexed = _bucketed_join_pairs(forward_labels, backward_labels, graph, small_join_pair_threshold=1)
-
-    direct_pairs = {(forward.path, backward.path) for forward, backward in direct["pairs"]}
-    indexed_pairs = {(forward.path, backward.path) for forward, backward in indexed["pairs"]}
-
-    assert direct_pairs == indexed_pairs
-    assert direct["small_bypass_calls"] == 1
-    assert indexed["small_bypass_calls"] == 0
-
-
-def test_workload_adaptive_join_activates_indexed_mode_on_cumulative_work() -> None:
-    instance, objective, graph = _two_hub_instance()
-    residual = frozenset(instance.customers)
-    restrictions = BranchRestrictions()
-    arc_customer_sets = _arc_customer_sets(graph)
-    duals = PricingDuals(mu={"C1": 0.0}, kappa=0.0, nu={})
-    source = _pricing_source_label(instance, objective, duals)
-    forward_labels = [
-        _extend(source, "H1", graph, objective, duals, tuple(), False),
-        _extend(source, "H2", graph, objective, duals, tuple(), False),
-    ]
-    backward_labels = [
-        _build_backward_label(("H1", instance.depot_sink), graph, residual, tuple(), restrictions, arc_customer_sets),
-        _build_backward_label(("H2", instance.depot_sink), graph, residual, tuple(), restrictions, arc_customer_sets),
-        _build_backward_label(("H1", "H2", instance.depot_sink), graph, residual, tuple(), restrictions, arc_customer_sets),
-    ]
-
-    direct = _bucketed_join_pairs(
-        forward_labels,
-        backward_labels,
-        graph,
-        small_join_pair_threshold=5_000,
-        small_join_cumulative_threshold=250_000,
-        max_join_bypass_calls=1_000,
-    )
-    indexed = _bucketed_join_pairs(
-        forward_labels,
-        backward_labels,
-        graph,
-        small_join_pair_threshold=5_000,
-        small_join_cumulative_threshold=5,
-        max_join_bypass_calls=1_000,
-        cumulative_pair_count=6,
-    )
-    exhausted = _bucketed_join_pairs(
-        forward_labels,
-        backward_labels,
-        graph,
-        small_join_pair_threshold=5_000,
-        small_join_cumulative_threshold=250_000,
-        max_join_bypass_calls=1_000,
-        previous_join_bypass_calls=1_000,
-    )
-
-    direct_pairs = {(forward.path, backward.path) for forward, backward in direct["pairs"]}
-    indexed_pairs = {(forward.path, backward.path) for forward, backward in indexed["pairs"]}
-    exhausted_pairs = {(forward.path, backward.path) for forward, backward in exhausted["pairs"]}
-
-    assert direct_pairs == indexed_pairs == exhausted_pairs
-    assert direct["local_bypass_calls"] == 1
-    assert direct["cumulative_bypass_calls"] == 1
-    assert indexed["indexed_activation_count"] == 1
-    assert indexed["join_work_estimate"] == 6
-    assert exhausted["indexed_activation_count"] == 1
-
-
-def test_cached_join_key_graph_reuses_compatible_keys() -> None:
-    instance, objective, graph = _two_hub_instance()
-    residual = frozenset(instance.customers)
-    restrictions = BranchRestrictions()
-    arc_customer_sets = _arc_customer_sets(graph)
-    duals = PricingDuals(mu={"C1": 0.0}, kappa=0.0, nu={})
-    source = _pricing_source_label(instance, objective, duals)
-    forward_labels = [_extend(source, "H1", graph, objective, duals, tuple(), False)]
-    backward_labels = [
-        _build_backward_label(("H1", instance.depot_sink), graph, residual, tuple(), restrictions, arc_customer_sets),
-        _build_backward_label(("H1", "H2", instance.depot_sink), graph, residual, tuple(), restrictions, arc_customer_sets),
-    ]
-    cache = {}
-
-    first = _bucketed_join_pairs(
-        forward_labels,
-        backward_labels,
-        graph,
-        compatible_key_cache=cache,
-        small_join_pair_threshold=1,
-    )
-    second = _bucketed_join_pairs(
-        forward_labels,
-        backward_labels,
-        graph,
-        compatible_key_cache=cache,
-        small_join_pair_threshold=1,
-    )
-
-    assert {(f.path, b.path) for f, b in first["pairs"]} == {(f.path, b.path) for f, b in second["pairs"]}
-    assert first["key_cache_misses"] > 0
-    assert second["key_cache_hits"] > 0
-
-
-def test_direct_dominance_keys_cover_compatible_bucket_pairs() -> None:
-    instance, objective, graph = _two_hub_instance()
-    residual = frozenset(instance.customers)
-    restrictions = BranchRestrictions()
-    arc_customer_sets = _arc_customer_sets(graph)
-    labels = [
-        _build_backward_label(("H1", instance.depot_sink), graph, residual, tuple(), restrictions, arc_customer_sets),
-        _build_backward_label((duplicate_node("H1", "C1"), instance.depot_sink), graph, residual, tuple(), restrictions, arc_customer_sets),
-        _build_backward_label(("H1", "H2", instance.depot_sink), graph, residual, tuple(), restrictions, arc_customer_sets),
-    ]
-
-    for label in labels:
-        label_key = _dominance_bucket_key(label)
-        incumbent_keys = set(_compatible_dominance_keys(label_key, graph, True))
-        purged_keys = set(_compatible_dominance_keys(label_key, graph, False))
-        for incumbent in labels:
-            incumbent_key = _dominance_bucket_key(incumbent)
-            if _dominance_buckets_compatible(incumbent_key, label_key, True):
-                assert incumbent_key in incumbent_keys
-            if _dominance_buckets_compatible(incumbent_key, label_key, False):
-                assert incumbent_key in purged_keys
-
-
-def test_cached_dominance_key_lookup_matches_uncached_candidates() -> None:
-    instance, objective, graph = _two_hub_instance()
-    residual = frozenset(instance.customers)
-    restrictions = BranchRestrictions()
-    arc_customer_sets = _arc_customer_sets(graph)
-    labels = [
-        _build_backward_label(("H1", instance.depot_sink), graph, residual, tuple(), restrictions, arc_customer_sets),
-        _build_backward_label((duplicate_node("H1", "C1"), instance.depot_sink), graph, residual, tuple(), restrictions, arc_customer_sets),
-        _build_backward_label(("H1", "H2", instance.depot_sink), graph, residual, tuple(), restrictions, arc_customer_sets),
-    ]
-    dominance_index = {}
-    for label in labels:
-        dominance_index.setdefault(_dominance_bucket_key(label), []).append(label)
-    target = labels[-1]
-    uncached_counter = _DominanceCounter()
-    cached_counter = _DominanceCounter()
-    cache = {}
-
-    uncached = _dominance_candidate_labels(
-        target,
-        dominance_index,
-        graph,
-        uncached_counter,
-        incumbent_may_dominate_label=True,
-        dominance_key_cache=None,
-        small_dom_bucket_threshold=0,
-    )
-    cached_first = _dominance_candidate_labels(
-        target,
-        dominance_index,
-        graph,
-        cached_counter,
-        incumbent_may_dominate_label=True,
-        dominance_key_cache=cache,
-        small_dom_bucket_threshold=0,
-    )
-    cached_second = _dominance_candidate_labels(
-        target,
-        dominance_index,
-        graph,
-        cached_counter,
-        incumbent_may_dominate_label=True,
-        dominance_key_cache=cache,
-        small_dom_bucket_threshold=0,
-    )
-
-    assert {label.path for label in uncached} == {label.path for label in cached_first}
-    assert {label.path for label in cached_first} == {label.path for label in cached_second}
-    assert cached_counter.key_cache_misses == 1
-    assert cached_counter.key_cache_hits == 1
-
-
-def test_workload_adaptive_dominance_activates_indexed_mode_on_cumulative_work() -> None:
-    instance, objective, graph = _two_hub_instance()
-    residual = frozenset(instance.customers)
-    restrictions = BranchRestrictions()
-    arc_customer_sets = _arc_customer_sets(graph)
-    labels = [
-        _build_backward_label(("H1", instance.depot_sink), graph, residual, tuple(), restrictions, arc_customer_sets),
-        _build_backward_label((duplicate_node("H1", "C1"), instance.depot_sink), graph, residual, tuple(), restrictions, arc_customer_sets),
-        _build_backward_label(("H1", "H2", instance.depot_sink), graph, residual, tuple(), restrictions, arc_customer_sets),
-    ]
-    dominance_index = {}
-    for label in labels:
-        dominance_index.setdefault(_dominance_bucket_key(label), []).append(label)
-    target = labels[-1]
-    direct_counter = _DominanceCounter()
-    indexed_counter = _DominanceCounter()
-    exhausted_counter = _DominanceCounter(small_bypass_calls=2_000)
-
-    direct = _dominance_candidate_labels(
-        target,
-        dominance_index,
-        graph,
-        direct_counter,
-        incumbent_may_dominate_label=True,
-        small_dom_bucket_threshold=100,
-        small_dom_cumulative_threshold=500_000,
-        max_dom_bypass_calls=2_000,
-    )
-    indexed = _dominance_candidate_labels(
-        target,
-        dominance_index,
-        graph,
-        indexed_counter,
-        incumbent_may_dominate_label=True,
-        small_dom_bucket_threshold=100,
-        small_dom_cumulative_threshold=1,
-        max_dom_bypass_calls=2_000,
-    )
-    exhausted = _dominance_candidate_labels(
-        target,
-        dominance_index,
-        graph,
-        exhausted_counter,
-        incumbent_may_dominate_label=True,
-        small_dom_bucket_threshold=100,
-        small_dom_cumulative_threshold=500_000,
-        max_dom_bypass_calls=2_000,
-    )
-
-    assert {label.path for label in direct} == {label.path for label in indexed}
-    assert {label.path for label in direct} == {label.path for label in exhausted}
-    assert direct_counter.small_bypass_calls == 1
-    assert indexed_counter.indexed_activation_count == 1
-    assert indexed_counter.work_estimate > 1
-    assert exhausted_counter.indexed_activation_count == 1
-
-
-def test_cost_dominated_insert_replaces_higher_cost_observable_column() -> None:
-    instance, _, objective, graph = _setup()
-    path = ("Source", "C1", "Sink")
-    base_route = route_from_path(0, path, graph, objective)
-    high_path = ("high",)
-    low_path = ("low",)
-    high_route = replace(base_route, id=1, path=high_path, cost=base_route.cost + 1.0)
-    low_route = replace(base_route, id=2, path=low_path, cost=base_route.cost - 1.0)
-    routes = {high_path: high_route}
-    paths = {high_path}
-
-    inserted_path, added = insert_node_column(
-        low_route,
-        routes,
-        paths,
-        graph,
-        frozenset(instance.customers),
-    )
-
-    assert inserted_path == low_path
-    assert added is True
-    assert paths == {low_path}
-
-
-def test_node_column_index_replaces_same_coeff_higher_cost_route() -> None:
-    instance, _, objective, graph = _setup()
-    path = ("Source", "C1", "Sink")
-    base_route = route_from_path(0, path, graph, objective)
-    high_path = ("high",)
-    low_path = ("low",)
-    high_route = replace(base_route, id=1, path=high_path, cost=base_route.cost + 1.0)
-    low_route = replace(base_route, id=2, path=low_path, cost=base_route.cost - 1.0)
-    routes = {high_path: high_route}
-    paths = {high_path}
-    residual = frozenset(instance.customers)
-    cache = RouteSignatureCache()
-    index = NodeColumnIndex()
-    refresh_node_column_index(index, routes, paths, graph, residual, cache)
-
-    inserted_path, added = insert_node_column(
-        low_route,
-        routes,
-        paths,
-        graph,
-        residual,
-        cache=cache,
-        column_index=index,
-    )
-    signature = route_signature(low_route, graph, residual, cache)
-    coeff_signature = route_coefficient_signature(signature)
-
-    assert inserted_path == low_path
-    assert added is True
-    assert paths == {low_path}
-    assert index.by_coeff[coeff_signature] == low_path
-    assert cache.stats.column_index_hits == 1
-    assert cache.stats.column_index_replacements == 1
-
-
-def test_node_column_index_refresh_tracks_active_sr_version() -> None:
-    instance, _, objective, graph = _setup()
-    route = route_from_path(0, ("Source", "C1", "C2", "Sink"), graph, objective)
-    routes = {route.path: route}
-    paths = {route.path}
-    residual = frozenset(instance.customers)
-    triplet = tuple(sorted(instance.customers))
-    cache = RouteSignatureCache()
-    index = NodeColumnIndex()
-
-    refresh_node_column_index(index, routes, paths, graph, residual, cache, active_sr=tuple(), active_sr_version=0)
-    inactive_signature = next(iter(index.by_coeff))
-    refresh_node_column_index(index, routes, paths, graph, residual, cache, active_sr=(triplet,), active_sr_version=1)
-    active_signature = next(iter(index.by_coeff))
-
-    assert inactive_signature.active_sr_coeff_key == tuple()
-    assert active_signature.active_sr_coeff_key == (route.sr_coeff(triplet),)
-    assert index.active_sr_version == 1
-
-
-def test_side_pool_retains_verified_routes_without_rmp_insertion() -> None:
-    instance, _, objective, graph = _setup()
-    route = route_from_path(0, ("Source", "C1", "Sink"), graph, objective)
-    routes = {}
-    side_pool_paths = set()
-    node = NodeState(
-        id=0,
-        depth=0,
-        restrictions=BranchRestrictions(),
-        fixed_routes=tuple(),
-        residual_customers=frozenset(instance.customers),
-        fleet_limit=instance.num_trucks,
-        fixed_cost=0.0,
-        column_paths=set(),
-        active_sr=set(),
-    )
-    stats = BPCStats()
-
-    _add_side_pool_routes(
-        (route,),
-        routes,
-        side_pool_paths,
-        node,
-        graph,
-        stats,
-        SolverConfig(),
-        {},
-    )
-
-    assert route.path in side_pool_paths
-    assert route.path not in node.column_paths
-    assert stats.side_pool_routes_added == 1
-    assert stats.side_pool_routes == 1
-
-
-def test_side_pool_pruning_preserves_per_customer_diversity_cap() -> None:
-    instance, _, objective, graph = _setup()
-    base_route = route_from_path(0, ("Source", "C1", "Sink"), graph, objective)
-    routes = {
-        ("side", str(index)): replace(base_route, id=index, path=("side", str(index)), cost=base_route.cost + index)
-        for index in range(5)
-    }
-    side_pool_paths = set(routes)
-    node = NodeState(
-        id=0,
-        depth=0,
-        restrictions=BranchRestrictions(),
-        fixed_routes=tuple(),
-        residual_customers=frozenset(instance.customers),
-        fleet_limit=instance.num_trucks,
-        fixed_cost=0.0,
-        column_paths=set(),
-        active_sr=set(),
-    )
-    stats = BPCStats()
-
-    _prune_side_pool(
-        routes,
-        side_pool_paths,
-        node,
-        SolverConfig(side_pool_max_size=20_000, side_pool_per_customer_keep=2),
-        {},
-        stats,
-    )
-
-    assert len(side_pool_paths) == 2
-    assert stats.side_pool_routes_pruned == 3
-    assert stats.side_pool_per_customer_keep == 2
-    assert all(routes[path].served == frozenset({"C1"}) for path in side_pool_paths)
-
-
-def test_exact_duplicate_and_cost_dominated_column_counters() -> None:
-    instance, _, objective, graph = _setup()
-    path = ("Source", "C1", "Sink")
-    base_route = route_from_path(0, path, graph, objective)
-    duplicate_route = replace(base_route, id=1, path=("duplicate",))
-    worse_route = replace(base_route, id=2, path=("worse",), cost=base_route.cost + 1.0)
-    routes = {path: base_route}
-    paths = {path}
-    cache = RouteSignatureCache()
-
-    _, duplicate_added = insert_node_column(duplicate_route, routes, paths, graph, frozenset(instance.customers), cache=cache)
-    _, worse_added = insert_node_column(worse_route, routes, paths, graph, frozenset(instance.customers), cache=cache)
-
-    assert duplicate_added is False
-    assert worse_added is False
-    assert cache.stats.duplicate_equivalent_rejected == 1
-    assert cache.stats.cost_dominated_rejected == 1
-
-
-def test_branch_aware_duplicate_merge_keeps_allowed_equivalent_column() -> None:
-    instance, _, objective, graph = _setup()
-    forbidden_path = ("Source", "C1", "Sink")
-    allowed_path = ("alias",)
-    route = route_from_path(0, forbidden_path, graph, objective)
-    routes = {
-        forbidden_path: route,
-        allowed_path: replace(route, id=1, path=allowed_path),
-    }
-    node = NodeState(
-        id=1,
-        depth=0,
-        restrictions=BranchRestrictions().with_route_forbidden(forbidden_path),
-        fixed_routes=tuple(),
-        residual_customers=frozenset(instance.customers),
-        fleet_limit=instance.num_trucks,
-        fixed_cost=0.0,
-        column_paths={forbidden_path, allowed_path},
-        active_sr=set(),
-    )
-    merged = _merge_duplicate_column_paths_for_node(node, routes, graph)
-    assert forbidden_path in merged
-    assert allowed_path in merged
-
-
-def test_branch_aware_insert_ignores_forbidden_duplicate_signature() -> None:
-    instance, _, objective, graph = _setup()
-    forbidden_path = ("Source", "C1", "Sink")
-    allowed_path = ("alias",)
-    route = route_from_path(0, forbidden_path, graph, objective)
-    routes = {forbidden_path: route}
-    node = NodeState(
-        id=1,
-        depth=0,
-        restrictions=BranchRestrictions().with_route_forbidden(forbidden_path),
-        fixed_routes=tuple(),
-        residual_customers=frozenset(instance.customers),
-        fleet_limit=instance.num_trucks,
-        fixed_cost=0.0,
-        column_paths={forbidden_path},
-        active_sr=set(),
-    )
-    inserted_path, added = _insert_node_column(replace(route, id=1, path=allowed_path), routes, node, graph)
-    assert inserted_path == allowed_path
-    assert added is True
-    assert allowed_path in node.column_paths
-
-
-def test_compact_root_extraction_returns_canonical_route_columns() -> None:
-    instance, weights, objective, graph = _setup()
-    solution = solve_compact_solution(instance, weights, time_limit=1800.0, require_optimal=True)
-    assert solution.route_paths
-    assert solution.objective_bound_full is not None
-    assert solution.mip_gap is not None
-    assert solution.status_code == GRB.OPTIMAL
-    assert solution.node_count is not None
-    assert solution.timing.model_build_time > 0.0
-    assert solution.timing.solve_time >= 0.0
-    assert solution.timing.route_decode_time >= 0.0
-    routes = tuple(route_from_path(i, path, graph, objective) for i, path in enumerate(solution.route_paths))
-    covered = frozenset().union(*(route.served for route in routes))
-    assert covered == frozenset(instance.customers)
-    for route in routes:
-        physical_internal = route.truck_path[1:-1]
-        assert len(physical_internal) == len(set(physical_internal))
-
-
-def test_route_pool_diving_returns_hard_feasible_incumbent() -> None:
-    instance, _, objective, graph = _setup()
-    routes = {}
-    for customer in instance.customers:
-        path = ("Source", customer, "Sink")
-        routes[path] = route_from_path(len(routes), path, graph, objective)
-    combo_path = ("Source", "C1", "C2", "Sink")
-    routes[combo_path] = route_from_path(len(routes), combo_path, graph, objective)
-    node = NodeState(
-        id=1,
-        depth=0,
-        restrictions=BranchRestrictions(),
-        fixed_routes=tuple(),
-        residual_customers=frozenset(instance.customers),
-        fleet_limit=instance.num_trucks,
-        fixed_cost=0.0,
-        column_paths=set(routes),
-        active_sr=set(),
-    )
-    result = run_route_pool_heuristic(
-        graph,
-        objective,
-        node,
-        routes,
-        set(routes),
-        {path: 1.0 / len(routes) for path in routes},
-        SolverConfig(),
-        len(routes),
-        float("inf"),
-    )
-    assert result.value is not None
-    covered = frozenset().union(*(route.served for route in result.selected_routes))
-    assert covered == frozenset(instance.customers)
-    assert result.diagnostics.hard_pool_solves == 1
-    assert result.diagnostics.hard_pool_feasible_solves == 1
-    assert result.diagnostics.support_pool_calls == 1
-    assert result.diagnostics.support_pool_feasible == 1
-    assert result.diagnostics.support_pool_incumbent_updates == 1
-    assert result.diagnostics.full_pool_calls == 0
-    assert result.diagnostics.soft_pool_solves == 0
-    assert result.diagnostics.support_routes > 0
-
-
-def test_full_node_admissible_hard_pool_solve_is_tracked_as_primal_only() -> None:
-    instance, _, objective, graph = _setup()
-    routes = {}
-    for customer in instance.customers:
-        path = ("Source", customer, "Sink")
-        routes[path] = route_from_path(len(routes), path, graph, objective)
-    combo_path = ("Source", "C1", "C2", "C3", "Sink")
-    routes[combo_path] = route_from_path(len(routes), combo_path, graph, objective)
-    node = NodeState(
-        id=12,
-        depth=0,
-        restrictions=BranchRestrictions(),
-        fixed_routes=tuple(),
-        residual_customers=frozenset(instance.customers),
-        fleet_limit=instance.num_trucks,
-        fixed_cost=0.0,
-        column_paths=set(routes),
-        active_sr=set(),
-    )
-
-    result = run_route_pool_heuristic(
-        graph,
-        objective,
-        node,
-        routes,
-        set(routes),
-        {},
-        SolverConfig(support_best_per_customer=1),
-        len(routes),
-        0.0,
-    )
-
-    assert result.value is not None
-    assert all(route.served.issubset(node.residual_customers) for route in result.selected_routes)
-    assert result.value == pytest.approx(sum(route.cost for route in result.selected_routes))
-    assert result.diagnostics.support_pool_calls == 1
-    assert result.diagnostics.full_pool_calls == 1
-    assert result.diagnostics.support_pool_feasible == 1
-    assert result.diagnostics.full_pool_feasible == 1
-    assert result.diagnostics.support_pool_incumbent_updates == 0
-    assert result.diagnostics.full_pool_incumbent_updates == 0
-    assert result.diagnostics.hard_pool_solves == 2
-    assert result.diagnostics.max_node_pool_routes == len(routes)
-    assert result.diagnostics.node_pool_to_support_ratio > 1.0
-
-
-def test_repair_pricing_adds_multiple_generated_routes_before_hard_resolve() -> None:
-    instance, _, objective, graph = _setup()
-    routes = {}
-    node = NodeState(
-        id=1,
-        depth=0,
-        restrictions=BranchRestrictions(),
-        fixed_routes=tuple(),
-        residual_customers=frozenset(instance.customers),
-        fleet_limit=instance.num_trucks,
-        fixed_cost=0.0,
-        column_paths=set(),
-        active_sr=set(),
-    )
-    result = run_route_pool_heuristic(
-        graph,
-        objective,
-        node,
-        routes,
-        set(),
-        {},
-        SolverConfig(repair_reward=10.0),
-        0,
-        float("inf"),
-    )
-    assert len(result.generated_paths) > 1
-    assert result.value is not None
-    assert result.pricing_diagnostics
-    assert {diagnostic["mode"] for diagnostic in result.pricing_diagnostics} == {"repair"}
-    assert sum(diagnostic["elapsed_seconds"] for diagnostic in result.pricing_diagnostics) >= 0.0
-    assert result.diagnostics.hard_pool_solves == 2
-    assert result.diagnostics.support_pool_calls == 2
-    assert result.diagnostics.full_pool_calls == 0
-    assert result.diagnostics.soft_pool_solves == 1
-    assert result.diagnostics.soft_pool_feasible_solves == 1
-    assert result.diagnostics.repair_customers > 0
-    assert result.diagnostics.repair_columns_generated == len(result.generated_paths)
-
-
-def test_repair_budget_skip_preserves_heuristic_lower_bound_neutrality() -> None:
-    instance, _, objective, graph = _setup()
-    routes = {}
-    node = NodeState(
-        id=1,
-        depth=0,
-        restrictions=BranchRestrictions(),
-        fixed_routes=tuple(),
-        residual_customers=frozenset(instance.customers),
-        fleet_limit=instance.num_trucks,
-        fixed_cost=0.0,
-        column_paths=set(),
-        active_sr=set(),
-    )
-
-    result = run_route_pool_heuristic(
-        graph,
-        objective,
-        node,
-        routes,
-        set(),
-        {},
-        SolverConfig(repair_reward=10.0),
-        0,
-        float("inf"),
-        allow_repair=False,
-        repair_time_budget=0.0,
-    )
-
-    assert result.value is None
-    assert not result.generated_paths
-    assert not result.pricing_diagnostics
-    assert result.diagnostics.soft_pool_feasible_solves == 1
-    assert result.diagnostics.repair_customers > 0
-    assert result.diagnostics.repair_budget_hit == 1
-    assert result.diagnostics.repair_columns_generated == 0
-
-
-def test_bpc_matches_compact_miqp_on_tiny_instance(tmp_path) -> None:
-    instance = tiny_instance()
-    weights = ObjectiveWeights(0.4, 0.3, 0.3)
-    solver_config = SolverConfig(time_limit=1800.0)
-    bpc = solve_branch_price_cut(instance, weights, solver_config)
-    compact = solve_compact_miqp(instance, weights, time_limit=1800.0)
-    assert abs(bpc.objective_full - compact) < 1e-5
-    assert bpc.gap == 0.0
-    assert bpc.gap_full == 0.0
-    assert bpc.gap_shifted == 0.0
-    assert bpc.lower_bound_shifted == bpc.upper_bound_shifted
-    assert bpc.lower_bound_full == bpc.upper_bound_full
-    record = bpc.to_record()
-    assert record["gap"] == record["gap_full"]
-    assert record["lower_bound_full"] == bpc.lower_bound_full
-    assert record["upper_bound_full"] == bpc.upper_bound_full
-    assert record["gap_shifted"] == bpc.gap_shifted
-    assert set(record["customer_service_times"]) == set(instance.customers)
-    assert len(record["return_times"]) == len(bpc.routes)
-    assert "normalization_bounds" in record
-    components = record["objective_components"]
-    weighted = components["weighted_normalized"]
-    assert abs(sum(weighted.values()) - bpc.objective_full) < 1e-8
-    assert components["raw"]["delay_square_sum"] >= 0.0
-    assert components["raw"]["return_time_sum"] == sum(record["return_times"])
-    assert components["raw"]["operating_cost"] >= instance.truck_cost * len(bpc.routes)
-    assert "delay_square_sum" in record["routes"][0]
-    assert "operating_cost" in record["routes"][0]
-    assert "shifted_cost" in record["routes"][0]
-    assert "full_single_route_value" not in record["routes"][0]
-    assert record["bpc_stats"]["root_model_build_time"] >= 0.0
-    assert record["bpc_stats"]["root_model_solve_time"] >= 0.0
-    assert record["bpc_stats"]["root_route_decode_time"] >= 0.0
-    assert "heuristic_hard_pool_solves" in record["bpc_stats"]
-    assert "heuristic_soft_pool_solves" in record["bpc_stats"]
-    assert "customer_pair_branches" in record["bpc_stats"]
-    assert "service_mode_branches" in record["bpc_stats"]
-    assert "launch_pad_branches" in record["bpc_stats"]
-    assert "transformed_arc_branches" in record["bpc_stats"]
-    assert "route_variable_branches" in record["bpc_stats"]
-    assert "pricing_standard_bound_pruned" in record["bpc_stats"]
-    assert "pricing_farkas_bound_pruned" in record["bpc_stats"]
-    solve_record = _build_solve_record(instance.config, solver_config, instance, bpc, tmp_path)
-    assert solve_record["total_drones"] == instance.num_trucks * instance.drones_per_truck
-    assert solve_record["service_metrics"]["service_feasible"] is True
-    assert solve_record["service_metrics"]["payload_feasible"] is True
-    assert solve_record["service_metrics"]["total_customer_demand"] == sum(
-        instance.demand[customer] for customer in instance.customers
-    )
-    assert solve_record["service_metrics"]["available_truck_payload_total"] == instance.num_trucks * instance.truck_payload
-    assert solve_record["service_metrics"]["available_drones_total"] == solve_record["total_drones"]
-    assert "gurobi_log_files" in solve_record
-
-
-def test_solve_timeout_record_preserves_no_incumbent_diagnostics(tmp_path) -> None:
-    instance, _, objective, _ = _setup()
-    stats = BPCStats(
-        status="time_limit",
-        open_nodes_at_termination=1,
-        pricing_labels_generated=2,
-        standard_pricing_calls=0,
-    )
-    exc = BPCTimeLimitNoIncumbent(
-        runtime=1.25,
-        nodes_processed=1,
-        lower_bound_shifted=0.5,
-        stats=stats,
-        objective=objective,
-    )
-    (tmp_path / "bpc_progress.json").write_text(
-        json.dumps({"event": "time_limit_pricing_unresolved", "stats": {"open_nodes_at_termination": 1}}),
-        encoding="utf-8",
-    )
-    (tmp_path / "pricing_diagnostics.jsonl").write_text(
-        json.dumps(
-            {
-                "mode": "standard_interrupted",
-                "labels_generated": 7,
-                "labels_dominated": 3,
-                "backward_dominance_tests": 5,
-                "backward_labels_dominated": 1,
-                "labels_purged": 2,
-                "stale_labels_skipped": 1,
-                "labels_pruned": 2,
-                "standard_bound_pruned": 2,
-                "farkas_bound_pruned": 0,
-                "complete_routes_generated": 1,
-                "max_queue_size": 4,
-                "elapsed_seconds": 0.75,
-                "exact_completion": False,
-                "termination_reason": "time_limit_unresolved",
-                "certification_mode": "not_certified_time_limit",
-            }
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    solver_config = SolverConfig(time_limit=0.01, gurobi_log_dir=str(tmp_path / "gurobi_logs"))
-    record = _build_solve_timeout_record(
-        instance.config,
-        solver_config,
-        instance,
-        exc,
-        tmp_path,
-        runtime_seconds=1.3,
-    )
-    assert record["status"] == "time_limited_internal"
-    assert record["solver_status"] == "time_limited_internal"
-    assert record["total_drones"] == instance.num_trucks * instance.drones_per_truck
-    assert record["runtime"] == 1.25
-    assert record["runtime_seconds"] == 1.3
-    assert record["nodes_processed"] == 1
-    assert record["lower_bound_shifted"] == 0.5
-    assert record["lower_bound_full"] == objective.full_value_from_route_sum(0.5)
-    assert record["bpc_progress"]["event"] == "time_limit_pricing_unresolved"
-    assert record["pricing_diagnostics_summary"]["count"] == 1
-    assert record["pricing_diagnostics_summary"]["last_pricing_diagnostic"]["exact_completion"] is False
-    assert record["pricing_diagnostics_summary"]["last_pricing_diagnostic"]["termination_reason"] == "time_limit_unresolved"
-    assert record["bpc_stats"]["pricing_labels_generated"] == 7
-    assert record["bpc_stats"]["pricing_backward_dominance_tests"] == 5
-    assert record["bpc_stats"]["pricing_backward_labels_dominated"] == 1
-    assert record["bpc_stats"]["pricing_labels_purged"] == 2
-    assert record["bpc_stats"]["pricing_stale_labels_skipped"] == 1
-    assert record["bpc_stats"]["pricing_diagnostics_count"] == 1
-    assert record["bpc_stats"]["standard_pricing_calls"] == 1
-    assert record["error"] == "BPC time limit reached before a feasible incumbent was found"
+        assert not hasattr(pricing_module, name)
+
+
+def test_retired_seeding_repair_basis_and_inactive_interfaces_are_absent() -> None:
+    config_fields = SolverConfig.__dataclass_fields__
+    for name in (
+        "repair_reward",
+        "seed_reward",
+        "phase_i_max_rounds",
+        "seed_batch_size",
+        "repair_batch_size",
+        "enable_rmp_basis_reuse",
+        "enable_inactive_column_storage",
+        "column_inactive_age_min",
+        "column_active_value_tol",
+        "column_deactivation_min_active_columns",
+        "column_deactivation_batch_size",
+    ):
+        assert name not in config_fields
+    node = _root_node(tiny_instance(), set())
+    for name in (
+        "basis_variables",
+        "basis_cover",
+        "basis_fleet",
+        "basis_sr",
+        "inactive_column_paths",
+        "column_age",
+        "pending_column_deactivation_bound",
+    ):
+        assert not hasattr(node, name)
+    assert not Path("thvrpd/phasei.py").exists()
+    assert not hasattr(bpc_module, "_run_phase_i_seeding")
+    assert not hasattr(bpc_module, "_add_initial_routes")
+    assert not hasattr(bpc_module, "_construct_root_incumbent_routes")
+    assert not hasattr(bpc_module, "_best_constructive_extension")
+    assert not hasattr(bpc_module, "_constructive_connectors")
+    assert not hasattr(heuristic_module, "_solve_soft_pool_ip")

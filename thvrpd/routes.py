@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from .instance import Arc, InstanceData
 from .objective import ObjectiveData
-from .transform import TransformedGraph, duplicate_customer, duplicate_hub, is_duplicate
+from .transform import TransformedGraph, duplicate_customer, is_duplicate
 
 PAYLOAD_TOLERANCE = 1e-9
 SERVICE_DEADLINE_TOLERANCE = 1e-9
@@ -79,6 +79,8 @@ def route_from_path(route_id: int, path: tuple[str, ...], graph: TransformedGrap
         arc = (i, j)
         if arc not in graph.arcs:
             raise ValueError(f"not a transformed arc: {arc}")
+        if not graph.arc_compatible_with_active_pad(arc, active_pad):
+            raise ValueError(f"transformed arc is incompatible with active pad {active_pad}: {arc}")
         if j in instance.customers or j in instance.hubs:
             if j in physical_seen:
                 raise ValueError(f"route violates physical-node elementarity at {j}")
@@ -113,9 +115,8 @@ def route_from_path(route_id: int, path: tuple[str, ...], graph: TransformedGrap
             active_wait = max(active_wait, instance.drone_trip_time[(active_pad, customer)])
             continue
         if arc in graph.duplicate_duplicate_arcs:
-            hub = duplicate_hub(j)
-            if active_pad != hub:
-                raise ValueError("duplicate block hub mismatch")
+            if active_pad is None:
+                raise ValueError("duplicate block has no active pad")
             customer = duplicate_customer(j)
             drone_blocks.setdefault(active_pad, []).append(customer)
             if len(drone_blocks[active_pad]) > instance.drones_per_truck:
@@ -125,10 +126,9 @@ def route_from_path(route_id: int, path: tuple[str, ...], graph: TransformedGrap
             active_wait = max(active_wait, instance.drone_trip_time[(active_pad, customer)])
             continue
         if arc in graph.duplicate_regular_arcs:
-            hub = duplicate_hub(i)
-            if active_pad != hub:
-                raise ValueError("duplicate continuation hub mismatch")
-            physical_time = active_pad_arrival + active_wait + instance.truck_time[(hub, j)]
+            if active_pad is None:
+                raise ValueError("duplicate continuation has no active pad")
+            physical_time = active_pad_arrival + active_wait + instance.truck_time[(active_pad, j)]
             truck_path.append(j)
             active_pad = j if j in instance.hubs else active_pad
             active_wait = 0.0
@@ -175,6 +175,24 @@ def route_from_path(route_id: int, path: tuple[str, ...], graph: TransformedGrap
         cost=route_cost,
         used_arcs=frozenset(zip(path, path[1:])),
     )
+
+
+def validate_route_cover(
+    paths: tuple[tuple[str, ...], ...],
+    graph: TransformedGraph,
+    objective: ObjectiveData,
+) -> tuple[Route, ...]:
+    instance = graph.instance
+    routes = tuple(route_from_path(index, path, graph, objective) for index, path in enumerate(paths))
+    if len(routes) > instance.num_trucks:
+        raise ValueError(f"route cover uses {len(routes)} trucks but fleet size is {instance.num_trucks}")
+    coverage = {
+        customer: sum(customer in route.served for route in routes)
+        for customer in instance.customers
+    }
+    if any(count != 1 for count in coverage.values()):
+        raise ValueError(f"route cover does not serve every customer exactly once: {coverage}")
+    return routes
 
 
 def is_customer_representation(node: str, instance: InstanceData) -> bool:
